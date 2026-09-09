@@ -1,7 +1,7 @@
 /// <reference path="../../../../preload/index.d.ts" />
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Editor, { DiffEditor, OnMount } from '@monaco-editor/react'
-import { bumpGit, useWorkbench } from '@/store'
+import { bumpGit, closeTab, openFile, useWorkbench } from '@/store'
 import './EditorPanel.css'
 
 function detectLanguage(filePath: string): string {
@@ -77,18 +77,26 @@ export default function EditorPanel(): JSX.Element {
     activeFilePath: string | null
     viewMode: 'edit' | 'diff'
     gitTick: number
+    openTabs: string[]
     theme?: 'light' | 'dark'
   }
 
-  const { activeFilePath, viewMode, gitTick } = workbench
+  const { activeFilePath, viewMode, gitTick, openTabs } = workbench
   const monacoTheme = workbench.theme === 'light' ? 'light' : 'vs-dark'
 
-  // Edit mode state
-  const [content, setContent] = useState<string>('')
-  const [initialContent, setInitialContent] = useState<string>('')
-  const [isDirty, setIsDirty] = useState<boolean>(false)
+  // 每個檔一份 model：切換分頁不會弄丟尚未存檔的編輯
+  const [models, setModels] = useState<Record<string, { content: string; initial: string }>>({})
   const [isSaving, setIsSaving] = useState<boolean>(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
+
+  const model = activeFilePath ? models[activeFilePath] : undefined
+  const content = model?.content ?? ''
+  const isDirty = !!model && model.content !== model.initial
+  const dirtyPaths = new Set(
+    Object.entries(models)
+      .filter(([, m]) => m.content !== m.initial)
+      .map(([p]) => p)
+  )
 
   // Diff mode state
   const [diffData, setDiffData] = useState<{ head: string; work: string }>({
@@ -118,8 +126,10 @@ export default function EditorPanel(): JSX.Element {
       setError(null)
       await window.api.files.write(activeFilePath, currentText)
       bumpGit()
-      setInitialContent(currentText)
-      setIsDirty(false)
+      setModels((m) => ({
+        ...m,
+        [activeFilePath]: { content: currentText, initial: currentText }
+      }))
       setSaveMessage('Saved')
       setTimeout(() => {
         setSaveMessage(null)
@@ -158,9 +168,6 @@ export default function EditorPanel(): JSX.Element {
   // Load file or diff on activeFilePath or viewMode change
   useEffect(() => {
     if (!activeFilePath) {
-      setContent('')
-      setInitialContent('')
-      setIsDirty(false)
       setError(null)
       setLoading(false)
       return
@@ -173,11 +180,15 @@ export default function EditorPanel(): JSX.Element {
       setError(null)
       try {
         if (viewMode === 'edit') {
+          // 已有未存檔編輯就不要從磁碟覆蓋回去（gitTick 變動也會跑到這裡）
+          const existing = models[activeFilePath]
+          if (existing && existing.content !== existing.initial) {
+            setLoading(false)
+            return
+          }
           const text = await window.api.files.read(activeFilePath)
           if (isMounted) {
-            setContent(text)
-            setInitialContent(text)
-            setIsDirty(false)
+            setModels((m) => ({ ...m, [activeFilePath]: { content: text, initial: text } }))
           }
         } else if (viewMode === 'diff') {
           const diff = await window.api.git.diff(activeFilePath)
@@ -205,9 +216,27 @@ export default function EditorPanel(): JSX.Element {
   }, [activeFilePath, viewMode, gitTick])
 
   const handleContentChange = (value?: string): void => {
+    if (!activeFilePath) return
     const nextVal = value ?? ''
-    setContent(nextVal)
-    setIsDirty(nextVal !== initialContent)
+    setModels((m) => ({
+      ...m,
+      [activeFilePath]: { content: nextVal, initial: m[activeFilePath]?.initial ?? nextVal }
+    }))
+  }
+
+  // 關分頁；有未存檔編輯先問一次，避免默默丟掉工作
+  const handleCloseTab = (path: string, e: React.MouseEvent): void => {
+    e.stopPropagation()
+    if (dirtyPaths.has(path)) {
+      const name = path.split(/[\\/]/).pop()
+      if (!window.confirm(`“${name}” has unsaved changes. Close it anyway?`)) return
+    }
+    setModels((m) => {
+      const next = { ...m }
+      delete next[path]
+      return next
+    })
+    closeTab(path)
   }
 
   if (!activeFilePath) {
@@ -219,6 +248,31 @@ export default function EditorPanel(): JSX.Element {
 
   return (
     <div className="editor-container">
+      {openTabs.length > 0 && (
+        <div className="editor-tabs">
+          {openTabs.map((p) => {
+            const name = p.split(/[\\/]/).pop() || p
+            return (
+              <div
+                key={p}
+                className={`editor-tab ${p === activeFilePath ? 'on' : ''}`}
+                onClick={() => openFile(p)}
+                title={p}
+              >
+                <span className="editor-tab-name">{name}</span>
+                {dirtyPaths.has(p) && <span className="editor-tab-dot" title="Unsaved changes" />}
+                <button
+                  className="editor-tab-close"
+                  onClick={(e) => handleCloseTab(p, e)}
+                  aria-label={`Close ${name}`}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
       <div className="editor-header">
         <div className="editor-header-left">
           <span
@@ -275,9 +329,7 @@ export default function EditorPanel(): JSX.Element {
             onClick={() => {
               if (viewMode === 'edit') {
                 window.api.files.read(activeFilePath).then((t) => {
-                  setContent(t)
-                  setInitialContent(t)
-                  setIsDirty(false)
+                  setModels((m) => ({ ...m, [activeFilePath]: { content: t, initial: t } }))
                   setError(null)
                 }).catch(() => {})
               } else {

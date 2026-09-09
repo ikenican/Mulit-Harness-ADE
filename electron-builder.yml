@@ -1,0 +1,43 @@
+appId: com.zkyle.agent-workbench
+productName: Agent Workbench
+copyright: MIT
+
+directories:
+  output: release
+  buildResources: build
+
+# 只打包編譯產物與 package.json；原始碼不進安裝檔
+files:
+  - out/**/*
+  - package.json
+
+# @lydell/node-pty 帶原生 .node（conpty），必須從 asar 解包，
+# 否則打包後 pty 載入不到二進位，終端會整個起不來。
+asarUnpack:
+  - '**/node_modules/@lydell/node-pty*/**'
+
+# 硬體分析 MCP server 跟著安裝檔走，讓使用者不必另外取得
+extraResources:
+  - from: tools/hardware-mcp
+    to: hardware-mcp
+    filter: ['**/*.py']
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+
+mac:
+  target: [dmg]
+  category: public.app-category.developer-tools
+
+linux:
+  target: [AppImage]
+  category: Development

@@ -1,9 +1,11 @@
-# CLI launcher 定義（怎麼起這個終端，不定義 agent loop）。由 [Task D] pty handler 解析。
+# CLI launcher 定義（怎麼起這個終端，不定義 agent loop）。由 pty handler 解析。
 launcher:
   id: claude_dev
   name: Claude Code
   cli: claude
   cwd_scope: workspace
-  # command/args：留給 pty handler 依 cli 欄位帶預設；也可在此覆寫
-  args: []
+  # 把硬體分析 MCP server 掛給這個 CLI；路徑相對工作區，pty 已把 cwd 鎖在這裡
+  args:
+    - --mcp-config
+    - .mcp/hardware.json
   env: {}

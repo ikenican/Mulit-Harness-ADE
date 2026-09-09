@@ -8,3 +8,4 @@ dist/
 
 # 連線憑證（OS 加密，仍不得進版控）
 .workbench/credentials.enc
+release/

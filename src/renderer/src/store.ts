@@ -18,6 +18,8 @@ export interface TerminalDispatch {
 
 export interface WorkbenchState {
   activeFilePath: string | null
+  /** 已開啟的檔案分頁（依開啟順序） */
+  openTabs: string[]
   viewMode: 'edit' | 'diff'
   gitTick: number // 遞增即代表 git 狀態該刷新
   theme: Theme
@@ -40,6 +42,7 @@ function applyTheme(theme: Theme): void {
 
 let state: WorkbenchState = {
   activeFilePath: null,
+  openTabs: [],
   viewMode: 'edit',
   gitTick: 0,
   theme: initialTheme(),
@@ -55,10 +58,22 @@ function set(patch: Partial<WorkbenchState>): void {
 }
 
 export function openFile(path: string): void {
-  set({ activeFilePath: path, viewMode: 'edit' })
+  const tabs = state.openTabs.includes(path) ? state.openTabs : [...state.openTabs, path]
+  set({ activeFilePath: path, viewMode: 'edit', openTabs: tabs })
 }
 export function openDiff(path: string): void {
-  set({ activeFilePath: path, viewMode: 'diff' })
+  const tabs = state.openTabs.includes(path) ? state.openTabs : [...state.openTabs, path]
+  set({ activeFilePath: path, viewMode: 'diff', openTabs: tabs })
+}
+
+/** 關閉分頁；關掉的若是當前檔，改選旁邊那個 */
+export function closeTab(path: string): void {
+  const idx = state.openTabs.indexOf(path)
+  if (idx === -1) return
+  const tabs = state.openTabs.filter((p) => p !== path)
+  const nextActive =
+    state.activeFilePath === path ? (tabs[Math.max(0, idx - 1)] ?? null) : state.activeFilePath
+  set({ openTabs: tabs, activeFilePath: nextActive })
 }
 export function bumpGit(): void {
   set({ gitTick: state.gitTick + 1 })

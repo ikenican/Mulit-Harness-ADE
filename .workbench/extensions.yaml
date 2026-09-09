@@ -7,17 +7,14 @@ version: 1
 skills: []
 
 mcp:
-  # 範例：硬體分析 MCP（Phase 3 會接上真正的 Python 腳本）
+  # 本專案自帶的硬體分析 MCP server（純標準庫，無需 pip 安裝）
+  # 工具：usb_list_devices / usb_parse_descriptor / pcap_summary / analyze_log
   - id: hardware
     command: py
     args:
-      - -m
-      - hw_mcp
-    env:
-      # 一般設定直接寫值
-      HW_MODE: usb
-      # 憑證用佔位；實際值在 Customized 面板的 Connections 設定
-      HW_TOKEN: ${conn:hardware}
+      - '-3'
+      - tools/hardware-mcp/server.py
+    env: {}
     targets:
       - claude
       - antigravity
