@@ -10,7 +10,6 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
-    "mcp:selftest": "py -3 tools/hardware-mcp/server.py --selftest",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder"
   },

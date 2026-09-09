@@ -16,12 +16,6 @@ files:
 asarUnpack:
   - '**/node_modules/@lydell/node-pty*/**'
 
-# 硬體分析 MCP server 跟著安裝檔走，讓使用者不必另外取得
-extraResources:
-  - from: tools/hardware-mcp
-    to: hardware-mcp
-    filter: ['**/*.py']
-
 win:
   target:
     - target: nsis

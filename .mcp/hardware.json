@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "hardware": {
-      "command": "py",
-      "args": ["-3", "tools/hardware-mcp/server.py"]
-    }
-  }
-}

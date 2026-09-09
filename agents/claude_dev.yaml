@@ -4,8 +4,6 @@ launcher:
   name: Claude Code
   cli: claude
   cwd_scope: workspace
-  # 把硬體分析 MCP server 掛給這個 CLI；路徑相對工作區，pty 已把 cwd 鎖在這裡
-  args:
-    - --mcp-config
-    - .mcp/hardware.json
+  # 這裡刻意不預設掛任何 MCP —— 要掛什麼由 Customized 面板決定，不強加給使用者
+  args: []
   env: {}

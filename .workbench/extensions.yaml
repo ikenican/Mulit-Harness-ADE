@@ -2,21 +2,19 @@
 # 憑證不放這裡 —— env 值寫 ${conn:名稱}，實際值存 OS 加密儲存，spawn 時才注入。
 #
 # targets 可填：claude / antigravity / codex（codex 目前 pending，填了也不會產生輸出）
+#
+# 範例（要用時取消註解並改成你的實際指令）：
+#   mcp:
+#     - id: my-tool
+#       command: py
+#       args: ['-3', 'tools/my-tool/server.py']
+#       env:
+#         MY_TOKEN: ${conn:my-tool}     # 憑證在 Connections 區塊設定
+#       targets: [claude, antigravity]
 version: 1
 
 skills: []
 
-mcp:
-  # 本專案自帶的硬體分析 MCP server（純標準庫，無需 pip 安裝）
-  # 工具：usb_list_devices / usb_parse_descriptor / pcap_summary / analyze_log
-  - id: hardware
-    command: py
-    args:
-      - '-3'
-      - tools/hardware-mcp/server.py
-    env: {}
-    targets:
-      - claude
-      - antigravity
+mcp: []
 
 plugins: []

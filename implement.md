@@ -101,7 +101,7 @@ launcher:
   name: "USB Protocol & Packet Analyst"
   cli: "claude"                 # 支援: claude, codex, antigravity
   cwd_scope: "workspace"        # 子行程 cwd 鎖定範圍
-  args: ["--mcp-config", ".mcp/hardware.json"]   # 把硬體 MCP 註冊給該 CLI
+  args: []   # 需要時才在此註冊 MCP（如 --mcp-config .mcp/xxx.json）
   env:
     PROJECT_MEMORY: ".project-memory/handoff.md"
 ```
@@ -116,7 +116,7 @@ CLI 自身已有 permission 系統，工作台**不再疊一層**（會打架、
 #### 4. 硬體工具 = MCP Server（給 CLI 用，非工作台調度）
 - Python 硬體腳本（PyUSB / pyserial / scapy 等）包成標準 **MCP server**（stdio）。
 - 透過各家 CLI 的 MCP 設定註冊（如 `--mcp-config`），由 **CLI 自己呼叫**，結果自然回到該 CLI 的對話與 `handoff.md`。
-- 工作台只提供一份共用 `.mcp/hardware.json` 供各 launcher 引用；**不自建 Tool Substrate 去代呼叫**。
+- 工作台只提供共用的 MCP 設定檔供各 launcher 引用；**不自建 Tool Substrate 去代呼叫**。
 - （若日後想要「不經 agent 直接跑某支硬體腳本」的按鈕，再另加即可，v1 YAGNI。）
 
 #### 5. 本機 Session Log（非共享大腦）
@@ -146,8 +146,9 @@ CLI 自身已有 permission 系統，工作台**不再疊一層**（會打架、
 - [x] 分頁待審批紅點提醒 + 中止鈕（timeout / 手動）。
 
 ### Phase 3 — 硬體 MCP 與跨機記憶 (1-2 週)
-- [x] 將現有 Python USB 封包 / BIOS Log 腳本包成 MCP server（stdio）。
-- [x] 建立共用 `.mcp/hardware.json`，於各 launcher 註冊給 CLI，驗證 CLI 能自行呼叫並把結果寫回 `handoff.md`。
+- [ ] 將現有 Python USB 封包 / BIOS Log 腳本包成 MCP server（stdio）。
+      （曾試作一組通用工具，經檢討多為冗餘後整包移除；待有真實腳本再做）
+- [ ] 建立共用 MCP 設定並於 launcher 註冊給 CLI。
 - [x] 安裝 / 對接 ShareProjectMem 的 git hook 同步（`MEM_AUTOSYNC` 等），驗證跨 CLI 交棒。
 
 ### Phase 4 — 面板深度整合與體驗 (2 週)
