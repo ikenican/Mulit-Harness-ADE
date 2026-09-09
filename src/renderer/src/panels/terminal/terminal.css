@@ -109,17 +109,57 @@
 
 .term-stage {
   flex: 1 1 auto;
-  position: relative;
+  min-height: 0;
   overflow: hidden;
+  display: grid;
+  gap: 1px;
+  background: var(--border); /* gap 透出來就是面板間的分隔線 */
 }
+.term-stage.split-single {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.term-stage.split-cols2 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+.term-stage.split-rows2 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.term-stage.split-grid4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
 .term-surface {
-  position: absolute;
-  inset: 0;
+  position: relative;
   padding: 8px;
-  visibility: hidden;
-  pointer-events: none;
+  background: var(--bg);
+  display: none;
+  min-width: 0;
+  min-height: 0;
 }
 .term-surface.on {
-  visibility: visible;
-  pointer-events: auto;
+  display: block;
+}
+/* 多面板時標出目前作用中的那個（Send to / 鍵盤焦點的來源） */
+.term-surface.pane-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  border-radius: 2px;
+}
+
+/* 分割模式切換鈕 */
+.term-split button {
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+/* 分頁在分割模式下若正被顯示，左側加一條指示 */
+.term-tab.shown {
+  box-shadow: inset 2px 0 0 var(--accent);
 }

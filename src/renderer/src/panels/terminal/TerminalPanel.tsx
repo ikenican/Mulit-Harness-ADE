@@ -61,12 +61,24 @@ function readTerm(term: Terminal, maxLines = 60): string {
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
+/** 分割模式與各自的面板數 */
+const SPLIT_MODES = [
+  { id: 'single', label: '▢', title: 'Single pane', panes: 1 },
+  { id: 'cols2', label: '▥', title: 'Two panes side by side', panes: 2 },
+  { id: 'rows2', label: '▤', title: 'Two panes stacked', panes: 2 },
+  { id: 'grid4', label: '⊞', title: 'Four panes', panes: 4 }
+] as const
+type SplitMode = (typeof SPLIT_MODES)[number]['id']
+
 export default function TerminalPanel(): JSX.Element {
   const { theme, terminalDispatch } = useWorkbench()
   const [launchers, setLaunchers] = useState<CliLauncher[]>([])
   const [selectedLauncher, setSelectedLauncher] = useState<string>('')
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [splitMode, setSplitMode] = useState<SplitMode>('single')
+  // 最近使用順序：分割時就顯示最近用過的前 N 個，不必再另外挑面板
+  const [mru, setMru] = useState<string[]>([])
 
   const containerRef = useRef<HTMLDivElement>(null)
   // 讓非同步的送出流程讀得到最新 sessions（ptyId 是 spawn 後才填的）
@@ -139,6 +151,7 @@ export default function TerminalPanel(): JSX.Element {
         needsApproval: false
       }
     ])
+    setMru((prev) => [sessionId, ...prev])
     setActiveSessionId(sessionId)
     return sessionId
   }
@@ -173,6 +186,7 @@ export default function TerminalPanel(): JSX.Element {
 
   const closeTerminal = (id: string, e: React.MouseEvent): void => {
     e.stopPropagation()
+    setMru((prev) => prev.filter((x) => x !== id))
     setSessions((prev) => {
       const idx = prev.findIndex((s) => s.id === id)
       if (idx === -1) return prev
@@ -192,13 +206,22 @@ export default function TerminalPanel(): JSX.Element {
     })
   }
 
-  // 切到某分頁即視為使用者已看到，清掉紅點
+  // 切到某分頁即視為使用者已看到，清掉紅點；同時把它移到 MRU 最前面
   const selectSession = (id: string): void => {
     setActiveSessionId(id)
+    setMru((prev) => [id, ...prev.filter((x) => x !== id)])
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, needsApproval: false } : s)))
   }
 
   const pendingCount = sessions.filter((s) => s.needsApproval).length
+
+  // 分割時要顯示哪幾個：MRU 前 N 個（不足就依分頁順序補）
+  const paneCount = SPLIT_MODES.find((m) => m.id === splitMode)!.panes
+  const order = [
+    ...mru.filter((id) => sessions.some((s) => s.id === id)),
+    ...sessions.filter((s) => !mru.includes(s.id)).map((s) => s.id)
+  ]
+  const visibleIds = order.slice(0, paneCount)
 
   return (
     <div className="term-root">
@@ -255,6 +278,20 @@ export default function TerminalPanel(): JSX.Element {
               ))}
           </select>
         )}
+        {sessions.length > 1 && (
+          <div className="segmented term-split">
+            {SPLIT_MODES.map((m) => (
+              <button
+                key={m.id}
+                className={splitMode === m.id ? 'on' : ''}
+                onClick={() => setSplitMode(m.id)}
+                title={m.title}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
         {pendingCount > 0 && (
           <span className="term-pending-summary" title="A terminal is waiting for your approval">
             ● {pendingCount} awaiting approval
@@ -269,7 +306,7 @@ export default function TerminalPanel(): JSX.Element {
               key={s.id}
               className={`term-tab ${activeSessionId === s.id ? 'on' : ''} ${
                 s.isExited ? 'exited' : ''
-              }`}
+              } ${paneCount > 1 && visibleIds.includes(s.id) ? 'shown' : ''}`}
               onClick={() => selectSession(s.id)}
               title={s.needsApproval ? 'This terminal is waiting for your approval' : s.title}
             >
@@ -283,7 +320,7 @@ export default function TerminalPanel(): JSX.Element {
         </div>
       )}
 
-      <div ref={containerRef} className="term-stage">
+      <div ref={containerRef} className={`term-stage split-${splitMode}`}>
         {sessions.length === 0 && (
           <div className="panel-stub">
             No terminals yet. Pick a CLI and press “＋ New Terminal” — it starts in the workspace directory.
@@ -293,7 +330,10 @@ export default function TerminalPanel(): JSX.Element {
           <TerminalInstance
             key={s.id}
             session={s}
+            isVisible={visibleIds.includes(s.id)}
             isActive={s.id === activeSessionId}
+            multi={paneCount > 1}
+            onFocusPane={() => selectSession(s.id)}
             launcherKey={s.launcherKey}
             setSessions={setSessions}
           />
@@ -305,12 +345,20 @@ export default function TerminalPanel(): JSX.Element {
 
 function TerminalInstance({
   session,
+  isVisible,
   isActive,
+  multi,
+  onFocusPane,
   launcherKey,
   setSessions
 }: {
   session: TerminalSession
+  /** 是否被排進目前的分割版面 */
+  isVisible: boolean
+  /** 是否為作用中面板（多面板時畫外框、決定 Send to 的來源） */
   isActive: boolean
+  multi: boolean
+  onFocusPane: () => void
   launcherKey: string
   setSessions: React.Dispatch<React.SetStateAction<TerminalSession[]>>
 }): JSX.Element {
@@ -320,8 +368,9 @@ function TerminalInstance({
   // 之前 resize 因此從未真正送出。
   const ptyIdRef = useRef<string | null>(null)
   const approvalRef = useRef(false)
-  const isActiveRef = useRef(isActive)
-  isActiveRef.current = isActive
+  // 看得到就不必再用系統通知打擾
+  const isVisibleRef = useRef(isVisible)
+  isVisibleRef.current = isVisible
 
   useEffect(() => {
     if (!elRef.current || mounted.current) return
@@ -355,7 +404,7 @@ function TerminalInstance({
             setSessions((prev) =>
               prev.map((s) => (s.id === session.id ? { ...s, needsApproval: true } : s))
             )
-            if (!isActiveRef.current) {
+            if (!isVisibleRef.current) {
               window.api.notify.show('Approval needed', `${session.title} is waiting for a response`)
             }
           }
@@ -405,20 +454,27 @@ function TerminalInstance({
     session.disposables.push(() => ro.disconnect())
   }, [])
 
+  // 從隱藏變回顯示時（display:none 期間尺寸為 0），重新 fit 一次
   useEffect(() => {
-    if (!isActive || !mounted.current) return
+    if (!isVisible || !mounted.current) return
     setTimeout(() => {
       try {
         session.fitAddon.fit()
         if (ptyIdRef.current) {
           window.api.pty.resize(ptyIdRef.current, session.term.cols, session.term.rows)
         }
-        session.term.focus()
+        if (isActive) session.term.focus()
       } catch {
-        /* 忽略 */
+        /* 尺寸尚未穩定時忽略 */
       }
     }, 0)
-  }, [isActive])
+  }, [isVisible, isActive])
 
-  return <div ref={elRef} className={`term-surface ${isActive ? 'on' : ''}`} />
+  return (
+    <div
+      ref={elRef}
+      className={`term-surface ${isVisible ? 'on' : ''} ${multi && isActive ? 'pane-active' : ''}`}
+      onMouseDown={multi ? onFocusPane : undefined}
+    />
+  )
 }

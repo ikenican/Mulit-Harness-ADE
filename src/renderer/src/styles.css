@@ -111,19 +111,24 @@ body {
 .workarea {
   grid-row: 2;
   display: grid;
-  grid-template-columns: 264px 1fr 460px;
   min-height: 0;
+  /* grid-template-* 由 App.tsx 依目前欄寬與停靠位置以 inline style 指定 */
 }
 .col {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-right: 1px solid var(--border);
+  min-height: 0;
   overflow: hidden;
   background: var(--bg);
 }
-.col-right {
-  border-right: none;
+/* 終端停靠底部時，分隔線由 splitter 提供，欄位本身不再畫邊框 */
+.dock-bottom .col-term {
+  border-top: none;
+}
+.dock-switch button {
+  font-size: 11px;
+  padding: 3px 9px;
 }
 
 /* ── segmented-control 風格 tabbar ───────────────────────────── */

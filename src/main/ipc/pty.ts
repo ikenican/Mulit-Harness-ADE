@@ -4,6 +4,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as yaml from 'js-yaml'
 import * as crypto from 'crypto'
+import { execFileSync } from 'child_process'
 import { workspace } from '../index'
 import { resolveConnectionEnv } from './conn'
 import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
@@ -11,6 +12,34 @@ import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
 const ptySessions = new Map<string, pty.IPty>()
 
 const isWin = process.platform === 'win32'
+
+/**
+ * 確實終止 pty 及其子行程。
+ *
+ * 為什麼不能只靠 node-pty 的 kill()：Windows 上它會先 fork
+ * conpty_console_list_agent 去列舉 console 行程，而該 helper 在 Electron 下
+ * 會以「AttachConsole failed」崩潰；node-pty 因此要等滿 5 秒 timeout 才真的動手。
+ * 結果是關終端後 shell 還多活 5 秒，關 app 時更直接留下孤兒行程。
+ * 所以這裡先自己把 process tree 殺掉，再呼叫 kill() 收尾釋放 handle。
+ */
+function hardKill(p: pty.IPty): void {
+  const pid = p.pid
+  try {
+    if (isWin) {
+      // /T 連子行程一起、/F 強制；已結束的 pid 會回非 0，忽略即可
+      execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    } else {
+      process.kill(pid, 'SIGKILL')
+    }
+  } catch {
+    /* 行程已不在就忽略 */
+  }
+  try {
+    p.kill()
+  } catch {
+    /* 已被 taskkill 帶走時會丟例外，忽略 */
+  }
+}
 
 /**
  * 邏輯名稱 → 實際執行檔。集中在這裡，UI 與 yaml 只需要用邏輯名。
@@ -34,13 +63,7 @@ function resolveCommand(name: string): string {
 }
 
 app.on('before-quit', () => {
-  for (const session of ptySessions.values()) {
-    try {
-      session.kill()
-    } catch (e) {
-      // ignore
-    }
-  }
+  for (const session of ptySessions.values()) hardKill(session)
   ptySessions.clear()
 })
 
@@ -159,11 +182,7 @@ export function registerPtyHandlers(): void {
   ipcMain.on('pty:kill', (event, id: string) => {
     const session = ptySessions.get(id)
     if (session) {
-      try {
-        session.kill()
-      } catch (e) {
-        // ignore
-      }
+      hardKill(session)
       ptySessions.delete(id)
     }
   })
