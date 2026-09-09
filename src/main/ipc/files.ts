@@ -72,6 +72,17 @@ export function registerFileHandlers(): void {
     }))
   })
 
+  // 存在檢查：給「可能不存在」的路徑用（如 .project-memory/*.md），
+  // 避免用 files:read 的例外當流程控制而在 main 端刷出 ENOENT 噪音。
+  ipcMain.handle('files:exists', async (_event, targetPath: string): Promise<boolean> => {
+    try {
+      await fs.access(resolveSafePath(targetPath))
+      return true
+    } catch {
+      return false
+    }
+  })
+
   // Return current workspace root path
   ipcMain.handle('files:workspaceRoot', async (): Promise<string> => {
     return workspace.root

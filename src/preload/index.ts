@@ -10,8 +10,13 @@ const api = {
     write: (path: string, content: string): Promise<void> =>
       ipcRenderer.invoke('files:write', path, content),
     list: (dir: string): Promise<FsEntry[]> => ipcRenderer.invoke('files:list', dir),
+    exists: (path: string): Promise<boolean> => ipcRenderer.invoke('files:exists', path),
     workspaceRoot: (): Promise<string> => ipcRenderer.invoke('files:workspaceRoot'),
     pickWorkspace: (): Promise<string | null> => ipcRenderer.invoke('files:pickWorkspace')
+  },
+  // OS 原生通知 —— main/ipc/notify.ts
+  notify: {
+    show: (title: string, body: string): void => ipcRenderer.send('notify:show', title, body)
   },
   // Git —— main/ipc/git.ts
   git: {

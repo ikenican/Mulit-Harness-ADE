@@ -1,0 +1,125 @@
+.term-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.term-select {
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px var(--font);
+  outline: none;
+}
+.term-select:focus {
+  border-color: var(--accent);
+}
+
+.term-pending-summary {
+  margin-left: auto;
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 分頁列 */
+.term-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.term-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+.term-tab:hover {
+  background: var(--bg3);
+}
+.term-tab.on {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+.term-tab.exited {
+  opacity: 0.55;
+}
+.term-tab-title {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.term-tab-close {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+.term-tab-close:hover {
+  color: var(--fg);
+}
+
+/* 待審批紅點 */
+.term-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  flex: 0 0 auto;
+  animation: term-pulse 1.6s ease-in-out infinite;
+}
+@keyframes term-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+
+.term-stage {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+}
+.term-surface {
+  position: absolute;
+  inset: 0;
+  padding: 8px;
+  visibility: hidden;
+  pointer-events: none;
+}
+.term-surface.on {
+  visibility: visible;
+  pointer-events: auto;
+}

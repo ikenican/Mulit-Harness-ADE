@@ -348,3 +348,17 @@
   line-height: 1.65;
   margin: 0 0 20px 0;
 }
+
+/* 可跳轉的檔案路徑（handoff 內提到、且工作區真的有的檔） */
+.memory-filelink {
+  cursor: pointer;
+  color: var(--accent);
+  border-bottom: 1px dashed var(--accent);
+  text-decoration: none;
+  padding: 1px 3px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+.memory-filelink:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
