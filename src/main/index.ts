@@ -4,6 +4,8 @@ import { registerFileHandlers } from './ipc/files'
 import { registerGitHandlers } from './ipc/git'
 import { registerPtyHandlers } from './ipc/pty'
 import { registerNotifyHandlers } from './ipc/notify'
+import { registerExtHandlers } from './ipc/ext'
+import { registerConnHandlers } from './ipc/conn'
 
 // 目前工作區根目錄；files handler 會用到，pickWorkspace 可更新。
 export const workspace = { root: process.cwd() }
@@ -44,6 +46,8 @@ app.whenReady().then(() => {
   registerGitHandlers()
   registerPtyHandlers()
   registerNotifyHandlers()
+  registerExtHandlers()
+  registerConnHandlers()
   createWindow()
 
   app.on('activate', () => {

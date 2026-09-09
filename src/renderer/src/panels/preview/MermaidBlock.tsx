@@ -45,7 +45,7 @@ export default function MermaidBlock({ chart, theme }: MermaidBlockProps): JSX.E
       .catch((err) => {
         if (!cancelled) {
           console.warn('Mermaid rendering failed:', err)
-          setError(err?.message || 'Mermaid 語法錯誤或無法渲染')
+          setError(err?.message || 'Invalid Mermaid syntax or failed to render')
           // 清理 mermaid 偶爾在 DOM 遺留的暫存節點
           const errorEl = document.getElementById(id) || document.getElementById(`d${id}`)
           if (errorEl && errorEl.parentNode) {
@@ -64,7 +64,7 @@ export default function MermaidBlock({ chart, theme }: MermaidBlockProps): JSX.E
       <div className="mermaid-error-box">
         <div className="mermaid-error-header">
           <span className="mermaid-error-dot" />
-          <span>Mermaid 圖表解析警告</span>
+          <span>Mermaid diagram warning</span>
         </div>
         <div className="mermaid-error-msg">{error}</div>
         <pre className="mermaid-fallback-code">
@@ -78,7 +78,7 @@ export default function MermaidBlock({ chart, theme }: MermaidBlockProps): JSX.E
     return (
       <div className="mermaid-loading-box">
         <div className="mermaid-loading-spinner" />
-        <span>圖表渲染中...</span>
+        <span>Rendering diagram…</span>
       </div>
     )
   }

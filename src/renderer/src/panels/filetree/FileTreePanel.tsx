@@ -174,7 +174,7 @@ function TreeNode({
               className="filetree-status-row"
               style={{ paddingLeft: `${indent + 26}px` }}
             >
-              載入中...
+              Loading…
             </div>
           )}
           {!isLoading && children && children.length === 0 && (
@@ -182,7 +182,7 @@ function TreeNode({
               className="filetree-status-row"
               style={{ paddingLeft: `${indent + 26}px` }}
             >
-              (空資料夾)
+              (empty folder)
             </div>
           )}
           {!isLoading &&
@@ -229,7 +229,7 @@ export default function FileTreePanel(): JSX.Element {
       setChildrenMap({})
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`無法讀取目錄：${msg}`)
+      setError(`Cannot read directory: ${msg}`)
     } finally {
       setLoading(false)
     }
@@ -247,7 +247,7 @@ export default function FileTreePanel(): JSX.Element {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`選取工作區失敗：${msg}`)
+      setError(`Failed to pick workspace: ${msg}`)
     }
   }
 
@@ -289,7 +289,7 @@ export default function FileTreePanel(): JSX.Element {
 
   const folderName = workspaceRoot
     ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || workspaceRoot
-    : '工作區'
+    : 'Workspace'
 
   return (
     <div className="filetree-container">
@@ -301,15 +301,15 @@ export default function FileTreePanel(): JSX.Element {
           <button
             className="filetree-btn"
             onClick={handlePickWorkspace}
-            title="選取並開啟資料夾"
+            title="Choose and open a folder"
           >
             <OpenFolderIcon />
-            <span>開啟資料夾</span>
+            <span>Open Folder</span>
           </button>
           <button
             className="filetree-btn filetree-btn-icon"
             onClick={() => loadTree(workspaceRoot)}
-            title="重新整理檔案樹"
+            title="Refresh file tree"
           >
             <RefreshIcon />
           </button>
@@ -319,7 +319,7 @@ export default function FileTreePanel(): JSX.Element {
       <div className="filetree-body">
         {loading && (
           <div className="filetree-center-msg">
-            <span>載入中...</span>
+            <span>Loading…</span>
           </div>
         )}
 
@@ -330,14 +330,14 @@ export default function FileTreePanel(): JSX.Element {
               className="filetree-btn"
               onClick={() => loadTree(workspaceRoot)}
             >
-              重試
+              Retry
             </button>
           </div>
         )}
 
         {!loading && !error && rootEntries.length === 0 && (
           <div className="filetree-center-msg">
-            <span>此工作區為空目錄</span>
+            <span>This workspace is empty</span>
           </div>
         )}
 

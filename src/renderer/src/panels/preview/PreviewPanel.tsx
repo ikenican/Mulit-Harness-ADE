@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { useWorkbench } from '@/store'
 import MermaidBlock from './MermaidBlock'
+import RunnableCode, { isShellLang } from '@/components/RunnableCode'
 import './preview.css'
 
 export default function PreviewPanel(): JSX.Element {
@@ -41,7 +42,7 @@ export default function PreviewPanel(): JSX.Element {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn('Failed to read preview file:', err)
-      setError(msg || '讀取檔案失敗')
+      setError(msg || 'Failed to read file')
       setContent('')
     } finally {
       setLoading(false)
@@ -71,11 +72,11 @@ export default function PreviewPanel(): JSX.Element {
                 <polyline points="10 9 9 9 8 9" />
               </svg>
             </div>
-            <div className="preview-empty-title">選一個 .md 或 .html 檔以預覽</div>
+            <div className="preview-empty-title">Select a .md or .html file to preview</div>
             <p className="preview-empty-desc">
               {activeFilePath
-                ? `目前選取的是「${filename}」，預覽面板支援 Markdown (.md) 與 HTML (.html) 即時渲染。`
-                : '請在左側檔案樹中點選 Markdown 或 HTML 檔案以開啟即時預覽。'}
+                ? `“${filename}” is selected. This panel renders Markdown (.md) and HTML (.html) live.`
+                : 'Pick a Markdown or HTML file in the file tree to open a live preview.'}
             </p>
           </div>
         </div>
@@ -99,13 +100,13 @@ export default function PreviewPanel(): JSX.Element {
           <button
             className="preview-btn"
             onClick={handleRefresh}
-            title="重新載入預覽內容"
+            title="Reload preview"
             disabled={loading}
           >
             <svg viewBox="0 0 24 24">
               <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
             </svg>
-            <span>重新整理</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
@@ -115,7 +116,7 @@ export default function PreviewPanel(): JSX.Element {
         <div className="mermaid-error-box" style={{ margin: '16px 20px 0' }}>
           <div className="mermaid-error-header">
             <span className="mermaid-error-dot" />
-            <span>讀取檔案失敗</span>
+            <span>Failed to read file</span>
           </div>
           <div className="mermaid-error-msg">{error}</div>
         </div>
@@ -139,6 +140,20 @@ export default function PreviewPanel(): JSX.Element {
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeHighlight]}
               components={{
+                // shell 類 code block 右上角給「送到終端」
+                pre({ children, ...props }) {
+                  const child = (Array.isArray(children) ? children[0] : children) as {
+                    props?: { className?: string; children?: unknown }
+                  } | null
+                  if (child?.props && isShellLang(child.props.className)) {
+                    return (
+                      <RunnableCode code={String(child.props.children ?? '')}>
+                        <pre {...props}>{children}</pre>
+                      </RunnableCode>
+                    )
+                  }
+                  return <pre {...props}>{children}</pre>
+                },
                 code({ className, children, ...props }) {
                   const match = /language-(\w+)/.exec(className || '')
                   const language = match ? match[1] : ''

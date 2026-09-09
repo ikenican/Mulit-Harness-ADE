@@ -133,7 +133,7 @@ export default function GitPanel(): JSX.Element {
   if (status && !status.isRepo) {
     return (
       <div className="git-container">
-        <div className="git-not-repo">目前資料夾不是 git repo</div>
+        <div className="git-not-repo">This folder is not a git repository</div>
       </div>
     )
   }
@@ -147,14 +147,14 @@ export default function GitPanel(): JSX.Element {
     <div className="git-container">
       {/* 頂部：分支列與下拉選單 */}
       <div className="git-topbar">
-        <span className="git-branch-label" title={`目前分支: ${branches.current}`}>
+        <span className="git-branch-label" title={`Current branch: ${branches.current}`}>
           ⎇
         </span>
         <select
           className="git-branch-select"
           value={branches.current}
           onChange={(e) => handleBranchChange(e.target.value)}
-          title="切換分支"
+          title="Switch branch"
         >
           {branches.all.length > 0 ? (
             branches.all.map((b) => (
@@ -166,7 +166,7 @@ export default function GitPanel(): JSX.Element {
             <option value={branches.current}>{branches.current || 'no branch'}</option>
           )}
         </select>
-        <button className="git-icon-btn" onClick={fetchData} title="重新整理 Git 狀態">
+        <button className="git-icon-btn" onClick={fetchData} title="Refresh git status">
           ↻
         </button>
       </div>
@@ -198,7 +198,7 @@ export default function GitPanel(): JSX.Element {
           {stagedOpen && (
             <div className="git-file-list">
               {stagedCount === 0 ? (
-                <div className="git-empty-msg">無暫存變更</div>
+                <div className="git-empty-msg">No staged changes</div>
               ) : (
                 status?.staged.map((f: GitFileChange) => {
                   const { fileName, dirPath } = splitPath(f.path)
@@ -220,7 +220,7 @@ export default function GitPanel(): JSX.Element {
                         <button
                           className="git-action-btn git-unstage-btn"
                           onClick={(e) => handleUnstage(e, f.path)}
-                          title="Unstage (取消暫存)"
+                          title="Unstage"
                         >
                           −
                         </button>
@@ -248,7 +248,7 @@ export default function GitPanel(): JSX.Element {
           {unstagedOpen && (
             <div className="git-file-list">
               {unstagedCount === 0 ? (
-                <div className="git-empty-msg">無未暫存變更</div>
+                <div className="git-empty-msg">No unstaged changes</div>
               ) : (
                 status?.unstaged.map((f: GitFileChange) => {
                   const { fileName, dirPath } = splitPath(f.path)
@@ -270,14 +270,14 @@ export default function GitPanel(): JSX.Element {
                         <button
                           className="git-action-btn git-restore-btn"
                           onClick={(e) => handleRestore(e, f.path)}
-                          title="Restore (還原變更)"
+                          title="Restore (discard changes)"
                         >
                           ↺
                         </button>
                         <button
                           className="git-action-btn git-stage-btn"
                           onClick={(e) => handleStage(e, f.path)}
-                          title="Stage (暫存變更)"
+                          title="Stage"
                         >
                           +
                         </button>
@@ -305,7 +305,7 @@ export default function GitPanel(): JSX.Element {
           {untrackedOpen && (
             <div className="git-file-list">
               {untrackedCount === 0 ? (
-                <div className="git-empty-msg">無未追蹤檔案</div>
+                <div className="git-empty-msg">No untracked files</div>
               ) : (
                 status?.untracked.map((filePath: string) => {
                   const { fileName, dirPath } = splitPath(filePath)
@@ -325,7 +325,7 @@ export default function GitPanel(): JSX.Element {
                         <button
                           className="git-action-btn git-stage-btn"
                           onClick={(e) => handleStage(e, filePath)}
-                          title="Stage (暫存變更)"
+                          title="Stage"
                         >
                           +
                         </button>
@@ -340,7 +340,7 @@ export default function GitPanel(): JSX.Element {
 
         {isClean && (
           <div className="git-empty-msg" style={{ textAlign: 'center', padding: '16px 0' }}>
-            工作區乾淨，無任何變更
+            Working tree clean
           </div>
         )}
 
@@ -359,7 +359,7 @@ export default function GitPanel(): JSX.Element {
           {logOpen && (
             <div className="git-file-list">
               {commits.length === 0 ? (
-                <div className="git-empty-msg">無歷史提交</div>
+                <div className="git-empty-msg">No commits yet</div>
               ) : (
                 commits.map((c: GitCommit) => (
                   <div key={c.hash} className="git-log-item" title={c.message}>
@@ -398,8 +398,8 @@ export default function GitPanel(): JSX.Element {
           onClick={handleCommit}
           title={
             stagedCount === 0
-              ? '請先暫存變更 (Stage) 再進行提交'
-              : '提交暫存變更 (Ctrl+Enter)'
+              ? 'Stage some changes before committing'
+              : 'Commit staged changes (Ctrl+Enter)'
           }
         >
           {committing ? 'Committing...' : 'Commit'}

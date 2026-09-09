@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { openFile, useWorkbench } from '@/store'
+import RunnableCode, { isShellLang } from '@/components/RunnableCode'
 import './memory.css'
 
 interface MemoryDoc {
@@ -129,17 +130,17 @@ export default function MemoryPanel(): JSX.Element {
               </svg>
             </div>
             <div className="memory-empty-title">
-              尚未安裝 ShareProjectMem（.project-memory/handoff.md 不存在）
+              ShareProjectMem is not installed (.project-memory/handoff.md not found)
             </div>
             <p className="memory-empty-desc">
-              ShareProjectMem 是跨官方 CLI（Claude Code / Codex / Antigravity）與跨機協作的共享大腦與交棒核心。
-              請確認工作區根目錄已建立 <code>.project-memory/handoff.md</code>。
+              ShareProjectMem is the shared memory and handoff layer across the official CLIs (Claude Code / Codex / Antigravity) and across machines.
+              Make sure <code>.project-memory/handoff.md</code> exists in the workspace root.
             </p>
             <button className="memory-btn" onClick={handleRefresh}>
               <svg viewBox="0 0 24 24">
                 <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
               </svg>
-              <span>重新整理</span>
+              <span>Refresh</span>
             </button>
           </div>
         </div>
@@ -170,13 +171,13 @@ export default function MemoryPanel(): JSX.Element {
           <button
             className="memory-btn"
             onClick={handleRefresh}
-            title="重新載入記憶文件"
+            title="Reload memory files"
             disabled={loading}
           >
             <svg viewBox="0 0 24 24">
               <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
             </svg>
-            <span>重新整理</span>
+            <span>Refresh</span>
           </button>
         </div>
       </div>
@@ -188,6 +189,20 @@ export default function MemoryPanel(): JSX.Element {
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
+                // handoff 裡的指令（如 npm run typecheck）可直接送到終端
+                pre({ children, ...props }) {
+                  const child = (Array.isArray(children) ? children[0] : children) as {
+                    props?: { className?: string; children?: unknown }
+                  } | null
+                  if (child?.props && isShellLang(child.props.className)) {
+                    return (
+                      <RunnableCode code={String(child.props.children ?? '')}>
+                        <pre {...props}>{children}</pre>
+                      </RunnableCode>
+                    )
+                  }
+                  return <pre {...props}>{children}</pre>
+                },
                 // 行內程式碼若是工作區內真實存在的檔案 → 做成可點擊，跳到編輯器
                 code({ className, children, ...props }) {
                   const text = String(children)
@@ -195,7 +210,7 @@ export default function MemoryPanel(): JSX.Element {
                     return (
                       <code
                         className="memory-filelink"
-                        title={`在編輯器開啟 ${text}`}
+                        title={`Open ${text} in editor`}
                         onClick={() => jumpTo(text)}
                       >
                         {children}
@@ -215,7 +230,7 @@ export default function MemoryPanel(): JSX.Element {
                     return (
                       <a
                         className="memory-filelink"
-                        title={`在編輯器開啟 ${rel}`}
+                        title={`Open ${rel} in editor`}
                         onClick={(e) => {
                           e.preventDefault()
                           jumpTo(rel)

@@ -64,9 +64,9 @@ function EmptyEditorState(): JSX.Element {
         <line x1="16" y1="17" x2="8" y2="17" />
         <polyline points="10 9 9 9 8 9" />
       </svg>
-      <div className="editor-empty-title">未開啟任何檔案</div>
+      <div className="editor-empty-title">No file open</div>
       <div className="editor-empty-desc">
-        在左側「檔案」面板點擊檔案開始編輯，或在「Git」面板點選變更檔檢視 Diff 比對。
+        Click a file in the Files panel to start editing, or pick a changed file in the Git panel to view its diff.
       </div>
     </div>
   )
@@ -120,13 +120,13 @@ export default function EditorPanel(): JSX.Element {
       bumpGit()
       setInitialContent(currentText)
       setIsDirty(false)
-      setSaveMessage('已儲存')
+      setSaveMessage('Saved')
       setTimeout(() => {
         setSaveMessage(null)
       }, 2000)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
-      setError(`儲存失敗：${msg}`)
+      setError(`Save failed: ${msg}`)
     } finally {
       setIsSaving(false)
     }
@@ -226,12 +226,12 @@ export default function EditorPanel(): JSX.Element {
               viewMode === 'edit' ? 'badge-edit' : 'badge-diff'
             }`}
           >
-            {viewMode === 'edit' ? '編輯' : 'Diff 比對'}
+            {viewMode === 'edit' ? 'Edit' : 'Diff'}
           </span>
           <div className="editor-filename-wrapper" title={activeFilePath}>
             <span className="editor-filename">{fileName}</span>
             {viewMode === 'edit' && isDirty && (
-              <span className="editor-dirty-dot" title="未儲存變更" />
+              <span className="editor-dirty-dot" title="Unsaved changes" />
             )}
           </div>
         </div>
@@ -244,7 +244,7 @@ export default function EditorPanel(): JSX.Element {
               className="editor-btn-save"
               onClick={handleSave}
               disabled={isSaving || !isDirty}
-              title="儲存檔案 (Ctrl+S / Cmd+S)"
+              title="Save file (Ctrl+S / Cmd+S)"
             >
               <svg
                 width="12"
@@ -260,7 +260,7 @@ export default function EditorPanel(): JSX.Element {
                 <polyline points="17 21 17 13 7 13 7 21" />
                 <polyline points="7 3 7 8 15 8" />
               </svg>
-              <span>{isSaving ? '儲存中...' : '儲存'}</span>
+              <span>{isSaving ? 'Saving…' : 'Save'}</span>
             </button>
           )}
         </div>
@@ -288,7 +288,7 @@ export default function EditorPanel(): JSX.Element {
               }
             }}
           >
-            重試
+            Retry
           </button>
         </div>
       )}
@@ -296,7 +296,7 @@ export default function EditorPanel(): JSX.Element {
       <div className="editor-body">
         {loading && (
           <div className="editor-loading-overlay">
-            <span>載入中...</span>
+            <span>Loading…</span>
           </div>
         )}
 

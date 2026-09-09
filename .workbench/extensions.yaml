@@ -1,0 +1,25 @@
+# Workbench 擴充清單：唯一真相，由 Customized 面板產生各家 agent 的原生設定。
+# 憑證不放這裡 —— env 值寫 ${conn:名稱}，實際值存 OS 加密儲存，spawn 時才注入。
+#
+# targets 可填：claude / antigravity / codex（codex 目前 pending，填了也不會產生輸出）
+version: 1
+
+skills: []
+
+mcp:
+  # 範例：硬體分析 MCP（Phase 3 會接上真正的 Python 腳本）
+  - id: hardware
+    command: py
+    args:
+      - -m
+      - hw_mcp
+    env:
+      # 一般設定直接寫值
+      HW_MODE: usb
+      # 憑證用佔位；實際值在 Customized 面板的 Connections 設定
+      HW_TOKEN: ${conn:hardware}
+    targets:
+      - claude
+      - antigravity
+
+plugins: []

@@ -7,11 +7,21 @@ import { useSyncExternalStore } from 'react'
 //   bumpGit()       → 通知 Git panel 重新抓 status（存檔 / commit 後呼叫）
 //   toggleTheme()   → 切換亮暗；panel 需 JS 感知主題時讀 useWorkbench().theme
 export type Theme = 'light' | 'dark'
+
+/** 要送進終端的文字（例如 markdown code block 的指令）。nonce 遞增即代表有新的一筆。 */
+export interface TerminalDispatch {
+  text: string
+  /** shell = 送到（必要時新開）一般 shell；active = 目前分頁 */
+  target: 'shell' | 'active'
+  nonce: number
+}
+
 export interface WorkbenchState {
   activeFilePath: string | null
   viewMode: 'edit' | 'diff'
   gitTick: number // 遞增即代表 git 狀態該刷新
   theme: Theme
+  terminalDispatch: TerminalDispatch | null
 }
 
 function initialTheme(): Theme {
@@ -32,7 +42,8 @@ let state: WorkbenchState = {
   activeFilePath: null,
   viewMode: 'edit',
   gitTick: 0,
-  theme: initialTheme()
+  theme: initialTheme(),
+  terminalDispatch: null
 }
 applyTheme(state.theme)
 
@@ -52,6 +63,19 @@ export function openDiff(path: string): void {
 export function bumpGit(): void {
   set({ gitTick: state.gitTick + 1 })
 }
+/**
+ * 把文字送進終端。刻意「只貼上、不自動送出」——指令要不要執行由使用者按 Enter 決定。
+ */
+export function sendToTerminal(text: string, target: 'shell' | 'active' = 'shell'): void {
+  set({
+    terminalDispatch: {
+      text,
+      target,
+      nonce: (state.terminalDispatch?.nonce ?? 0) + 1
+    }
+  })
+}
+
 export function toggleTheme(): void {
   const next: Theme = state.theme === 'dark' ? 'light' : 'dark'
   applyTheme(next)

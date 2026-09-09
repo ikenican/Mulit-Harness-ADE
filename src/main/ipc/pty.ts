@@ -5,9 +5,33 @@ import * as path from 'path'
 import * as yaml from 'js-yaml'
 import * as crypto from 'crypto'
 import { workspace } from '../index'
+import { resolveConnectionEnv } from './conn'
 import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
 
 const ptySessions = new Map<string, pty.IPty>()
+
+const isWin = process.platform === 'win32'
+
+/**
+ * 邏輯名稱 → 實際執行檔。集中在這裡，UI 與 yaml 只需要用邏輯名。
+ * 注意 antigravity 的執行檔實際叫 agy（實機探測結果），不是 antigravity。
+ */
+function resolveCommand(name: string): string {
+  switch (name) {
+    case 'antigravity':
+      return 'agy'
+    case 'powershell':
+      return isWin ? 'powershell.exe' : 'pwsh'
+    case 'pwsh':
+      return 'pwsh'
+    case 'cmd':
+      return isWin ? 'cmd.exe' : 'sh'
+    case 'bash':
+      return 'bash'
+    default:
+      return name
+  }
+}
 
 app.on('before-quit', () => {
   for (const session of ptySessions.values()) {
@@ -41,7 +65,7 @@ export function registerPtyHandlers(): void {
               id: l.id,
               name: l.name,
               cli: l.cli,
-              command: l.cli,
+              command: resolveCommand(l.cli),
               args: l.args || [],
               env: l.env || {}
             })
@@ -56,7 +80,7 @@ export function registerPtyHandlers(): void {
   })
 
   ipcMain.handle('pty:spawn', async (event, opts: PtySpawnOptions) => {
-    let command = opts.command || (process.platform === 'win32' ? 'cmd.exe' : 'bash')
+    let command = opts.command ? resolveCommand(opts.command) : isWin ? 'cmd.exe' : 'bash'
     let args = opts.args || []
     let env = { ...process.env }
     
@@ -70,7 +94,7 @@ export function registerPtyHandlers(): void {
             const parsed = yaml.load(content) as any
             if (parsed && parsed.launcher && parsed.launcher.id === opts.launcherId) {
               const l = parsed.launcher
-              command = l.cli
+              command = resolveCommand(l.cli)
               args = l.args || []
               env = { ...env, ...(l.env || {}) }
               break
@@ -80,6 +104,10 @@ export function registerPtyHandlers(): void {
       }
     }
     
+    // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
+    // 因此不需要（也不該）把明文寫進任何 agent 設定檔。
+    env = { ...env, ...resolveConnectionEnv() }
+
     const id = crypto.randomUUID()
     const cols = opts.cols || 80
     const rows = opts.rows || 24

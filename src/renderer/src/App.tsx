@@ -5,10 +5,11 @@ import EditorPanel from '@panels/editor/EditorPanel'
 import PreviewPanel from '@panels/preview/PreviewPanel'
 import MemoryPanel from '@panels/memory/MemoryPanel'
 import TerminalPanel from '@panels/terminal/TerminalPanel'
+import CustomizedPanel from '@panels/customized/CustomizedPanel'
 import { toggleTheme, useWorkbench } from '@/store'
 
 type LeftTab = 'files' | 'git'
-type CenterTab = 'editor' | 'preview' | 'memory'
+type CenterTab = 'editor' | 'preview' | 'memory' | 'customized'
 
 // 三欄殼：頂 titlebar｜左（Files/Git）｜中（Editor/Preview/Memory）｜右（CLI 終端殼）
 // 這個檔由 Master 擁有，worker 只實作各自 panel，不動這裡。
@@ -26,7 +27,7 @@ export default function App(): JSX.Element {
         <span className="spacer" />
         <button
           className="btn-icon"
-          title={theme === 'dark' ? '切換亮色' : '切換暗色'}
+          title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
           onClick={toggleTheme}
         >
           {theme === 'dark' ? '☀︎' : '☾'}
@@ -38,7 +39,7 @@ export default function App(): JSX.Element {
           <div className="tabbar">
             <div className="segmented">
               <button className={left === 'files' ? 'on' : ''} onClick={() => setLeft('files')}>
-                檔案
+                Files
               </button>
               <button className={left === 'git' ? 'on' : ''} onClick={() => setLeft('git')}>
                 Git
@@ -59,16 +60,22 @@ export default function App(): JSX.Element {
           <div className="tabbar">
             <div className="segmented">
               <button className={center === 'editor' ? 'on' : ''} onClick={() => setCenter('editor')}>
-                編輯 / Diff
+                Editor / Diff
               </button>
               <button
                 className={center === 'preview' ? 'on' : ''}
                 onClick={() => setCenter('preview')}
               >
-                預覽
+                Preview
               </button>
               <button className={center === 'memory' ? 'on' : ''} onClick={() => setCenter('memory')}>
                 Memory
+              </button>
+              <button
+                className={center === 'customized' ? 'on' : ''}
+                onClick={() => setCenter('customized')}
+              >
+                Customized
               </button>
             </div>
           </div>
@@ -82,11 +89,14 @@ export default function App(): JSX.Element {
             <div hidden={center !== 'memory'} className="fill">
               <MemoryPanel />
             </div>
+            <div hidden={center !== 'customized'} className="fill">
+              <CustomizedPanel />
+            </div>
           </div>
         </main>
 
         <section className="col col-right">
-          <div className="tabbar static">Agent 終端</div>
+          <div className="tabbar static">Agent Terminals</div>
           <div className="panel-body">
             <TerminalPanel />
           </div>
