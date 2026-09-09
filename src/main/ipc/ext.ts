@@ -30,7 +30,7 @@ export function registerExtHandlers(): void {
             : mc.targets.includes(a)
               ? ('missing' as const)
               : ('missing' as const),
-          detail: AGENT_PATHS[a].pending ? '尚未支援（Codex 未安裝）' : '已宣告，待同步'
+          detail: AGENT_PATHS[a].pending ? 'Not supported yet (Codex is not installed)' : 'Declared, pending sync'
         }))
       })
     }

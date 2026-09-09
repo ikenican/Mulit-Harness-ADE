@@ -82,9 +82,9 @@ export function registerConnHandlers(): void {
   })
 
   ipcMain.handle('conn:set', async (_e, name: string, value: string): Promise<void> => {
-    if (!name?.trim()) throw new Error('連線名稱不可為空')
+    if (!name?.trim()) throw new Error('Connection name cannot be empty')
     if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error('此系統無法使用 OS 加密儲存，拒絕以明文保存憑證')
+      throw new Error('OS-backed encryption is unavailable on this system; refusing to store the credential in plain text')
     }
     const s = load()
     s[name.trim()] = safeStorage.encryptString(value).toString('base64')

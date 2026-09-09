@@ -134,12 +134,12 @@ function scanClaude(workspaceRoot: string): Found[] {
     mcpServers?: Record<string, unknown>
     projects?: Record<string, { mcpServers?: Record<string, unknown> }>
   }>(P.mcpConfig!, {})
-  pushMcp(claudeJson.mcpServers || {}, '~/.claude.json（全域）')
+  pushMcp(claudeJson.mcpServers || {}, '~/.claude.json (global)')
 
   const wsKey = workspaceRoot.replace(/\\/g, '/').toLowerCase()
   for (const [proj, cfg] of Object.entries(claudeJson.projects || {})) {
     if (proj.replace(/\\/g, '/').toLowerCase() !== wsKey) continue
-    pushMcp(cfg.mcpServers || {}, '~/.claude.json（本專案）')
+    pushMcp(cfg.mcpServers || {}, '~/.claude.json (this project)')
   }
   const proj = readJson<{ mcpServers?: Record<string, unknown> }>(
     join(workspaceRoot, '.mcp.json'),
@@ -257,7 +257,7 @@ export function buildInventory(workspaceRoot: string, managedIds: Set<string>): 
       const support: AgentSupport = {
         agent: a,
         state,
-        detail: P.pending ? '尚未支援（Codex 未安裝）' : undefined
+        detail: P.pending ? 'Not supported yet (Codex is not installed)' : undefined
       }
       item.agents.push(support)
     }
@@ -281,10 +281,10 @@ export function buildAgentStatus(workspaceRoot: string, items: ExtItem[]): Agent
     }
 
     if (P.pending) {
-      notes.push('尚未支援：本機未安裝 Codex，且其 config.toml 與另兩家不同構')
+      notes.push('Not supported yet: Codex is not installed here, and its config.toml differs from the other two')
     } else {
-      if (!cliPath) notes.push(`PATH 上找不到 ${P.cli}`)
-      if (!fs.existsSync(P.configHome)) notes.push(`設定目錄不存在：${P.configHome}`)
+      if (!cliPath) notes.push(`${P.cli} was not found on PATH`)
+      if (!fs.existsSync(P.configHome)) notes.push(`Config directory does not exist: ${P.configHome}`)
     }
 
     // Antigravity 的信任工作區檢查：沒被信任時 agy 可能無法在此目錄運作
@@ -293,12 +293,12 @@ export function buildAgentStatus(workspaceRoot: string, items: ExtItem[]): Agent
       const list = (s.trustedWorkspaces || []).map((x) => x.replace(/\\/g, '/').toLowerCase())
       const ws = workspaceRoot.replace(/\\/g, '/').toLowerCase()
       if (!list.some((t) => ws === t || ws.startsWith(t + '/'))) {
-        notes.push('目前工作區不在 Antigravity 的信任清單內')
+        notes.push('This workspace is not in Antigravity\'s trust list')
       }
     }
 
     if (id === 'antigravity') {
-      notes.push('MCP 僅有全域設定（無 per-project），寫入會影響所有專案')
+      notes.push('MCP config is global only (no per-project scope) — writing affects every project')
     }
 
     return {

@@ -88,7 +88,7 @@ export function planSync(workspaceRoot: string, manifest: ExtManifest): FileChan
     const before = readText(p)
     const after = mergeMcpJson(before, manifest, 'claude')
     if (before !== after) {
-      changes.push({ path: p, agent: 'claude', before, after, note: '專案層級，可隨 repo 一起 commit' })
+      changes.push({ path: p, agent: 'claude', before, after, note: 'Project scope — can be committed with the repo' })
     }
   }
 
@@ -103,7 +103,7 @@ export function planSync(workspaceRoot: string, manifest: ExtManifest): FileChan
         agent: 'antigravity',
         before,
         after,
-        note: '全域設定，會影響所有專案'
+        note: 'Global config — affects every project'
       })
     }
   }
@@ -118,7 +118,7 @@ export function planSync(workspaceRoot: string, manifest: ExtManifest): FileChan
         agent: 'claude',
         before: '',
         after: '',
-        note: '⚠ 來源不存在，略過此 skill'
+        note: '⚠ Source not found — this skill will be skipped'
       })
       continue
     }
@@ -141,7 +141,7 @@ export function planSync(workspaceRoot: string, manifest: ExtManifest): FileChan
           agent: 'antigravity',
           before,
           after: content,
-          note: 'Antigravity 的 skill 需包成 plugin，會一併產生 plugin.json'
+          note: 'Antigravity skills must live inside a plugin — plugin.json is generated too'
         })
       }
       const pj = join(dir, 'plugin.json')
