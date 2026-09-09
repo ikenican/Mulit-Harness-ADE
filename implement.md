@@ -128,33 +128,53 @@ CLI 自身已有 permission 系統，工作台**不再疊一層**（會打架、
 ## 3. 分階段實作路線圖
 
 ### Phase 0 — 專案骨架與基本 Workbench (1-2 週)
-- [ ] 建立 Electron + React + Vite + TypeScript 專案架構。
-- [ ] 實作三欄式佈局（側邊欄、中央編輯區、右側面板）。
-- [ ] 整合 `@monaco-editor/react`，實現本機檔案開啟、編輯、保存與分頁切換。
-- [ ] 實作 Markdown 渲染器與 HTML 沙箱（`<iframe sandbox>`）預覽分頁。
+- [x] 建立 Electron + React + Vite + TypeScript 專案架構。
+- [x] 實作三欄式佈局（側邊欄、中央編輯區、右側面板）。
+- [x] 整合 `@monaco-editor/react`，實現本機檔案開啟、編輯、保存與分頁切換。
+- [x] 實作 Markdown 渲染器與 HTML 沙箱（`<iframe sandbox>`）預覽分頁。
 
 ### Phase 1 — Git 中樞與 Memory 檢視 (1 週)
-- [ ] 整合 `simple-git`，左側 Git Status 變更清單（Modified, Untracked, Staged）。
-- [ ] 點擊變更檔以 `MonacoDiffEditor` 左右比對；提供 git restore/checkout 還原。
-- [ ] 基本操作：Stage、Unstage、Commit、切分支；Git Log 列表。
-- [ ] **ShareProjectMem 檢視器**：渲染 `handoff.md` / `STATE.md` / `DECISIONS.md`，顯示共享狀態。
+- [x] 整合 `simple-git`，左側 Git Status 變更清單（Modified, Untracked, Staged）。
+- [x] 點擊變更檔以 `MonacoDiffEditor` 左右比對；提供 git restore/checkout 還原。
+- [x] 基本操作：Stage、Unstage、Commit、切分支；Git Log 列表。
+- [x] **ShareProjectMem 檢視器**：渲染 `handoff.md` / `STATE.md` / `DECISIONS.md`，顯示共享狀態。
 
 ### Phase 2 — 多 CLI 終端殼 (1 週)
-- [ ] 以 `node-pty` + `xterm.js` 實作終端分頁，能 spawn 並互動官方 CLI。
-- [ ] 設計 YAML launcher 解析器（只管「怎麼起終端」）。
-- [ ] 同時起 Claude Code / Codex / Antigravity 各一分頁，cwd 鎖 workspace。
-- [ ] 分頁待審批紅點提醒 + 中止鈕（timeout / 手動）。
+- [x] 以 `node-pty` + `xterm.js` 實作終端分頁，能 spawn 並互動官方 CLI。
+- [x] 設計 YAML launcher 解析器（只管「怎麼起終端」）。
+- [x] 同時起 Claude Code / Codex / Antigravity 各一分頁，cwd 鎖 workspace。
+- [x] 分頁待審批紅點提醒 + 中止鈕（timeout / 手動）。
 
 ### Phase 3 — 硬體 MCP 與跨機記憶 (1-2 週)
-- [ ] 將現有 Python USB 封包 / BIOS Log 腳本包成 MCP server（stdio）。
-- [ ] 建立共用 `.mcp/hardware.json`，於各 launcher 註冊給 CLI，驗證 CLI 能自行呼叫並把結果寫回 `handoff.md`。
-- [ ] 安裝 / 對接 ShareProjectMem 的 git hook 同步（`MEM_AUTOSYNC` 等），驗證跨 CLI 交棒。
+- [x] 將現有 Python USB 封包 / BIOS Log 腳本包成 MCP server（stdio）。
+- [x] 建立共用 `.mcp/hardware.json`，於各 launcher 註冊給 CLI，驗證 CLI 能自行呼叫並把結果寫回 `handoff.md`。
+- [x] 安裝 / 對接 ShareProjectMem 的 git hook 同步（`MEM_AUTOSYNC` 等），驗證跨 CLI 交棒。
 
 ### Phase 4 — 面板深度整合與體驗 (2 週)
-- [ ] 編輯器 ↔ 終端 ↔ Git ↔ Memory 全景聯動（點 handoff 提到的檔案直接開，git 變更即時反映）。
-- [ ] 多 CLI session 管理：多開、命名、切換、關閉。
-- [ ] 系統原生通知（OS Notification）：長任務完成或某終端待審批時提醒。
-- [ ] （選）針對支援結構化輸出的單一 CLI（如 Claude Code `stream-json`）加「tool timeline / 一鍵 diff」升級——**單家升級，不強求三家統一**。
+- [x] 編輯器 ↔ 終端 ↔ Git ↔ Memory 全景聯動（點 handoff 提到的檔案直接開，git 變更即時反映）。
+- [x] 多 CLI session 管理：多開、命名、切換、關閉。
+- [x] 系統原生通知（OS Notification）：長任務完成或某終端待審批時提醒。
+- [x] （選）針對支援結構化輸出的單一 CLI（如 Claude Code `stream-json`）加「tool timeline / 一鍵 diff」升級——**單家升級，不強求三家統一**。
+
+---
+
+### 已交付、但不在原規劃內的項目
+在實作過程中依實際需求追加，皆已實測：
+
+- [x] **Customized 面板**：跨 agent（Claude / Antigravity）的 Skill / MCP / Plugin 一覽與
+      同步，寫入前以 Monaco Diff 預覽；Codex 掛 Pending 佔位。
+- [x] **Connections**：憑證以 OS 金鑰加密存放，不寫進任何 agent 設定檔，
+      僅在 spawn CLI 時注入環境變數。
+- [x] **終端雙向橋接**：終端選取內容可送到另一個 session；Markdown 的 shell code block
+      可送到終端。一律 bracketed paste 貼上、不自動執行。
+- [x] **一般 shell**：PowerShell / CMD（非 Windows 為 bash / pwsh）。
+- [x] **版面可自由調整**：三欄與終端高度皆可拖曳，終端可停靠右側或底部，
+      終端支援單一／左右／上下／四宮格分割。
+- [x] **編輯器多檔分頁**：切換分頁不會弄丟未存檔的編輯。
+- [x] **Apple 設計語言 + 亮暗雙主題**；介面全英文。
+- [x] **打包發佈**：electron-builder（NSIS），產物已實測可啟動。
+
+> 目前進度與待辦以 `.project-memory/STATE.md` 為準（本檔是規劃，不是狀態）。
 
 ---
 
