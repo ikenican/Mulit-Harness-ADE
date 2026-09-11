@@ -3,8 +3,16 @@
   "version": "0.1.0",
   "description": "輕量 Agent-Native Workbench — Monaco + 多 CLI 終端殼 + ShareProjectMem",
   "main": "./out/main/index.js",
-  "author": "zkyle",
+  "author": "zkylek1212-k",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zkylek1212-k/Mulit-Harness-ADE.git"
+  },
+  "homepage": "https://github.com/zkylek1212-k/Mulit-Harness-ADE#readme",
+  "bugs": {
+    "url": "https://github.com/zkylek1212-k/Mulit-Harness-ADE/issues"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
