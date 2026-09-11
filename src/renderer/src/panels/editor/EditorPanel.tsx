@@ -1,7 +1,17 @@
 /// <reference path="../../../../preload/index.d.ts" />
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Editor, { DiffEditor, OnMount } from '@monaco-editor/react'
-import { bumpGit, closeTab, openFile, useWorkbench } from '@/store'
+import {
+  bumpGit,
+  closeTab,
+  openFile,
+  useWorkbench,
+  clearAgentModified,
+  setEditorDraft,
+  clearEditorDraft,
+  type GitCommitDiffTarget
+} from '@/store'
+import DocumentViewer, { isDocumentFile } from './DocumentViewer'
 import './EditorPanel.css'
 
 function detectLanguage(filePath: string): string {
@@ -72,17 +82,100 @@ function EmptyEditorState(): JSX.Element {
   )
 }
 
+function defineMorandiThemes(monaco: any): void {
+  monaco.editor.defineTheme('morandi-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: '', foreground: '2c3136', background: 'ece7df' },
+      { token: 'comment', foreground: '8a929a', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '53787b', fontStyle: 'bold' },
+      { token: 'string', foreground: '628367' },
+      { token: 'number', foreground: 'af6e5d' },
+      { token: 'regexp', foreground: 'af6e5d' },
+      { token: 'type', foreground: '53787b' },
+      { token: 'class', foreground: '53787b' },
+      { token: 'function', foreground: '406568' },
+      { token: 'variable', foreground: '2c3136' },
+      { token: 'constant', foreground: '9e7352' },
+      { token: 'delimiter', foreground: '788089' }
+    ],
+    colors: {
+      'editor.background': '#ece7df',
+      'editor.foreground': '#2c3136',
+      'editorCursor.foreground': '#53787b',
+      'editor.lineHighlightBackground': '#e2ddd4',
+      'editorLineNumber.foreground': '#989fa6',
+      'editorLineNumber.activeForeground': '#2c3136',
+      'editor.selectionBackground': '#cfc7b9',
+      'editor.inactiveSelectionBackground': '#ded8cd',
+      'editorIndentGuide.background': '#dcd6ca',
+      'editorIndentGuide.activeBackground': '#b5ad9e',
+      'editorWhitespace.foreground': '#d2ccc0'
+    }
+  })
+
+  monaco.editor.defineTheme('morandi-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: '', foreground: 'e2ded6', background: '1c2023' },
+      { token: 'comment', foreground: '717a82', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '79a3a3', fontStyle: 'bold' },
+      { token: 'string', foreground: '8fae92' },
+      { token: 'number', foreground: 'cf8d7e' },
+      { token: 'regexp', foreground: 'cf8d7e' },
+      { token: 'type', foreground: '79a3a3' },
+      { token: 'class', foreground: '79a3a3' },
+      { token: 'function', foreground: '92b5b5' },
+      { token: 'variable', foreground: 'e2ded6' },
+      { token: 'constant', foreground: 'd4a37e' },
+      { token: 'delimiter', foreground: 'a0a7ad' }
+    ],
+    colors: {
+      'editor.background': '#1c2023',
+      'editor.foreground': '#e2ded6',
+      'editorCursor.foreground': '#79a3a3',
+      'editor.lineHighlightBackground': '#252a2f',
+      'editorLineNumber.foreground': '#646d76',
+      'editorLineNumber.activeForeground': '#e2ded6',
+      'editor.selectionBackground': '#3a444c',
+      'editor.inactiveSelectionBackground': '#2d353b',
+      'editorIndentGuide.background': '#2b3137',
+      'editorIndentGuide.activeBackground': '#454e56',
+      'editorWhitespace.foreground': '#31373e'
+    }
+  })
+}
+
+function getMonacoTheme(theme?: string): string {
+  switch (theme) {
+    case 'light':
+      return 'light'
+    case 'light-morandi':
+      return 'morandi-light'
+    case 'dark-morandi':
+      return 'morandi-dark'
+    case 'dark':
+    default:
+      return 'vs-dark'
+  }
+}
+
 export default function EditorPanel(): JSX.Element {
   const workbench = useWorkbench() as {
     activeFilePath: string | null
     viewMode: 'edit' | 'diff'
     gitTick: number
     openTabs: string[]
-    theme?: 'light' | 'dark'
+    theme?: string
+    agentModifiedFiles?: Set<string>
+    fileReloadTick?: Record<string, number>
+    activeCommitDiff?: GitCommitDiffTarget | null
   }
 
-  const { activeFilePath, viewMode, gitTick, openTabs } = workbench
-  const monacoTheme = workbench.theme === 'light' ? 'light' : 'vs-dark'
+  const { activeFilePath, viewMode, gitTick, openTabs, agentModifiedFiles, fileReloadTick, activeCommitDiff } = workbench
+  const monacoTheme = getMonacoTheme(workbench.theme)
 
   // 每個檔一份 model：切換分頁不會弄丟尚未存檔的編輯
   const [models, setModels] = useState<Record<string, { content: string; initial: string }>>({})
@@ -126,6 +219,7 @@ export default function EditorPanel(): JSX.Element {
       setError(null)
       await window.api.files.write(activeFilePath, currentText)
       bumpGit()
+      setEditorDraft(activeFilePath, currentText)
       setModels((m) => ({
         ...m,
         [activeFilePath]: { content: currentText, initial: currentText }
@@ -173,6 +267,13 @@ export default function EditorPanel(): JSX.Element {
       return
     }
 
+    // 若為 Office 或 PDF 等二進位文件，不進行文字讀取，由 DocumentViewer 處理
+    if (isDocumentFile(activeFilePath)) {
+      setLoading(false)
+      setError(null)
+      return
+    }
+
     let isMounted = true
 
     const loadData = async (): Promise<void> => {
@@ -188,12 +289,21 @@ export default function EditorPanel(): JSX.Element {
           }
           const text = await window.api.files.read(activeFilePath)
           if (isMounted) {
+            setEditorDraft(activeFilePath, text)
             setModels((m) => ({ ...m, [activeFilePath]: { content: text, initial: text } }))
+            if (agentModifiedFiles?.has(activeFilePath)) {
+              setSaveMessage('Updated by Agent')
+              setTimeout(() => setSaveMessage(null), 2200)
+            }
           }
         } else if (viewMode === 'diff') {
-          const diff = await window.api.git.diff(activeFilePath)
-          if (isMounted) {
-            setDiffData(diff || { head: '', work: '' })
+          if (activeCommitDiff) {
+            const { commitHash, filePath, parentHash } = activeCommitDiff
+            const d = await window.api.git.commitFileDiff(commitHash, filePath, parentHash)
+            if (isMounted) setDiffData({ head: d.original, work: d.modified })
+          } else {
+            const diff = await window.api.git.diff(activeFilePath)
+            if (isMounted) setDiffData(diff || { head: '', work: '' })
           }
         }
       } catch (err: unknown) {
@@ -213,7 +323,7 @@ export default function EditorPanel(): JSX.Element {
     return () => {
       isMounted = false
     }
-  }, [activeFilePath, viewMode, gitTick])
+  }, [activeFilePath, viewMode, gitTick, activeCommitDiff, fileReloadTick?.[activeFilePath || '']])
 
   const handleContentChange = (value?: string): void => {
     if (!activeFilePath) return
@@ -222,6 +332,7 @@ export default function EditorPanel(): JSX.Element {
       ...m,
       [activeFilePath]: { content: nextVal, initial: m[activeFilePath]?.initial ?? nextVal }
     }))
+    setEditorDraft(activeFilePath, nextVal)
   }
 
   // 關分頁；有未存檔編輯先問一次，避免默默丟掉工作
@@ -231,6 +342,7 @@ export default function EditorPanel(): JSX.Element {
       const name = path.split(/[\\/]/).pop()
       if (!window.confirm(`“${name}” has unsaved changes. Close it anyway?`)) return
     }
+    clearEditorDraft(path)
     setModels((m) => {
       const next = { ...m }
       delete next[path]
@@ -243,8 +355,9 @@ export default function EditorPanel(): JSX.Element {
     return <EmptyEditorState />
   }
 
-  const language = detectLanguage(activeFilePath)
-  const fileName = activeFilePath.split(/[\\/]/).pop() || activeFilePath
+  const diffPath = activeCommitDiff?.filePath || activeFilePath
+  const language = detectLanguage(diffPath)
+  const fileName = diffPath.split(/[\\/]/).pop() || diffPath
 
   return (
     <div className="editor-container">
@@ -252,14 +365,23 @@ export default function EditorPanel(): JSX.Element {
         <div className="editor-tabs">
           {openTabs.map((p) => {
             const name = p.split(/[\\/]/).pop() || p
+            const isAgentMod = agentModifiedFiles?.has(p)
             return (
               <div
                 key={p}
-                className={`editor-tab ${p === activeFilePath ? 'on' : ''}`}
-                onClick={() => openFile(p)}
-                title={p}
+                className={`editor-tab ${p === activeFilePath ? 'on' : ''} ${isAgentMod ? 'agent-modified' : ''}`}
+                onClick={() => {
+                  openFile(p)
+                  clearAgentModified(p)
+                }}
+                title={isAgentMod ? `${p} (Recently modified by Agent)` : p}
               >
                 <span className="editor-tab-name">{name}</span>
+                {isAgentMod && (
+                  <span className="editor-tab-agent-badge" title="Modified by Agent">
+                    Agent
+                  </span>
+                )}
                 {dirtyPaths.has(p) && <span className="editor-tab-dot" title="Unsaved changes" />}
                 <button
                   className="editor-tab-close"
@@ -273,125 +395,146 @@ export default function EditorPanel(): JSX.Element {
           })}
         </div>
       )}
-      <div className="editor-header">
-        <div className="editor-header-left">
-          <span
-            className={`editor-badge ${
-              viewMode === 'edit' ? 'badge-edit' : 'badge-diff'
-            }`}
-          >
-            {viewMode === 'edit' ? 'Edit' : 'Diff'}
-          </span>
-          <div className="editor-filename-wrapper" title={activeFilePath}>
-            <span className="editor-filename">{fileName}</span>
-            {viewMode === 'edit' && isDirty && (
-              <span className="editor-dirty-dot" title="Unsaved changes" />
+
+      {activeFilePath && isDocumentFile(activeFilePath) && viewMode === 'edit' ? (
+        <DocumentViewer filePath={activeFilePath} />
+      ) : (
+        <>
+          <div className="editor-header">
+            <div className="editor-header-left">
+              <span
+                className={`editor-badge ${
+                  viewMode === 'edit' ? 'badge-edit' : 'badge-diff'
+                }`}
+              >
+                {viewMode === 'edit' ? 'Edit' : 'Diff'}
+              </span>
+              <div className="editor-filename-wrapper" title={activeFilePath}>
+                <span className="editor-filename">{fileName}</span>
+                {viewMode === 'edit' && isDirty && (
+                  <span className="editor-dirty-dot" title="Unsaved changes" />
+                )}
+              </div>
+            </div>
+
+            <div className="editor-header-right">
+              {saveMessage && <span className="editor-save-badge">{saveMessage}</span>}
+              <span className="editor-lang-tag">{language}</span>
+              {viewMode === 'edit' && (
+                <button
+                  className="editor-btn-save"
+                  onClick={handleSave}
+                  disabled={isSaving || !isDirty}
+                  title="Save file (Ctrl+S / Cmd+S)"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                    <polyline points="17 21 17 13 7 13 7 21" />
+                    <polyline points="7 3 7 8 15 8" />
+                  </svg>
+                  <span>{isSaving ? 'Saving…' : 'Save'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="editor-error-bar">
+              <span>{error}</span>
+              <button
+                className="editor-btn-save"
+                style={{ padding: '2px 8px', fontSize: '11px' }}
+                onClick={() => {
+                  if (viewMode === 'edit') {
+                    window.api.files.read(activeFilePath).then((t) => {
+                      setModels((m) => ({ ...m, [activeFilePath]: { content: t, initial: t } }))
+                      setError(null)
+                    }).catch(() => {})
+                  } else if (activeCommitDiff) {
+                    window.api.git
+                      .commitFileDiff(
+                        activeCommitDiff.commitHash,
+                        activeCommitDiff.filePath,
+                        activeCommitDiff.parentHash
+                      )
+                      .then((d) => {
+                        setDiffData({ head: d.original, work: d.modified })
+                        setError(null)
+                      })
+                      .catch(() => {})
+                  } else {
+                    window.api.git.diff(activeFilePath).then((d) => {
+                      setDiffData(d)
+                      setError(null)
+                    }).catch(() => {})
+                  }
+                }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          <div className="editor-body">
+            {loading && (
+              <div className="editor-loading-overlay">
+                <span>Loading…</span>
+              </div>
+            )}
+
+            {viewMode === 'edit' ? (
+              <Editor
+                path={activeFilePath}
+                value={content}
+                language={language}
+                theme={monacoTheme}
+                beforeMount={defineMorandiThemes}
+                onMount={handleEditorDidMount}
+                onChange={handleContentChange}
+                options={{
+                  fontSize: 13,
+                  fontFamily: "'SF Mono', Monaco, Menlo, Consolas, 'Courier New', monospace",
+                  tabSize: 2,
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  minimap: { enabled: true, maxColumn: 80 },
+                  smoothScrolling: true,
+                  cursorBlinking: 'smooth',
+                  wordWrap: 'on',
+                  renderLineHighlight: 'all',
+                  roundedSelection: true
+                }}
+              />
+            ) : (
+              <DiffEditor
+                original={diffData.head}
+                modified={diffData.work}
+                language={language}
+                theme={monacoTheme}
+                beforeMount={defineMorandiThemes}
+                options={{
+                  readOnly: true,
+                  fontSize: 13,
+                  fontFamily: "'SF Mono', Monaco, Menlo, Consolas, 'Courier New', monospace",
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  renderSideBySide: true,
+                  smoothScrolling: true
+                }}
+              />
             )}
           </div>
-        </div>
-
-        <div className="editor-header-right">
-          {saveMessage && <span className="editor-save-badge">{saveMessage}</span>}
-          <span className="editor-lang-tag">{language}</span>
-          {viewMode === 'edit' && (
-            <button
-              className="editor-btn-save"
-              onClick={handleSave}
-              disabled={isSaving || !isDirty}
-              title="Save file (Ctrl+S / Cmd+S)"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                <polyline points="17 21 17 13 7 13 7 21" />
-                <polyline points="7 3 7 8 15 8" />
-              </svg>
-              <span>{isSaving ? 'Saving…' : 'Save'}</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {error && (
-        <div className="editor-error-bar">
-          <span>{error}</span>
-          <button
-            className="editor-btn-save"
-            style={{ padding: '2px 8px', fontSize: '11px' }}
-            onClick={() => {
-              if (viewMode === 'edit') {
-                window.api.files.read(activeFilePath).then((t) => {
-                  setModels((m) => ({ ...m, [activeFilePath]: { content: t, initial: t } }))
-                  setError(null)
-                }).catch(() => {})
-              } else {
-                window.api.git.diff(activeFilePath).then((d) => {
-                  setDiffData(d)
-                  setError(null)
-                }).catch(() => {})
-              }
-            }}
-          >
-            Retry
-          </button>
-        </div>
+        </>
       )}
-
-      <div className="editor-body">
-        {loading && (
-          <div className="editor-loading-overlay">
-            <span>Loading…</span>
-          </div>
-        )}
-
-        {viewMode === 'edit' ? (
-          <Editor
-            path={activeFilePath}
-            value={content}
-            language={language}
-            theme={monacoTheme}
-            onMount={handleEditorDidMount}
-            onChange={handleContentChange}
-            options={{
-              fontSize: 13,
-              fontFamily: "'SF Mono', Monaco, Menlo, Consolas, 'Courier New', monospace",
-              tabSize: 2,
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              minimap: { enabled: true, maxColumn: 80 },
-              smoothScrolling: true,
-              cursorBlinking: 'smooth',
-              wordWrap: 'on',
-              renderLineHighlight: 'all',
-              roundedSelection: true
-            }}
-          />
-        ) : (
-          <DiffEditor
-            original={diffData.head}
-            modified={diffData.work}
-            language={language}
-            theme={monacoTheme}
-            options={{
-              readOnly: true,
-              fontSize: 13,
-              fontFamily: "'SF Mono', Monaco, Menlo, Consolas, 'Courier New', monospace",
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              renderSideBySide: true,
-              smoothScrolling: true
-            }}
-          />
-        )}
-      </div>
     </div>
   )
 }
