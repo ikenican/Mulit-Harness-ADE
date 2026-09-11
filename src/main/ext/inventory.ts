@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import { join } from 'path'
 import * as yaml from 'js-yaml'
-import { AGENT_PATHS, findCli } from './paths'
+import { AGENT_PATHS, findCli, findAgentCli } from './paths'
 import type {
   AgentId,
   AgentStatus,
@@ -71,49 +71,99 @@ function scanClaude(workspaceRoot: string): Found[] {
   const P = AGENT_PATHS.claude
   const out: Found[] = []
 
-  // skills：~/.claude/skills/<n>/SKILL.md
-  for (const d of listDirs(P.skillsDir!)) {
-    const md = join(P.skillsDir!, d, 'SKILL.md')
-    if (!fs.existsSync(md)) continue
-    const fm = parseSkillMd(md)
-    out.push({
-      kind: 'skill',
-      id: norm(fm.name || d),
-      name: fm.name || d,
-      description: fm.description,
-      version: fm.version,
-      agent: 'claude',
-      state: 'installed',
-      detail: md
-    })
+  // 1. Standalone skills：~/.claude/skills/<n>/SKILL.md
+  if (P.skillsDir && fs.existsSync(P.skillsDir)) {
+    for (const d of listDirs(P.skillsDir)) {
+      const md = join(P.skillsDir, d, 'SKILL.md')
+      if (!fs.existsSync(md)) continue
+      const fm = parseSkillMd(md)
+      out.push({
+        kind: 'skill',
+        id: norm(fm.name || d),
+        name: fm.name || d,
+        description: fm.description,
+        version: fm.version,
+        agent: 'claude',
+        state: 'installed',
+        detail: md
+      })
+    }
   }
 
-  // plugins：~/.claude/plugins/installed_plugins.json
-  const inst = readJson<Record<string, unknown>>(
-    join(P.pluginsDir!, 'installed_plugins.json'),
-    {}
-  )
-  const collectPlugins = (v: unknown, prefix = ''): void => {
-    if (Array.isArray(v)) {
-      v.forEach((x) => typeof x === 'string' && out.push(mkPlugin(x, prefix)))
-    } else if (v && typeof v === 'object') {
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-        if (Array.isArray(val) || (val && typeof val === 'object')) collectPlugins(val, k)
-        else out.push(mkPlugin(k, prefix))
+  // 2. Plugins & Plugin Skills / MCPs:
+  // ~/.claude/plugins/installed_plugins.json
+  const settingsPath = join(P.configHome, 'settings.json')
+  const settings = readJson<{ enabledPlugins?: Record<string, boolean> }>(settingsPath, {})
+  const enabledMap = settings.enabledPlugins || {}
+
+  const instPath = join(P.pluginsDir!, 'installed_plugins.json')
+  if (fs.existsSync(instPath)) {
+    const rawInst = readJson<{ plugins?: Record<string, unknown> } & Record<string, unknown>>(instPath, {})
+    const pluginsMap = (rawInst.plugins && typeof rawInst.plugins === 'object' ? rawInst.plugins : rawInst) as Record<string, unknown>
+
+    for (const [pluginKey, installs] of Object.entries(pluginsMap)) {
+      if (pluginKey === 'version') continue
+      const installList = Array.isArray(installs) ? installs : [installs]
+      const firstInstall = installList[0] as { installPath?: string; version?: string } | undefined
+      const isEnabled = enabledMap[pluginKey] !== false
+      const pluginName = pluginKey.includes('@') ? pluginKey.split('@')[0] : pluginKey
+      const marketplace = pluginKey.includes('@') ? pluginKey.split('@')[1] : ''
+
+      out.push({
+        kind: 'plugin',
+        id: norm(pluginName),
+        name: pluginKey,
+        description: marketplace ? `marketplace: ${marketplace}${isEnabled ? '' : ' (disabled)'}` : undefined,
+        version: firstInstall?.version,
+        agent: 'claude',
+        state: 'installed',
+        detail: firstInstall?.installPath
+      })
+
+      // 讀取該 plugin 附帶的 skills: <installPath>/skills/<subskill>/SKILL.md
+      if (firstInstall?.installPath && fs.existsSync(firstInstall.installPath)) {
+        const pSkillsDir = join(firstInstall.installPath, 'skills')
+        if (fs.existsSync(pSkillsDir)) {
+          for (const sub of listDirs(pSkillsDir)) {
+            const md = join(pSkillsDir, sub, 'SKILL.md')
+            if (fs.existsSync(md)) {
+              const fm = parseSkillMd(md)
+              out.push({
+                kind: 'skill',
+                id: norm(fm.name || sub),
+                name: fm.name || sub,
+                description: fm.description || `Provided by plugin ${pluginName}`,
+                version: fm.version || firstInstall.version,
+                agent: 'claude',
+                state: 'installed',
+                detail: `plugin: ${pluginKey}`
+              })
+            }
+          }
+        }
+
+        // 讀取該 plugin 附帶的 MCP: <installPath>/.mcp.json
+        const pMcpPath = join(firstInstall.installPath, '.mcp.json')
+        if (fs.existsSync(pMcpPath)) {
+          const pMcp = readJson<{ mcpServers?: Record<string, unknown> }>(pMcpPath, {})
+          for (const [mcpName, mcpVal] of Object.entries(pMcp.mcpServers || {})) {
+            const cfg = mcpVal as { command?: string; url?: string }
+            out.push({
+              kind: 'mcp',
+              id: norm(mcpName),
+              name: mcpName,
+              description: cfg?.command || cfg?.url || `Plugin MCP: ${pluginName}`,
+              agent: 'claude',
+              state: 'installed',
+              detail: `plugin: ${pluginKey}`
+            })
+          }
+        }
       }
     }
   }
-  const mkPlugin = (name: string, marketplace: string): Found => ({
-    kind: 'plugin',
-    id: norm(name),
-    name,
-    description: marketplace ? `marketplace: ${marketplace}` : undefined,
-    agent: 'claude',
-    state: 'installed'
-  })
-  collectPlugins(inst)
 
-  // MCP：全域 ~/.claude.json 與專案 .mcp.json
+  // 3. MCP：全域 ~/.claude.json 與專案 .mcp.json
   const pushMcp = (servers: Record<string, unknown>, where: string): void => {
     for (const [k, v] of Object.entries(servers || {})) {
       const cfg = v as { command?: string; url?: string }
@@ -128,8 +178,7 @@ function scanClaude(workspaceRoot: string): Found[] {
       })
     }
   }
-  // Claude Code 的 MCP 有三處：~/.claude.json 頂層（全域）、
-  // 同檔 projects[<工作區>].mcpServers（該專案），以及專案的 .mcp.json。
+
   const claudeJson = readJson<{
     mcpServers?: Record<string, unknown>
     projects?: Record<string, { mcpServers?: Record<string, unknown> }>
@@ -137,10 +186,14 @@ function scanClaude(workspaceRoot: string): Found[] {
   pushMcp(claudeJson.mcpServers || {}, '~/.claude.json (global)')
 
   const wsKey = workspaceRoot.replace(/\\/g, '/').toLowerCase()
+  const wsBasename = workspaceRoot.split(/[\\/]/).pop()?.toLowerCase() || ''
   for (const [proj, cfg] of Object.entries(claudeJson.projects || {})) {
-    if (proj.replace(/\\/g, '/').toLowerCase() !== wsKey) continue
-    pushMcp(cfg.mcpServers || {}, '~/.claude.json (this project)')
+    const pKey = proj.replace(/\\/g, '/').toLowerCase()
+    if (pKey === wsKey || (wsBasename && pKey.includes(wsBasename))) {
+      pushMcp(cfg.mcpServers || {}, '~/.claude.json (this project)')
+    }
   }
+
   const proj = readJson<{ mcpServers?: Record<string, unknown> }>(
     join(workspaceRoot, '.mcp.json'),
     {}
@@ -272,7 +325,7 @@ export function buildInventory(workspaceRoot: string, managedIds: Set<string>): 
 export function buildAgentStatus(workspaceRoot: string, items: ExtItem[]): AgentStatus[] {
   return AGENTS.map((id) => {
     const P = AGENT_PATHS[id]
-    const cliPath = findCli(P.cli)
+    const cliPath = findAgentCli(id)
     const notes: string[] = []
 
     const counts = { skill: 0, mcp: 0, plugin: 0 }

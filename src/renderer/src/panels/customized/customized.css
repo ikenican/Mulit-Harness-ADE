@@ -11,6 +11,54 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.cz-rescan-icon {
+  display: inline-block;
+  font-weight: bold;
+  transition: transform 0.2s ease;
+}
+@keyframes czSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.cz-rescan-icon.cz-spinning {
+  animation: czSpin 0.7s linear infinite;
+}
+.cz-scan-status {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  animation: fadeIn 0.3s ease;
+}
+.cz-scan-status.scanning {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cz-scan-status.done {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+}
+.cz-install-codex {
+  margin-top: 6px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+.cz-install-codex:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+.cz-install-codex:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .cz-hint {
   color: var(--fg-dim);
   font-size: 11px;
@@ -29,8 +77,8 @@
 /* agent 狀態卡 */
 .cz-agents {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
 }
 .cz-agent-card {
   border: 1px solid var(--border);
@@ -40,10 +88,22 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  height: 140px;
+  min-height: 140px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .cz-agent-card.pending {
   opacity: 0.68;
   border-style: dashed;
+}
+.cz-agent-card-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .cz-agent-head {
   display: flex;
@@ -144,6 +204,13 @@
   gap: 7px;
   font-weight: 500;
   font-size: 12.5px;
+  min-width: 0;
+}
+.cz-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 .cz-ver {
   font-size: 10px;
@@ -188,9 +255,9 @@
 /* 三家狀態燈 */
 .cz-item-agents {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   flex: 0 0 auto;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
 }
 .cz-chip {
@@ -198,11 +265,15 @@
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  padding: 2px 7px;
+  padding: 2px 6px;
   border-radius: 999px;
   border: 1px solid var(--border);
   color: var(--fg-dim);
   white-space: nowrap;
+}
+.cz-chip-name {
+  font-size: 10px;
+  font-weight: 500;
 }
 .cz-chip em {
   font-style: normal;
@@ -333,4 +404,58 @@
 .cz-modal-diff {
   flex: 1;
   min-height: 0;
+}
+
+/* Toggle Switch for Skills / MCP / Plugins */
+.cz-item.is-disabled {
+  opacity: 0.55;
+  filter: grayscale(40%);
+}
+.cz-item-actions {
+  display: flex;
+  align-items: center;
+  margin-left: 10px;
+  flex: 0 0 auto;
+}
+.cz-toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+.cz-toggle-switch.on {
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg2));
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.cz-toggle-switch.off {
+  background: color-mix(in srgb, var(--fg-dim) 10%, var(--bg2));
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+}
+.cz-toggle-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+.cz-toggle-switch.on .cz-toggle-thumb {
+  background: var(--accent);
+  transform: translateX(2px);
+}
+.cz-toggle-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--fg-dim);
+}
+.cz-toggle-switch.on .cz-toggle-label {
+  color: var(--accent);
 }

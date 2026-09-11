@@ -12,7 +12,24 @@ const api = {
     list: (dir: string): Promise<FsEntry[]> => ipcRenderer.invoke('files:list', dir),
     exists: (path: string): Promise<boolean> => ipcRenderer.invoke('files:exists', path),
     workspaceRoot: (): Promise<string> => ipcRenderer.invoke('files:workspaceRoot'),
-    pickWorkspace: (): Promise<string | null> => ipcRenderer.invoke('files:pickWorkspace')
+    pickWorkspace: (): Promise<string | null> => ipcRenderer.invoke('files:pickWorkspace'),
+    openExternal: (path: string, customToolPath?: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('files:openExternal', path, customToolPath),
+    showInFolder: (path: string): Promise<void> => ipcRenderer.invoke('files:showInFolder', path),
+    stat: (path: string): Promise<FileStat> => ipcRenderer.invoke('files:stat', path),
+    pickExecutable: (title?: string): Promise<string | null> =>
+      ipcRenderer.invoke('files:pickExecutable', title),
+    detectDocTools: (): Promise<DocToolPaths> => ipcRenderer.invoke('files:detectDocTools'),
+    onExternalChange: (
+      cb: (info: { path: string; relativePath: string; eventType: string }) => void
+    ): (() => void) => {
+      const listener = (
+        _event: unknown,
+        info: { path: string; relativePath: string; eventType: string }
+      ): void => cb(info)
+      ipcRenderer.on('files:externalChange', listener)
+      return () => ipcRenderer.removeListener('files:externalChange', listener)
+    }
   },
   // OS 原生通知 —— main/ipc/notify.ts
   notify: {
@@ -26,7 +43,10 @@ const api = {
     saveManifest: (m: ExtManifest): Promise<void> => ipcRenderer.invoke('ext:saveManifest', m),
     planSync: (): Promise<FileChange[]> => ipcRenderer.invoke('ext:planSync'),
     applySync: (): Promise<{ written: string[] }> => ipcRenderer.invoke('ext:applySync'),
-    trustWorkspace: (): Promise<boolean> => ipcRenderer.invoke('ext:trustWorkspace')
+    trustWorkspace: (): Promise<boolean> => ipcRenderer.invoke('ext:trustWorkspace'),
+    installCodex: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('ext:installCodex'),
+    toggleItem: (kind: string, id: string, enabled: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('ext:toggleItem', kind, id, enabled)
   },
   // 連線憑證（值只進 OS 加密儲存，不回傳給 renderer）—— main/ipc/conn.ts
   conn: {
@@ -35,10 +55,27 @@ const api = {
       ipcRenderer.invoke('conn:set', name, value),
     remove: (name: string): Promise<void> => ipcRenderer.invoke('conn:remove', name)
   },
+  // 設定管理（CLI 路徑等）—— main/ipc/settings.ts
+  settings: {
+    get: (): Promise<WorkbenchSettings> => ipcRenderer.invoke('settings:get'),
+    set: (patch: Partial<WorkbenchSettings>): Promise<WorkbenchSettings> =>
+      ipcRenderer.invoke('settings:set', patch),
+    testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
+      ipcRenderer.invoke('settings:testCliPath', path)
+  },
+  // 儀表板與使用量統計 —— main/ipc/dashboard.ts
+  dashboard: {
+    data: (): Promise<DashboardData> => ipcRenderer.invoke('dashboard:data'),
+    archiveSession: (sessionId: string, archive: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:archiveSession', sessionId, archive),
+    deleteSession: (sessionId: string): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:deleteSession', sessionId)
+  },
   // Git —— main/ipc/git.ts
   git: {
     status: (): Promise<GitStatus> => ipcRenderer.invoke('git:status'),
     log: (limit?: number): Promise<GitCommit[]> => ipcRenderer.invoke('git:log', limit),
+    graph: (limit?: number): Promise<GitGraphNode[]> => ipcRenderer.invoke('git:graph', limit),
     diff: (path: string): Promise<{ head: string; work: string }> =>
       ipcRenderer.invoke('git:diff', path),
     stage: (path: string): Promise<void> => ipcRenderer.invoke('git:stage', path),
@@ -47,12 +84,22 @@ const api = {
     restore: (path: string): Promise<void> => ipcRenderer.invoke('git:restore', path),
     branches: (): Promise<{ current: string; all: string[] }> =>
       ipcRenderer.invoke('git:branches'),
-    checkout: (branch: string): Promise<void> => ipcRenderer.invoke('git:checkout', branch)
+    checkout: (branch: string): Promise<void> => ipcRenderer.invoke('git:checkout', branch),
+    commitDetails: (hash: string): Promise<GitCommitDetail> =>
+      ipcRenderer.invoke('git:commitDetails', hash),
+    commitFileDiff: (
+      hash: string,
+      filePath: string,
+      parentHash?: string
+    ): Promise<{ original: string; modified: string }> =>
+      ipcRenderer.invoke('git:commitFileDiff', hash, filePath, parentHash)
   },
   // CLI 終端殼（node-pty）—— main/ipc/pty.ts
   pty: {
     spawn: (opts: PtySpawnOptions): Promise<string> => ipcRenderer.invoke('pty:spawn', opts),
     write: (id: string, data: string): void => ipcRenderer.send('pty:write', id, data),
+    pipe: (fromId: string, toId: string, text: string): Promise<boolean> =>
+      ipcRenderer.invoke('pty:pipe', fromId, toId, text),
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id: string): void => ipcRenderer.send('pty:kill', id),
@@ -70,6 +117,18 @@ const api = {
     },
     // 讀取 agents/*.yaml launcher 定義
     launchers: (): Promise<CliLauncher[]> => ipcRenderer.invoke('pty:launchers')
+  },
+  // 視窗管理（獨立彈出終端等）
+  window: {
+    detachTerminal: (): Promise<boolean> => ipcRenderer.invoke('window:openTerminalWindow'),
+    attachTerminal: (): Promise<boolean> => ipcRenderer.invoke('window:closeTerminalWindow'),
+    setTitleBarTheme: (theme: 'light' | 'dark'): Promise<boolean> =>
+      ipcRenderer.invoke('window:setTitleBarTheme', theme),
+    onTerminalAttached: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('terminal:attached', listener)
+      return () => ipcRenderer.removeListener('terminal:attached', listener)
+    }
   }
 }
 
@@ -101,6 +160,120 @@ export interface GitCommit {
   message: string
   author: string
 }
+
+export interface GitGraphNode {
+  hash: string
+  parents: string[]
+  author: string
+  date: string
+  refs: string[]
+  message: string
+}
+
+export interface GitCommitFileChange {
+  path: string
+  status: string
+}
+
+export interface GitCommitDetail {
+  hash: string
+  fullHash: string
+  parents: string[]
+  author: string
+  date: string
+  message: string
+  files: GitCommitFileChange[]
+}
+
+export interface DocToolPaths {
+  word?: string
+  excel?: string
+  powerpoint?: string
+  pdf?: string
+  [key: string]: string | undefined
+}
+
+export interface FileStat {
+  size: number
+  mtime: string
+  isFile: boolean
+}
+
+export interface WorkbenchSettings {
+  cliPaths: {
+    claude?: string
+    antigravity?: string
+    codex?: string
+    powershell?: string
+    cmd?: string
+    [key: string]: string | undefined
+  }
+  cliEnabled?: {
+    claude?: boolean
+    antigravity?: boolean
+    codex?: boolean
+    powershell?: boolean
+    cmd?: boolean
+    [key: string]: boolean | undefined
+  }
+  docToolPaths?: DocToolPaths
+  autoOpenAgentModifiedFiles?: boolean
+}
+
+export interface SessionTokenBreakdown {
+  promptTokens: number
+  toolReadTokens: number
+  completionTokens: number
+  details: {
+    category: string
+    tokens: number
+    percentage: number
+  }[]
+}
+
+export interface AgentSessionInfo {
+  id: string
+  agent: AgentId
+  title: string
+  status: 'active' | 'waiting_approval' | 'idle' | 'completed' | 'error'
+  startTime: string
+  lastActiveTime: string
+  totalTokens: number
+  tokenBreakdown: SessionTokenBreakdown
+  model?: string
+  isArchived?: boolean
+  workspace?: string
+  workspacePath?: string
+}
+
+export interface WindowUsage {
+  usedPct: number
+  resetsAt?: string | null
+  resetsInSeconds?: number | null
+  tokens?: number
+  label?: string
+}
+
+export interface AgentUsageSummary {
+  agent: AgentId
+  label: string
+  totalSessions: number
+  activeSessions: number
+  totalTokens: number
+  promptTokens: number
+  toolTokens: number
+  completionTokens: number
+  usedPct?: number
+  quotaLimit?: number
+  fiveHour?: WindowUsage
+  weekly?: WindowUsage
+}
+
+export interface DashboardData {
+  agents: Record<AgentId, AgentUsageSummary>
+  sessions: AgentSessionInfo[]
+}
+
 export interface CliLauncher {
   id: string
   name: string
@@ -138,6 +311,7 @@ export interface ExtItem {
   agents: AgentSupport[]
   /** 需要的連線憑證名稱（來自 env 的 ${conn:x} 佔位） */
   needsConnection?: string[]
+  enabled?: boolean
 }
 
 export interface AgentStatus {

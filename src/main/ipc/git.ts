@@ -3,7 +3,13 @@ import simpleGit from 'simple-git'
 import path from 'path'
 import fs from 'fs/promises'
 import { workspace } from '../index'
-import type { GitStatus, GitCommit, GitFileChange } from '../../preload/index'
+import type {
+  GitStatus,
+  GitCommit,
+  GitFileChange,
+  GitCommitDetail,
+  GitCommitFileChange
+} from '../../preload/index'
 
 export function registerGitHandlers(): void {
   const getGit = () => simpleGit(workspace.root)
@@ -64,6 +70,47 @@ export function registerGitHandlers(): void {
         return []
       }
       throw new Error(`git:log failed: ${msg}`)
+    }
+  })
+
+  // git:graph (limit=60) -> GitGraphNode[]
+  ipcMain.handle('git:graph', async (_event, limit?: number) => {
+    try {
+      const git = getGit()
+      const isRepo = await git.checkIsRepo()
+      if (!isRepo) return []
+
+      const maxCount = typeof limit === 'number' && limit > 0 ? limit : 60
+      const raw = await git.raw([
+        'log',
+        '--date=short',
+        '--format=%h%x09%p%x09%an%x09%ad%x09%d%x09%s',
+        '-n',
+        String(maxCount)
+      ])
+
+      const lines = raw.trim().split(/\r?\n/).filter(Boolean)
+      return lines.map((line) => {
+        const parts = line.split('\t')
+        const hash = parts[0] || ''
+        const parents = parts[1] ? parts[1].trim().split(/\s+/).filter(Boolean) : []
+        const author = parts[2] || ''
+        const date = parts[3] || ''
+        const rawRefs = parts[4] ? parts[4].trim().replace(/^\(|\)$/g, '') : ''
+        const refs = rawRefs ? rawRefs.split(',').map((r) => r.trim()).filter(Boolean) : []
+        const message = parts.slice(5).join('\t') || ''
+
+        return {
+          hash,
+          parents,
+          author,
+          date,
+          refs,
+          message
+        }
+      })
+    } catch {
+      return []
     }
   })
 
@@ -185,4 +232,115 @@ export function registerGitHandlers(): void {
       throw new Error(`git:checkout failed: ${msg}`)
     }
   })
+
+  // git:commitDetails (hash) -> GitCommitDetail
+  ipcMain.handle('git:commitDetails', async (_event, hash: string): Promise<GitCommitDetail> => {
+    try {
+      const git = getGit()
+      const raw = await git.raw([
+        'show',
+        '--name-status',
+        '--format=%H%x09%P%x09%an%x09%ad%x09%s',
+        '-n',
+        '1',
+        hash
+      ])
+      const lines = raw.trim().split(/\r?\n/)
+      if (lines.length === 0) {
+        throw new Error('Commit not found')
+      }
+      const headerParts = lines[0].split('\t')
+      const fullHash = headerParts[0] || hash
+      const parents = headerParts[1] ? headerParts[1].trim().split(/\s+/).filter(Boolean) : []
+      const author = headerParts[2] || ''
+      const date = headerParts[3] || ''
+      const message = headerParts.slice(4).join('\t') || ''
+
+      const files: GitCommitFileChange[] = []
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim()
+        if (!line) continue
+        const parts = line.split('\t')
+        if (parts.length >= 2) {
+          const rawStatus = parts[0].trim()
+          const status = rawStatus[0] || 'M'
+          const filePath = (parts[2] || parts[1]).replace(/\\/g, '/')
+          files.push({ path: filePath, status })
+        }
+      }
+
+      return {
+        hash: fullHash.slice(0, 7),
+        fullHash,
+        parents,
+        author,
+        date,
+        message,
+        files
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`git:commitDetails failed: ${msg}`)
+    }
+  })
+
+  // git:commitFileDiff (hash, filePath, parentHash?) -> { original: string; modified: string }
+  ipcMain.handle(
+    'git:commitFileDiff',
+    async (
+      _event,
+      hash: string,
+      filePath: string,
+      parentHash?: string
+    ): Promise<{ original: string; modified: string }> => {
+      try {
+        const git = getGit()
+        let relPath = path.isAbsolute(filePath)
+          ? path.relative(workspace.root, filePath)
+          : filePath
+        relPath = relPath.replace(/\\/g, '/')
+
+        let parent = parentHash
+        if (!parent) {
+          try {
+            const rawParents = await git.raw(['rev-parse', `${hash}^@`])
+            const firstParent = rawParents.trim().split(/\s+/)[0]
+            if (firstParent) parent = firstParent
+          } catch {
+            parent = undefined
+          }
+        }
+
+        let original = ''
+        if (parent) {
+          try {
+            original = await git.show([`${parent}:${relPath}`])
+          } catch {
+            original = ''
+          }
+        }
+
+        let modified = ''
+        try {
+          modified = await git.show([`${hash}:${relPath}`])
+        } catch {
+          modified = ''
+        }
+
+        // Detect binary file content
+        const isBinary = (str: string) => /[\x00-\x08\x0E-\x1F]/.test(str.slice(0, 1000))
+        if (isBinary(original) || isBinary(modified)) {
+          return {
+            original: '[Binary file content cannot be displayed in text diff]',
+            modified: '[Binary file content cannot be displayed in text diff]'
+          }
+        }
+
+        return { original, modified }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new Error(`git:commitFileDiff failed: ${msg}`)
+      }
+    }
+  )
 }

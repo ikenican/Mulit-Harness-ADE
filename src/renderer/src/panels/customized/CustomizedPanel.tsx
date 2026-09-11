@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { useWorkbench } from '@/store'
+import AgentMark from '@/components/AgentMark'
 import './customized.css'
 import type {
   AgentId,
@@ -27,11 +28,15 @@ const STATE_LABEL: Record<SupportState, string> = {
 }
 
 function StateChip({ agent, state, detail }: { agent: AgentId; state: SupportState; detail?: string }) {
+  const shortName = agent === 'claude' ? 'Claude' : agent === 'antigravity' ? 'AGY' : 'Codex'
   return (
-    <span className={`cz-chip cz-${state}`} title={detail || `${AGENT_SHORT[agent]}: ${STATE_LABEL[state]}`}>
+    <span
+      className={`cz-chip cz-${state}`}
+      title={detail || `${AGENT_SHORT[agent]}: ${STATE_LABEL[state]}`}
+    >
+      <AgentMark agent={agent} size={11} />
       <i className="cz-dot" />
-      {AGENT_SHORT[agent]}
-      <em>{STATE_LABEL[state]}</em>
+      <span className="cz-chip-name">{shortName}</span>
     </span>
   )
 }
@@ -42,6 +47,8 @@ export default function CustomizedPanel(): JSX.Element {
   const [items, setItems] = useState<ExtItem[]>([])
   const [conns, setConns] = useState<ConnectionInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [lastScanned, setLastScanned] = useState<string | null>(null)
+  const [installingCodex, setInstallingCodex] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 同步預覽
@@ -65,6 +72,7 @@ export default function CustomizedPanel(): JSX.Element {
       setAgents(a)
       setItems(i)
       setConns(c)
+      setLastScanned(new Date().toLocaleTimeString())
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -75,6 +83,20 @@ export default function CustomizedPanel(): JSX.Element {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  const handleToggleItem = async (it: ExtItem): Promise<void> => {
+    const nextState = it.enabled === false ? true : false
+    try {
+      await window.api.ext.toggleItem(it.kind, it.id, nextState)
+      setItems((prev) =>
+        prev.map((x) =>
+          x.kind === it.kind && x.id === it.id ? { ...x, enabled: nextState } : x
+        )
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const doPlan = async (): Promise<void> => {
     try {
@@ -120,11 +142,18 @@ export default function CustomizedPanel(): JSX.Element {
     <div className="cz-root">
       <div className="cz-toolbar">
         <button className="btn" onClick={refresh} disabled={loading}>
-          ↻ Rescan
+          <span className={`cz-rescan-icon ${loading ? 'cz-spinning' : ''}`}>↻</span>
+          {loading ? ' Scanning...' : ' Rescan'}
         </button>
         <button className="btn btn-primary" onClick={doPlan}>
           Sync to agents…
         </button>
+        {loading ? (
+          <span className="cz-scan-status scanning">Scanning agent configs & environments...</span>
+        ) : lastScanned ? (
+          <span className="cz-scan-status done">Last rescanned at {lastScanned}</span>
+        ) : null}
+        <span className="cz-spacer" />
         <span className="cz-hint">Changes are shown for review before anything is written</span>
       </div>
 
@@ -149,24 +178,50 @@ export default function CustomizedPanel(): JSX.Element {
               <span>MCP {a.counts.mcp}</span>
               <span>Plugins {a.counts.plugin}</span>
             </div>
-            {a.configHome && <div className="cz-agent-path" title={a.configHome}>{a.configHome}</div>}
-            {a.notes.map((n, i) => (
-              <div key={i} className="cz-note">
-                {n}
-              </div>
-            ))}
-            {a.agent === 'antigravity' &&
-              a.notes.some((n) => n.includes('trust list')) && (
+            <div className="cz-agent-card-scroll">
+              {a.configHome && <div className="cz-agent-path" title={a.configHome}>{a.configHome}</div>}
+              {a.notes.map((n, i) => (
+                <div key={i} className="cz-note">
+                  {n}
+                </div>
+              ))}
+              {a.agent === 'codex' && !a.cliFound && (
                 <button
-                  className="btn cz-trust"
+                  className="btn cz-install-codex"
+                  disabled={installingCodex}
                   onClick={async () => {
-                    await window.api.ext.trustWorkspace()
-                    await refresh()
+                    setInstallingCodex(true)
+                    try {
+                      const res = await window.api.ext.installCodex()
+                      if (res.ok) {
+                        window.api.notify.show('Codex Installation', res.message)
+                        await refresh()
+                      } else {
+                        setError(res.message)
+                      }
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e))
+                    } finally {
+                      setInstallingCodex(false)
+                    }
                   }}
                 >
-                  Add this workspace to trust list
+                  {installingCodex ? 'Installing Codex CLI…' : '⬇ Download & Install Codex'}
                 </button>
               )}
+              {a.agent === 'antigravity' &&
+                a.notes.some((n) => n.includes('trust list')) && (
+                  <button
+                    className="btn cz-trust"
+                    onClick={async () => {
+                      await window.api.ext.trustWorkspace()
+                      await refresh()
+                    }}
+                  >
+                    Add this workspace to trust list
+                  </button>
+                )}
+            </div>
           </div>
         ))}
       </div>
@@ -182,10 +237,13 @@ export default function CustomizedPanel(): JSX.Element {
           ) : (
             <div className="cz-list">
               {byKind(kind).map((it) => (
-                <div key={`${it.kind}:${it.id}`} className="cz-item">
+                <div
+                  key={`${it.kind}:${it.id}`}
+                  className={`cz-item ${it.enabled === false ? 'is-disabled' : ''}`}
+                >
                   <div className="cz-item-main">
                     <div className="cz-item-title">
-                      {it.name}
+                      <span className="cz-title-text" title={it.name}>{it.name}</span>
                       {it.version && <span className="cz-ver">v{it.version}</span>}
                       {it.managed && <span className="cz-managed" title="Managed by the workbench manifest">managed</span>}
                     </div>
@@ -209,6 +267,16 @@ export default function CustomizedPanel(): JSX.Element {
                     {it.agents.map((a) => (
                       <StateChip key={a.agent} agent={a.agent} state={a.state} detail={a.detail} />
                     ))}
+                  </div>
+                  <div className="cz-item-actions">
+                    <button
+                      className={`cz-toggle-switch ${it.enabled !== false ? 'on' : 'off'}`}
+                      onClick={() => handleToggleItem(it)}
+                      title={it.enabled !== false ? 'Enabled (Click to disable)' : 'Disabled (Click to enable)'}
+                    >
+                      <span className="cz-toggle-thumb" />
+                      <span className="cz-toggle-label">{it.enabled !== false ? 'ON' : 'OFF'}</span>
+                    </button>
                   </div>
                 </div>
               ))}

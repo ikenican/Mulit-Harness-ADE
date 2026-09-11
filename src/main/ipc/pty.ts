@@ -11,6 +11,19 @@ import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
 
 const ptySessions = new Map<string, pty.IPty>()
 
+export interface ActiveSessionMeta {
+  id: string
+  command: string
+  launcherId?: string
+  startTime: number
+  pid: number
+}
+const ptySessionMetas = new Map<string, ActiveSessionMeta>()
+
+export function getActiveSessionMetas(): ActiveSessionMeta[] {
+  return Array.from(ptySessionMetas.values())
+}
+
 const isWin = process.platform === 'win32'
 
 /**
@@ -41,25 +54,64 @@ function hardKill(p: pty.IPty): void {
   }
 }
 
+import { getCustomCliPath } from './settings'
+import { findAgentCli } from '../ext/paths'
+import type { AgentId } from '../../preload/index'
+
 /**
- * 邏輯名稱 → 實際執行檔。集中在這裡，UI 與 yaml 只需要用邏輯名。
- * 注意 antigravity 的執行檔實際叫 agy（實機探測結果），不是 antigravity。
+ * 邏輯名稱 → 實際執行檔與前置參數。
+ * 優先讀取 settings 中的自訂路徑，Windows 腳本自動帶起正確的解譯器。
  */
-function resolveCommand(name: string): string {
-  switch (name) {
-    case 'antigravity':
-      return 'agy'
-    case 'powershell':
-      return isWin ? 'powershell.exe' : 'pwsh'
-    case 'pwsh':
-      return 'pwsh'
-    case 'cmd':
-      return isWin ? 'cmd.exe' : 'sh'
-    case 'bash':
-      return 'bash'
-    default:
-      return name
+function resolveCommand(name: string): { cmd: string; extraArgs: string[] } {
+  const isAgent = name === 'claude' || name === 'antigravity' || name === 'codex'
+  let custom = getCustomCliPath(name)
+  let target = custom || name
+
+  if (!custom) {
+    if (isAgent) {
+      const detected = findAgentCli(name as AgentId)
+      if (detected) {
+        target = detected
+      } else if (name === 'antigravity') {
+        target = 'agy'
+      }
+    } else {
+      switch (name) {
+        case 'powershell':
+          target = isWin ? 'powershell.exe' : 'pwsh'
+          break
+        case 'pwsh':
+          target = 'pwsh'
+          break
+        case 'cmd':
+          target = isWin ? 'cmd.exe' : 'sh'
+          break
+        case 'bash':
+          target = 'bash'
+          break
+      }
+    }
   }
+
+  // Windows 平台相容性處理 (.ps1, .cmd, .bat, .exe)
+  if (isWin) {
+    const lower = target.toLowerCase()
+    if (!lower.endsWith('.exe') && !lower.endsWith('.cmd') && !lower.endsWith('.bat') && !lower.endsWith('.ps1')) {
+      if (fs.existsSync(`${target}.cmd`)) target = `${target}.cmd`
+      else if (fs.existsSync(`${target}.exe`)) target = `${target}.exe`
+      else if (fs.existsSync(`${target}.bat`)) target = `${target}.bat`
+      else if (fs.existsSync(`${target}.ps1`)) target = `${target}.ps1`
+    }
+
+    if (target.toLowerCase().endsWith('.ps1')) {
+      return { cmd: 'powershell.exe', extraArgs: ['-ExecutionPolicy', 'Bypass', '-File', target] }
+    }
+    if (target.toLowerCase().endsWith('.cmd') || target.toLowerCase().endsWith('.bat')) {
+      return { cmd: 'cmd.exe', extraArgs: ['/c', target] }
+    }
+  }
+
+  return { cmd: target, extraArgs: [] }
 }
 
 app.on('before-quit', () => {
@@ -84,12 +136,13 @@ export function registerPtyHandlers(): void {
           const parsed = yaml.load(content) as any
           if (parsed && parsed.launcher) {
             const l = parsed.launcher
+            const r = resolveCommand(l.cli)
             launchers.push({
               id: l.id,
               name: l.name,
               cli: l.cli,
-              command: resolveCommand(l.cli),
-              args: l.args || [],
+              command: r.cmd,
+              args: [...r.extraArgs, ...(l.args || [])],
               env: l.env || {}
             })
           }
@@ -103,8 +156,9 @@ export function registerPtyHandlers(): void {
   })
 
   ipcMain.handle('pty:spawn', async (event, opts: PtySpawnOptions) => {
-    let command = opts.command ? resolveCommand(opts.command) : isWin ? 'cmd.exe' : 'bash'
-    let args = opts.args || []
+    let resolved = opts.command ? resolveCommand(opts.command) : { cmd: isWin ? 'cmd.exe' : 'bash', extraArgs: [] }
+    let command = resolved.cmd
+    let args = [...resolved.extraArgs, ...(opts.args || [])]
     let env = { ...process.env }
     
     if (opts.launcherId) {
@@ -117,8 +171,9 @@ export function registerPtyHandlers(): void {
             const parsed = yaml.load(content) as any
             if (parsed && parsed.launcher && parsed.launcher.id === opts.launcherId) {
               const l = parsed.launcher
-              command = resolveCommand(l.cli)
-              args = l.args || []
+              const r = resolveCommand(l.cli)
+              command = r.cmd
+              args = [...r.extraArgs, ...(l.args || [])]
               env = { ...env, ...(l.env || {}) }
               break
             }
@@ -130,6 +185,23 @@ export function registerPtyHandlers(): void {
     // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
     // 因此不需要（也不該）把明文寫進任何 agent 設定檔。
     env = { ...env, ...resolveConnectionEnv() }
+
+    // 防禦處理：若呼叫 agy / antigravity CLI 且帶有 --conversation <id>，
+    // 檢查該 session 是否在 CLI 本地資料庫 (~/.gemini/antigravity-cli/conversations/) 中。
+    // 若為 IDE 專屬 session 或不存在的 CLI 紀錄，過濾掉 --conversation 避免 agy 印出 'warning: conversation "<id>" not found'
+    const cmdLower = command.toLowerCase()
+    if (cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity') {
+      const convIdx = args.indexOf('--conversation')
+      if (convIdx !== -1 && args[convIdx + 1]) {
+        const targetId = args[convIdx + 1]
+        const H = process.env.USERPROFILE || process.env.HOME || ''
+        const cliDb = path.join(H, '.gemini', 'antigravity-cli', 'conversations', `${targetId}.db`)
+        if (!fs.existsSync(cliDb)) {
+          // 移除 --conversation 及該 ID
+          args.splice(convIdx, 2)
+        }
+      }
+    }
 
     const id = crypto.randomUUID()
     const cols = opts.cols || 80
@@ -145,6 +217,13 @@ export function registerPtyHandlers(): void {
       })
       
       ptySessions.set(id, ptyProcess)
+      ptySessionMetas.set(id, {
+        id,
+        command: opts.command || opts.launcherId || 'shell',
+        launcherId: opts.launcherId,
+        startTime: Date.now(),
+        pid: ptyProcess.pid
+      })
       
       ptyProcess.onData((data) => {
         event.sender.send(`pty:data:${id}`, data)
@@ -153,6 +232,7 @@ export function registerPtyHandlers(): void {
       ptyProcess.onExit(({ exitCode }) => {
         event.sender.send(`pty:exit:${id}`, exitCode)
         ptySessions.delete(id)
+        ptySessionMetas.delete(id)
       })
       
       return id
@@ -179,11 +259,20 @@ export function registerPtyHandlers(): void {
     }
   })
 
+  ipcMain.handle('pty:pipe', async (_event, fromId: string, toId: string, text: string): Promise<boolean> => {
+    const target = ptySessions.get(toId)
+    if (!target) return false
+    const msg = text.endsWith('\r') || text.endsWith('\n') ? text : `${text}\r\n`
+    target.write(msg)
+    return true
+  })
+
   ipcMain.on('pty:kill', (event, id: string) => {
     const session = ptySessions.get(id)
     if (session) {
       hardKill(session)
       ptySessions.delete(id)
+      ptySessionMetas.delete(id)
     }
   })
 }

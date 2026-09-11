@@ -1,0 +1,983 @@
+/* Apple Design System - Dashboard Panel */
+.dash-root {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--fg);
+  min-width: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.dash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+.dash-title-block {
+  min-width: 0;
+  flex: 1;
+}
+
+.dash-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-subtitle {
+  font-size: 11px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  margin-top: 1px;
+}
+
+.dash-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.dash-refresh-btn:hover:not(:disabled) {
+  background: var(--bg3);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.dash-refresh-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dash-spinning {
+  display: inline-block;
+  animation: czSpin 0.7s linear infinite;
+}
+
+/* Overview Metric Banner */
+.dash-banner {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg2) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  min-width: 0;
+}
+
+.dash-banner-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dash-metric-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--fg-dim);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.dash-metric-val {
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-banner-divider {
+  display: none;
+}
+
+/* Agent Trio Grid */
+.dash-agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.dash-agent-card {
+  padding: 10px 11px;
+  border-radius: 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--bg2);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  min-width: 0;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.dash-agent-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.dash-agent-card.dash-agent-claude:hover {
+  border-color: rgba(217, 119, 6, 0.4);
+  background: color-mix(in srgb, #d97706 4%, var(--bg2));
+}
+
+.dash-agent-card.dash-agent-antigravity:hover {
+  border-color: rgba(124, 58, 237, 0.4);
+  background: color-mix(in srgb, #7c3aed 4%, var(--bg2));
+}
+
+.dash-agent-card.dash-agent-codex:hover {
+  border-color: rgba(16, 163, 127, 0.4);
+  background: color-mix(in srgb, #10a37f 4%, var(--bg2));
+}
+
+/* Agent Card Selected / Filtering State */
+.dash-agent-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+              0 4px 14px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.dash-agent-card.selected.dash-agent-claude {
+  border-color: #d97706;
+  box-shadow: 0 0 0 1.5px rgba(217, 119, 6, 0.45), 0 4px 14px rgba(217, 119, 6, 0.12);
+  background: color-mix(in srgb, #d97706 7%, var(--bg2));
+}
+
+.dash-agent-card.selected.dash-agent-antigravity {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 1.5px rgba(124, 58, 237, 0.45), 0 4px 14px rgba(124, 58, 237, 0.12);
+  background: color-mix(in srgb, #7c3aed 7%, var(--bg2));
+}
+
+.dash-agent-card.selected.dash-agent-codex {
+  border-color: #10a37f;
+  box-shadow: 0 0 0 1.5px rgba(16, 163, 127, 0.45), 0 4px 14px rgba(16, 163, 127, 0.12);
+  background: color-mix(in srgb, #10a37f 7%, var(--bg2));
+}
+
+.dash-agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dash-agent-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dash-agent-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-agent-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-agent-sessions {
+  font-size: 9.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-agent-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dash-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.dash-pulse-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: applePulse 1.4s infinite;
+}
+
+.dash-agent-usage-pill,
+.dash-agent-share-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 5.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Agent Token Meter (Apple Health segmented bar) */
+.dash-agent-tokens-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  margin-top: 1px;
+}
+
+.dash-agent-tokens-track {
+  display: flex;
+  height: 5px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border) 65%, transparent);
+  gap: 1.5px;
+}
+
+.dash-agent-tokens-seg {
+  height: 100%;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  min-width: 0;
+}
+
+.dash-agent-card:hover .dash-agent-usage-pill,
+.dash-agent-card.selected .dash-agent-usage-pill,
+.dash-agent-card:hover .dash-agent-share-pill,
+.dash-agent-card.selected .dash-agent-share-pill {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.dash-agent-token-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dash-agent-stat-number-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dash-agent-stat-number {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-agent-stat-unit {
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--fg-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.dash-agent-stat-sub {
+  font-size: 9.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-agent-stat-label {
+  font-size: 9.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Apple Health Segmented Usage Meter Bar */
+.dash-agent-meter-track {
+  display: flex;
+  height: 5px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  gap: 1px;
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
+.dash-agent-meter-seg {
+  height: 100%;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Usage Breakdown 3-Column Grid */
+.dash-agent-breakdown-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  box-sizing: border-box;
+}
+
+.dash-agent-breakdown-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.dash-agent-col-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 8.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-agent-chip-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-prompt {
+  background: #f59e0b; /* System Amber */
+}
+
+.dot-tools {
+  background: #10b981; /* System Mint */
+}
+
+.dot-comp {
+  background: #8b5cf6; /* System Purple */
+}
+
+.dash-agent-col-val {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 9.5px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Sessions Section */
+.dash-sessions-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dash-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.dash-filter-segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+
+.dash-filter-segmented button {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.dash-filter-segmented button.active {
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.dash-active-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.dash-active-filter-badge:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  transform: translateY(-0.5px);
+}
+
+.dash-empty-state {
+  text-align: center;
+  padding: 24px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--border);
+  background: var(--bg2);
+}
+
+.dash-empty-icon {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.dash-empty-title {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.dash-empty-desc {
+  margin: 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+  line-height: 1.45;
+}
+
+/* Session Cards */
+.dash-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dash-session-card {
+  background: var(--bg2);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.15s ease;
+  min-width: 0;
+  cursor: grab;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.dash-session-card:active {
+  cursor: grabbing;
+}
+
+.dash-session-card.dragging {
+  opacity: 0.38;
+  cursor: grabbing;
+  border: 1px dashed var(--accent);
+  transform: scale(0.985);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.25);
+}
+
+.dash-session-card:hover {
+  border-color: color-mix(in srgb, var(--border) 100%, transparent);
+  background: color-mix(in srgb, var(--bg3) 30%, var(--bg2));
+}
+
+.dash-drag-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  opacity: 0.35;
+  transition: all 0.15s ease;
+  cursor: grab;
+  padding: 2px 1px;
+  margin-left: -2px;
+}
+
+.dash-session-card:hover .dash-drag-grip {
+  opacity: 0.85;
+  color: var(--accent);
+}
+
+.dash-session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  min-width: 0;
+}
+
+.dash-session-click-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 6px;
+  transition: background 0.12s ease;
+}
+
+.dash-session-click-area:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.dash-session-click-area:hover .dash-session-title {
+  color: var(--accent);
+}
+
+.dash-session-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dash-session-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dash-session-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-status-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dash-status-badge.active {
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+}
+
+.dash-status-badge.waiting_approval {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+  animation: applePulse 1.4s infinite;
+}
+
+.dash-status-badge.completed {
+  background: var(--bg3);
+  color: var(--fg-dim);
+}
+
+.dash-status-badge.idle {
+  background: var(--bg3);
+  color: var(--fg-dim);
+}
+
+.dash-session-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--fg-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-meta-model {
+  color: var(--accent);
+}
+
+.dash-session-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  padding: 1px 6px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 9.5px;
+  font-weight: 500;
+  max-width: 130px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  transition: all 0.12s ease;
+}
+
+.dash-session-workspace:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+
+.dash-session-workspace svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.dash-alert-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.dash-session-token-summary {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.dash-token-amount {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--fg);
+}
+
+.dash-token-unit {
+  font-size: 9px;
+  color: var(--fg-dim);
+}
+
+.dash-expand-chevron {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+/* Apple Health Segmented Meter */
+.dash-meter-container {
+  padding-top: 1px;
+}
+
+.dash-meter-bar {
+  display: flex;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg3) 60%, transparent);
+}
+
+.dash-meter-seg {
+  height: 100%;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.seg-prompt {
+  background: #f59e0b; /* System Amber */
+}
+
+.seg-tools {
+  background: #10b981; /* System Mint */
+}
+
+.seg-comp {
+  background: #8b5cf6; /* System Purple */
+}
+
+/* Actions Bar */
+.dash-session-actions-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dash-session-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.dash-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg3);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  color: var(--fg-dim);
+  border-radius: 6px;
+  padding: 2.5px 7px;
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.dash-action-btn:hover {
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--border-strong);
+}
+
+.dash-action-btn.dash-action-open {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.dash-action-btn.dash-action-open:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.dash-action-btn.dash-action-delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Breakdown Analysis */
+.dash-session-breakdown {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: appleFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dash-breakdown-analysis {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg3));
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.dash-analysis-badge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: var(--accent);
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.dash-analysis-text {
+  margin: 0;
+  font-size: 10.5px;
+  color: var(--fg);
+  line-height: 1.35;
+}
+
+.dash-breakdown-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.dash-breakdown-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.dash-pill-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dash-pill-text {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.dash-pill-label {
+  font-size: 10px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-pill-text strong {
+  font-size: 10.5px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+/* Apple HIG Alert Session Preview Card */
+.dash-alert-session-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.dash-alert-session-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dash-alert-session-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-alert-session-agent-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.dash-alert-session-title {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 290px;
+}
+
+.dash-alert-session-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  margin-top: 2px;
+}

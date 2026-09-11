@@ -13,13 +13,23 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 0 12px;
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
-  flex-shrink: 0;
-  min-height: 36px;
+  height: var(--subtoolbar-h);
+  min-height: var(--subtoolbar-h);
+  max-height: var(--subtoolbar-h);
+  flex: 0 0 var(--subtoolbar-h);
+  box-sizing: border-box;
   gap: 8px;
+}
+
+.editor-container > .editor-header:first-child {
+  height: var(--toolbar-h);
+  min-height: var(--toolbar-h);
+  max-height: var(--toolbar-h);
+  flex: 0 0 var(--toolbar-h);
 }
 
 .editor-header-left {
@@ -40,15 +50,67 @@
 }
 
 .badge-edit {
-  background: rgba(14, 99, 156, 0.25);
-  color: #58a6ff;
-  border: 1px solid rgba(88, 166, 255, 0.3);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .badge-diff {
-  background: rgba(78, 201, 176, 0.2);
+  background: color-mix(in srgb, var(--green) 18%, transparent);
   color: var(--green);
-  border: 1px solid rgba(78, 201, 176, 0.3);
+  border: 1px solid color-mix(in srgb, var(--green) 32%, transparent);
+}
+
+.badge-commit-diff {
+  background: color-mix(in srgb, var(--purple, #8b5cf6) 20%, transparent);
+  color: var(--purple, #a78bfa);
+  border: 1px solid color-mix(in srgb, var(--purple, #8b5cf6) 38%, transparent);
+}
+
+.editor-commit-hash-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.editor-commit-file-select {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font-size: 11px;
+  font-family: var(--mono);
+  max-width: 240px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.editor-commit-file-select:hover {
+  border-color: var(--accent);
+}
+
+.editor-commit-msg {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.editor-tab-hash {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--accent);
+  opacity: 0.85;
+  margin-left: 2px;
 }
 
 .editor-filename-wrapper {
@@ -94,7 +156,7 @@
   color: var(--fg-dim);
   font-size: 11px;
   text-transform: uppercase;
-  font-family: monospace;
+  font-family: var(--mono);
   background: var(--bg3);
   padding: 2px 6px;
   border-radius: var(--radius, 4px);
@@ -202,13 +264,39 @@
 /* 檔案分頁列 */
 .editor-tabs {
   display: flex;
+  align-items: center;
   gap: 3px;
-  padding: 6px 8px 0;
+  padding: 0 8px;
   overflow-x: auto;
-  flex: 0 0 auto;
+  overflow-y: hidden;
+  height: var(--toolbar-h);
+  min-height: var(--toolbar-h);
+  max-height: var(--toolbar-h);
+  flex: 0 0 var(--toolbar-h);
   border-bottom: 1px solid var(--border);
   background: var(--bg2);
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg-dim) 40%, transparent) transparent;
 }
+
+.editor-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.editor-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-tabs::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--fg-dim) 35%, transparent);
+  border-radius: 4px;
+}
+
+.editor-tabs::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
 .editor-tab {
   display: flex;
   align-items: center;
@@ -223,6 +311,7 @@
   font-size: 12px;
   color: var(--fg-dim);
   max-width: 220px;
+  flex-shrink: 0;
 }
 .editor-tab:hover {
   background: var(--bg3);
@@ -256,4 +345,74 @@
 .editor-tab-close:hover {
   background: var(--bg3);
   color: var(--fg);
+}
+
+/* ── Agent Modified Tab Styling ── */
+.editor-tab.agent-modified {
+  border-top: 2px solid #8b5cf6;
+}
+
+.editor-tab-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #8b5cf6 18%, transparent);
+  border: 1px solid color-mix(in srgb, #8b5cf6 36%, transparent);
+  color: #a78bfa;
+  font-size: 8.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+  user-select: none;
+  animation: agentPulse 2.2s infinite ease-in-out;
+}
+
+@keyframes agentPulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.03); }
+}
+
+/* ── Editor Zoom Controls (Apple Minimalist Pill) ── */
+.editor-zoom-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg3) 60%, transparent);
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+}
+
+.editor-zoom-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 0.12s ease;
+}
+
+.editor-zoom-btn:hover {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+  color: var(--fg);
+}
+
+.editor-zoom-val {
+  font-size: 10px;
+  color: var(--fg-dim);
+  padding: 0 3px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.editor-zoom-val:hover {
+  color: var(--accent);
 }

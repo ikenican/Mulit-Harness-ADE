@@ -1,11 +1,41 @@
 import { ipcMain } from 'electron'
 import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { workspace } from '../index'
 import { AGENT_PATHS } from '../ext/paths'
 import { buildInventory, buildAgentStatus } from '../ext/inventory'
 import { readManifest, writeManifest, managedKeys, connRefsOf } from '../ext/manifest'
 import { planSync, applySync } from '../ext/adapters'
 import type { AgentStatus, ExtItem, ExtManifest, FileChange } from '../../preload/index'
+
+const execFileAsync = promisify(execFile)
+
+function getDisabledKeys(): Set<string> {
+  try {
+    const file = path.join(workspace.root, '.workbench', 'customized-state.json')
+    if (fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+      return new Set(data.disabled || [])
+    }
+  } catch {
+    /* ignore */
+  }
+  return new Set()
+}
+
+function saveDisabledKeys(keys: Set<string>): void {
+  try {
+    const dir = path.join(workspace.root, '.workbench')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, 'customized-state.json')
+    fs.writeFileSync(file, JSON.stringify({ disabled: Array.from(keys) }, null, 2), 'utf8')
+  } catch (e) {
+    console.error('Failed to save customized state:', e)
+  }
+}
 
 export function registerExtHandlers(): void {
   const inventory = (): ExtItem[] => {
@@ -34,16 +64,47 @@ export function registerExtHandlers(): void {
         }))
       })
     }
-    // 補上憑證需求標記
+    // 補上憑證需求標記與啟用狀態
+    const disabled = getDisabledKeys()
     for (const it of items) {
-      if (it.kind !== 'mcp') continue
-      const decl = m.mcp.find((x) => x.id.toLowerCase() === it.id)
-      if (decl) it.needsConnection = connRefsOf(decl.env)
+      if (it.kind === 'mcp') {
+        const decl = m.mcp.find((x) => x.id.toLowerCase() === it.id)
+        if (decl) it.needsConnection = connRefsOf(decl.env)
+      }
+      it.enabled = !disabled.has(`${it.kind}:${it.id.toLowerCase()}`)
     }
     return items
   }
 
   ipcMain.handle('ext:inventory', async (): Promise<ExtItem[]> => inventory())
+
+  ipcMain.handle('ext:toggleItem', async (_e, kind: string, id: string, enabled: boolean): Promise<boolean> => {
+    const disabled = getDisabledKeys()
+    const key = `${kind}:${id.toLowerCase()}`
+    if (enabled) {
+      disabled.delete(key)
+    } else {
+      disabled.add(key)
+    }
+    saveDisabledKeys(disabled)
+
+    // 若為 Claude plugin，嘗試同步寫入 ~/.claude/settings.json
+    if (kind === 'plugin') {
+      try {
+        const claudeSettings = path.join(os.homedir(), '.claude', 'settings.json')
+        if (fs.existsSync(claudeSettings)) {
+          const raw = fs.readFileSync(claudeSettings, 'utf8')
+          const cfg = JSON.parse(raw)
+          if (!cfg.enabledPlugins) cfg.enabledPlugins = {}
+          cfg.enabledPlugins[id] = enabled
+          fs.writeFileSync(claudeSettings, JSON.stringify(cfg, null, 2), 'utf8')
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return true
+  })
 
   ipcMain.handle('ext:agents', async (): Promise<AgentStatus[]> =>
     buildAgentStatus(workspace.root, inventory())
@@ -83,5 +144,33 @@ export function registerExtHandlers(): void {
     doc.trustedWorkspaces = list
     fs.writeFileSync(p, JSON.stringify(doc, null, 2), 'utf8')
     return true
+  })
+
+  // 下載並安裝 Codex CLI
+  ipcMain.handle('ext:installCodex', async (): Promise<{ ok: boolean; message: string }> => {
+    const isWin = process.platform === 'win32'
+    try {
+      const cmd = isWin ? 'npm.cmd' : 'npm'
+      await execFileAsync(cmd, ['install', '-g', '@openai/codex'], {
+        timeout: 120000,
+        shell: isWin
+      })
+      return { ok: true, message: 'Codex CLI installed successfully via npm (@openai/codex)' }
+    } catch (err: unknown) {
+      if (isWin) {
+        try {
+          await execFileAsync('powershell.exe', [
+            '-ExecutionPolicy', 'Bypass', '-Command',
+            'irm https://chatgpt.com/codex/install.ps1 | iex'
+          ], { timeout: 120000 })
+          return { ok: true, message: 'Codex CLI installed successfully via PowerShell installer' }
+        } catch (err2: unknown) {
+          const msg = err2 instanceof Error ? err2.message : String(err2)
+          return { ok: false, message: `Installation failed: ${msg}` }
+        }
+      }
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, message: `Installation failed: ${msg}` }
+    }
   })
 }

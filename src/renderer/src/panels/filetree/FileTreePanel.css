@@ -13,10 +13,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 0 8px;
+  height: var(--subtoolbar-h);
+  min-height: var(--subtoolbar-h);
+  max-height: var(--subtoolbar-h);
+  flex: 0 0 var(--subtoolbar-h);
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+  box-sizing: border-box;
   gap: 6px;
 }
 

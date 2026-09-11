@@ -6,17 +6,32 @@
   --bg2: #ffffff;
   --bg3: #ececef;
   --bg-elevated: rgba(255, 255, 255, 0.72);
+  --bg-surface: #ffffff;
   --fg: #1d1d1f;
   --fg-dim: #6e6e73;
   --accent: #0071e3;
   --accent-fg: #ffffff;
   --border: rgba(0, 0, 0, 0.1);
   --border-strong: rgba(0, 0, 0, 0.16);
+  --border-subtle: rgba(0, 0, 0, 0.08);
   --green: #1a7f37;
   --red: #d70015;
+  --orange: #c93b00;
+  --purple: #8944ab;
+  --blue: #0071e3;
+  --yellow: #b25000;
+  --morandi-blue: #0071e3;
+  --morandi-green: #34c759;
+  --morandi-orange: #ff9500;
+  --morandi-purple: #af52de;
+  --morandi-red: #ff3b30;
+  --morandi-cyan: #0071e3;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.06);
   --radius: 8px;
   --radius-sm: 6px;
+  --toolbar-h: 38px;
+  --subtoolbar-h: 34px;
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI',
     system-ui, 'Helvetica Neue', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   --mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
@@ -24,38 +39,130 @@
 
 /* 系統偏好暗色時、JS 尚未設定 data-theme 前的 FOUC 保護 */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --bg: #1c1c1e;
-    --bg2: #2c2c2e;
-    --bg3: #3a3a3c;
-    --bg-elevated: rgba(44, 44, 46, 0.72);
+  :root:not([data-theme='light']):not([data-theme='light-morandi']) {
+    --bg: #161618;
+    --bg2: #1e1e20;
+    --bg3: #28282c;
+    --bg-elevated: rgba(30, 30, 34, 0.85);
+    --bg-surface: #1e1e22;
     --fg: #f5f5f7;
     --fg-dim: #98989d;
     --accent: #0a84ff;
     --accent-fg: #ffffff;
-    --border: rgba(255, 255, 255, 0.1);
-    --border-strong: rgba(255, 255, 255, 0.18);
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --border-subtle: rgba(255, 255, 255, 0.08);
     --green: #30d158;
     --red: #ff453a;
+    --orange: #ff9f0a;
+    --purple: #bf5af2;
+    --blue: #0a84ff;
+    --yellow: #ffd60a;
+    --morandi-blue: #0a84ff;
+    --morandi-green: #30d158;
+    --morandi-orange: #ff9f0a;
+    --morandi-purple: #bf5af2;
+    --morandi-red: #ff453a;
+    --morandi-cyan: #0a84ff;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+    --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
   }
 }
 
 /* 明確選暗色（store 切換的權威來源） */
 :root[data-theme='dark'] {
-  --bg: #1c1c1e;
-  --bg2: #2c2c2e;
-  --bg3: #3a3a3c;
-  --bg-elevated: rgba(44, 44, 46, 0.72);
+  --bg: #161618;
+  --bg2: #1e1e20;
+  --bg3: #28282c;
+  --bg-elevated: rgba(30, 30, 34, 0.85);
+  --bg-surface: #1e1e22;
   --fg: #f5f5f7;
   --fg-dim: #98989d;
   --accent: #0a84ff;
   --accent-fg: #ffffff;
-  --border: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-subtle: rgba(255, 255, 255, 0.08);
   --green: #30d158;
   --red: #ff453a;
+  --orange: #ff9f0a;
+  --purple: #bf5af2;
+  --blue: #0a84ff;
+  --yellow: #ffd60a;
+  --morandi-blue: #0a84ff;
+  --morandi-green: #30d158;
+  --morandi-orange: #ff9f0a;
+  --morandi-purple: #bf5af2;
+  --morandi-red: #ff453a;
+  --morandi-cyan: #0a84ff;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/* ── 亮色·莫蘭迪色系（晨霧暖調） ─────────────────────────────────── */
+:root[data-theme='light-morandi'] {
+  --bg: #ece7df;
+  --bg0: #e5dfd6;
+  --bg1: #ece7df;
+  --bg2: #f6f4ee;
+  --bg3: #dfd9cf;
+  --bg-elevated: rgba(246, 244, 238, 0.90);
+  --bg-surface: #f6f4ee;
+  --fg: #202428;
+  --fg-dim: #59626b;
+  --fg-subtle: #79828c;
+  --accent: #486a6d;
+  --accent-fg: #ffffff;
+  --border: rgba(32, 36, 40, 0.13);
+  --border-strong: rgba(32, 36, 40, 0.24);
+  --border-subtle: rgba(32, 36, 40, 0.08);
+  --green: #486c4e;
+  --red: #9e4644;
+  --orange: #a86b40;
+  --purple: #725d7b;
+  --blue: #446476;
+  --yellow: #8a6a2f;
+  --morandi-blue: #446476;
+  --morandi-green: #486c4e;
+  --morandi-orange: #a86b40;
+  --morandi-purple: #725d7b;
+  --morandi-red: #9e4644;
+  --morandi-cyan: #486a6d;
+  --shadow: 0 1px 3px rgba(32, 36, 40, 0.08), 0 8px 24px rgba(32, 36, 40, 0.06);
+  --shadow-modal: 0 24px 64px rgba(32, 36, 40, 0.22), 0 4px 16px rgba(32, 36, 40, 0.08);
+}
+
+/* ── 暗色·莫蘭迪色系（暮靄冷調） ─────────────────────────────────── */
+:root[data-theme='dark-morandi'] {
+  --bg: #1c2023;
+  --bg0: #16191c;
+  --bg1: #1c2023;
+  --bg2: #25292d;
+  --bg3: #30363c;
+  --bg-elevated: rgba(37, 41, 45, 0.86);
+  --bg-surface: #25292d;
+  --fg: #e2ded6;
+  --fg-dim: #9aa1a8;
+  --fg-subtle: #737c84;
+  --accent: #79a3a3;
+  --accent-fg: #1c2023;
+  --border: rgba(226, 222, 214, 0.10);
+  --border-strong: rgba(226, 222, 214, 0.18);
+  --border-subtle: rgba(226, 222, 214, 0.06);
+  --green: #76a481;
+  --red: #d47772;
+  --orange: #ce946b;
+  --purple: #9f8ca9;
+  --blue: #6f92a2;
+  --yellow: #d1b577;
+  --morandi-blue: #6f92a2;
+  --morandi-green: #76a481;
+  --morandi-orange: #ce946b;
+  --morandi-purple: #9f8ca9;
+  --morandi-red: #d47772;
+  --morandi-cyan: #79a3a3;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(226, 222, 214, 0.08);
 }
 
 * {
@@ -72,46 +179,46 @@ body {
   color: var(--fg);
   font: 13px/1.55 var(--font);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
 }
 
-/* ── 版面：頂部 titlebar + 三欄 ─────────────────────────────── */
+/* 全域字型統一：確保所有表單控制項與按鈕繼承 Apple 系統字型 */
+button,
+input,
+select,
+textarea {
+  font-family: var(--font);
+  font-size: inherit;
+  color: inherit;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--mono);
+}
+
+/* ── 版面：無框融合設計（頂部 Header 融合入工作區，釋放 44px 空間） ── */
 .app {
-  display: grid;
-  grid-template-rows: 44px 1fr;
-  grid-template-columns: 1fr;
-  height: 100vh;
-}
-.titlebar {
-  grid-row: 1;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 14px;
-  background: var(--bg-elevated);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--border);
-  -webkit-app-region: drag;
-}
-.titlebar .brand {
-  font-weight: 600;
-  letter-spacing: 0.2px;
-}
-.titlebar .brand .dot {
-  color: var(--accent);
-}
-.titlebar .spacer {
-  flex: 1;
-}
-.titlebar button {
-  -webkit-app-region: no-drag;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
 }
 
 .workarea {
-  grid-row: 2;
+  flex: 1 1 auto;
   display: grid;
   min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
   /* grid-template-* 由 App.tsx 依目前欄寬與停靠位置以 inline style 指定 */
 }
 .col {
@@ -126,21 +233,119 @@ body {
 .dock-bottom .col-term {
   border-top: none;
 }
+
+/* ── 頂層全域無縫 Header（整合 Windows/macOS 視窗控制項） ── */
+.app-unified-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  user-select: none;
+  -webkit-app-region: drag;
+  z-index: 100;
+  box-sizing: border-box;
+  padding-right: 142px; /* 預留 Windows 系統視窗控制項（最小化/最大化/關閉）之空間 */
+}
+
+.app-unified-header button,
+.app-unified-header .segmented,
+.app-unified-header input,
+.app-unified-header a {
+  -webkit-app-region: no-drag;
+}
+
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.app-brand {
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.app-brand .dot {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.app-header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.btn-collapse-left,
+.btn-expand-left {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  padding: 0 7px;
+  gap: 4px;
+}
+.btn-collapse-left:hover,
+.btn-expand-left:hover {
+  background: var(--bg3);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
 .dock-switch button {
   font-size: 11px;
-  padding: 3px 9px;
+  padding: 3px 8px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ── segmented-control 風格 tabbar ───────────────────────────── */
 .tabbar {
   display: flex;
   gap: 2px;
-  padding: 8px 10px;
-  flex: 0 0 auto;
+  padding: 0 8px;
+  height: var(--toolbar-h);
+  min-height: var(--toolbar-h);
+  max-height: var(--toolbar-h);
+  flex: 0 0 var(--toolbar-h);
   align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  box-sizing: border-box;
 }
 .segmented {
   display: inline-flex;
+  align-items: center;
   padding: 2px;
   gap: 2px;
   background: var(--bg3);
@@ -153,8 +358,11 @@ body {
   padding: 4px 12px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font: 12px/1 var(--font);
+  font: 12px/1.2 var(--font);
   transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .segmented button:hover {
   color: var(--fg);
@@ -163,6 +371,21 @@ body {
   background: var(--bg2);
   color: var(--fg);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.left-segmented {
+  width: 100%;
+  display: flex;
+  box-sizing: border-box;
+}
+.left-segmented button {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
 }
 .tabbar.static {
   color: var(--fg-dim);
@@ -200,14 +423,39 @@ button {
   border: none;
   color: var(--fg-dim);
   cursor: pointer;
-  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: var(--radius-sm);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
+  transition: all 0.15s ease;
 }
 .btn-icon:hover {
   background: var(--bg3);
   color: var(--fg);
+}
+.btn-icon.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.detached-term-app {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.detached-term-app .term-root {
+  flex: 1;
+  height: 100%;
 }
 
 .panel-body {

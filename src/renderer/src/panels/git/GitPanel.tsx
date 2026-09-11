@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, type JSX } from 'react'
-import { openDiff, useWorkbench } from '@/store'
+import { openDiff, openCommitDiff, useWorkbench } from '@/store'
+import GitGraphView from './GitGraphView'
 import './git.css'
+import type { GitGraphNode, GitCommitDetail } from '../../../../preload/index'
 
 type GitStatus = Awaited<ReturnType<typeof window.api.git.status>>
 type GitCommit = Awaited<ReturnType<typeof window.api.git.log>>[number]
@@ -34,10 +36,13 @@ function formatDate(dateStr: string): string {
 }
 
 export default function GitPanel(): JSX.Element {
-  const { gitTick } = useWorkbench()
+  const { gitTick, activeCommitDiff } = useWorkbench()
 
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [commits, setCommits] = useState<GitCommit[]>([])
+  const [graphNodes, setGraphNodes] = useState<GitGraphNode[]>([])
+  const [selectedCommit, setSelectedCommit] = useState<GitCommitDetail | null>(null)
+  const [activeView, setActiveView] = useState<'changes' | 'graph'>('changes')
   const [branches, setBranches] = useState<{ current: string; all: string[] }>({
     current: '',
     all: []
@@ -54,14 +59,16 @@ export default function GitPanel(): JSX.Element {
 
   const fetchData = useCallback(async () => {
     try {
-      const [s, l, b] = await Promise.all([
+      const [s, l, b, g] = await Promise.all([
         window.api.git.status(),
         window.api.git.log(30),
-        window.api.git.branches()
+        window.api.git.branches(),
+        window.api.git.graph(50)
       ])
       setStatus(s)
       setCommits(l)
       setBranches(b)
+      setGraphNodes(g)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -130,6 +137,25 @@ export default function GitPanel(): JSX.Element {
     }
   }
 
+  const handleSelectCommit = async (hash: string, specificFile?: string): Promise<void> => {
+    try {
+      setError(null)
+      const details = await window.api.git.commitDetails(hash)
+      setSelectedCommit(details)
+
+      const fileToOpen = specificFile || (details.files.length > 0 ? details.files[0].path : '')
+      openCommitDiff({
+        commitHash: details.hash,
+        parentHash: details.parents[0],
+        commitMessage: details.message,
+        filePath: fileToOpen,
+        files: details.files
+      })
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   if (status && !status.isRepo) {
     return (
       <div className="git-container">
@@ -171,6 +197,24 @@ export default function GitPanel(): JSX.Element {
         </button>
       </div>
 
+      {/* 視圖切換：變更清單 vs 分支拓撲圖 */}
+      <div className="git-view-toggle">
+        <div className="segmented">
+          <button
+            className={activeView === 'changes' ? 'on' : ''}
+            onClick={() => setActiveView('changes')}
+          >
+            Changes {isClean ? '' : `(${stagedCount + unstagedCount + untrackedCount})`}
+          </button>
+          <button
+            className={activeView === 'graph' ? 'on' : ''}
+            onClick={() => setActiveView('graph')}
+          >
+            Git Graph ({graphNodes.length})
+          </button>
+        </div>
+      </div>
+
       {/* 錯誤通知條 */}
       {error && (
         <div className="git-banner-error">
@@ -181,8 +225,81 @@ export default function GitPanel(): JSX.Element {
         </div>
       )}
 
-      {/* 捲動清單區域 */}
-      <div className="git-scroll-area">
+      {activeView === 'graph' ? (
+        <div className="git-graph-view-wrapper">
+          <div className="git-graph-main-scroll">
+            <GitGraphView
+              nodes={graphNodes}
+              selectedHash={selectedCommit?.hash}
+              onSelectCommit={(hash) => handleSelectCommit(hash)}
+            />
+          </div>
+
+          {selectedCommit && (
+            <div className="git-commit-inspector">
+              <div className="git-inspector-header">
+                <div className="git-inspector-title-row">
+                  <span className="git-inspector-hash">{selectedCommit.hash}</span>
+                  <span className="git-inspector-msg" title={selectedCommit.message}>
+                    {selectedCommit.message}
+                  </span>
+                </div>
+                <button
+                  className="git-inspector-close"
+                  onClick={() => setSelectedCommit(null)}
+                  title="Close inspector"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="git-inspector-meta">
+                <span>{selectedCommit.author}</span>
+                <span>•</span>
+                <span>{formatDate(selectedCommit.date)}</span>
+                <span>•</span>
+                <span>{selectedCommit.files.length} file(s) changed</span>
+              </div>
+
+              <div className="git-inspector-files-list">
+                {selectedCommit.files.length === 0 ? (
+                  <div className="git-empty-msg" style={{ padding: '8px 12px' }}>
+                    No file changes in this commit (e.g. merge/empty)
+                  </div>
+                ) : (
+                  selectedCommit.files.map((f) => {
+                    const isCurrentActive =
+                      activeCommitDiff?.commitHash.startsWith(selectedCommit.hash) &&
+                      activeCommitDiff?.filePath === f.path
+                    const badgeClass =
+                      f.status === 'A'
+                        ? 'git-badge-added'
+                        : f.status === 'D'
+                        ? 'git-badge-deleted'
+                        : 'git-badge-modified'
+
+                    return (
+                      <div
+                        key={f.path}
+                        className={`git-inspector-file-row ${isCurrentActive ? 'active' : ''}`}
+                        onClick={() => handleSelectCommit(selectedCommit.hash, f.path)}
+                        title={`Click to view diff for ${f.path}`}
+                      >
+                        <span className={`git-file-badge-commit ${badgeClass}`}>{f.status}</span>
+                        <span className="git-inspector-filename">{f.path}</span>
+                        <span className="git-inspector-open-diff">Diff ➔</span>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* 捲動清單區域 */}
+          <div className="git-scroll-area">
         {/* Staged Changes */}
         <div className="git-section">
           <div
@@ -362,7 +479,13 @@ export default function GitPanel(): JSX.Element {
                 <div className="git-empty-msg">No commits yet</div>
               ) : (
                 commits.map((c: GitCommit) => (
-                  <div key={c.hash} className="git-log-item" title={c.message}>
+                  <div
+                    key={c.hash}
+                    className={`git-log-item ${selectedCommit?.hash === c.hash ? 'selected' : ''}`}
+                    onClick={() => handleSelectCommit(c.hash)}
+                    title="Click to view commit diff in editor"
+                    style={{ cursor: 'pointer' }}
+                  >
                     <div className="git-log-header">
                       <span className="git-log-hash">{c.hash}</span>
                       <span className="git-log-date">{formatDate(c.date)}</span>
@@ -405,6 +528,8 @@ export default function GitPanel(): JSX.Element {
           {committing ? 'Committing...' : 'Commit'}
         </button>
       </div>
-    </div>
+    </>
+  )}
+</div>
   )
 }

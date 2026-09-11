@@ -1,6 +1,6 @@
 /// <reference path="../../../../preload/index.d.ts" />
 import { useState, useEffect, useCallback } from 'react'
-import { openFile, useWorkbench } from '@/store'
+import { openFile, useWorkbench, setWorkspaceRoot as setGlobalWorkspaceRoot, bumpGit } from '@/store'
 import './FileTreePanel.css'
 
 interface FsEntry {
@@ -223,6 +223,7 @@ export default function FileTreePanel(): JSX.Element {
       setError(null)
       const targetRoot = dir || (await window.api.files.workspaceRoot())
       setWorkspaceRoot(targetRoot)
+      setGlobalWorkspaceRoot(targetRoot)
       const entries = await window.api.files.list(targetRoot)
       setRootEntries(entries)
       setExpandedPaths(new Set())
@@ -243,6 +244,8 @@ export default function FileTreePanel(): JSX.Element {
     try {
       const newRoot = await window.api.files.pickWorkspace()
       if (newRoot) {
+        setGlobalWorkspaceRoot(newRoot)
+        bumpGit()
         await loadTree(newRoot)
       }
     } catch (err: unknown) {
