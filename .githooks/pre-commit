@@ -1,51 +1,8 @@
 #!/usr/bin/env bash
-# Shared project memory guard. Enforced for ANY agent that commits in this repo.
-# Enable per clone with: git config core.hooksPath .githooks
+# Git pre-commit hook
 set -e
-MEM=".project-memory"
 
-# 1) required memory files exist
-for f in PROTOCOL.md INDEX.md STATE.md handoff.md DECISIONS.md; do
-  [ -f "$MEM/$f" ] || { echo "missing required memory file: $MEM/$f"; exit 1; }
-done
-
-# 1b) handoff changed -> regenerate the AUTO-MEMORY block in the entry files that Codex and
-#     Antigravity auto-load, and stage them, so those tools get memory at startup without
-#     needing to run any command.
-if git diff --cached --name-only | grep -q "^$MEM/handoff\.md$"; then
-  if [ -f "$MEM/sync-entry-files.sh" ]; then
-    bash "$MEM/sync-entry-files.sh" >/dev/null
-    git add AGENTS.md .agents/rules/shared-memory.md 2>/dev/null || true
-  fi
-fi
-
-# 2) engineering files changed but memory not staged -> block
-#    Positive match on dirs / build files / source extensions, so editing .gitignore or a
-#    stray markdown file does not nag.
-ENG_CHANGED=$(git diff --cached --name-only | grep -E \
-  '^(src|tests|app|firmware|drivers|scripts|tools|config|configs)/|(^|/)(CMakeLists\.txt|Makefile|package\.json|pyproject\.toml)$|\.(c|cc|cpp|h|hpp|py|ps1|sh|yaml|yml)$' \
-  || true)
-if [ -n "$ENG_CHANGED" ] && ! git diff --cached --name-only | grep -q "^$MEM/"; then
-  echo "Engineering files changed but shared memory was not staged."
-  echo "Update $MEM/handoff.md per PROTOCOL.md update criteria, then: git add $MEM"
-  echo "$ENG_CHANGED" | head -n 10
-  exit 1
-fi
-
-# 3) secret scan on ADDED lines only, so removing an old secret is not blocked
-ADDED=$(git diff --cached -U0 -- "$MEM" | grep '^+' | grep -v '^+++' || true)
-if [ -n "$ADDED" ]; then
-  if echo "$ADDED" | grep -nEi '(api[_-]?key|secret|password|passwd|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{12,}'; then
-    echo "Possible secret (key=value) in newly added project-memory content. Remove it."
-    exit 1
-  fi
-  if echo "$ADDED" | grep -nE 'BEGIN (RSA|OPENSSH|EC|DSA|PGP) PRIVATE KEY'; then
-    echo "Private key found in newly added project-memory content. Remove it."
-    exit 1
-  fi
-fi
-
-# 4) whitespace
+# Whitespace check
 git diff --cached --check
 
-echo "Shared project memory check passed."
+echo "Pre-commit check passed."

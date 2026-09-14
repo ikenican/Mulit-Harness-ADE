@@ -15,6 +15,10 @@ release/
 .workbench/dashboard-state.json
 .workbench/dashboard-cache.json
 
-# 本機安裝的外部 skill（各自有 .git 與授權，不併入本專案）
-.agents/skills/
+# 本機安裝的外部 skill 與本地 AI 設定（不進版控）
+.agents/
+AGENTS.md
 scratch/
+
+# 本機 AI 專案交接記憶（純本地使用，不進版控）
+.project-memory/

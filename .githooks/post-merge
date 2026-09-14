@@ -1,6 +1,2 @@
 #!/usr/bin/env bash
-# After a pull/merge brings in a newer handoff, refresh the AUTO-MEMORY block in the entry files
-# that Codex and Antigravity auto-load. Keeps them current on every machine without manual steps.
-MEM=".project-memory"
-[ -f "$MEM/sync-entry-files.sh" ] || exit 0
-bash "$MEM/sync-entry-files.sh" >/dev/null 2>&1 || true
+exit 0
