@@ -6,7 +6,7 @@ import { isProtectedPath } from './settings'
 import type { UpdaterStatus, UpdateInfo } from '../../preload/index'
 
 let updaterStatus: UpdaterStatus = {
-  currentVersion: app.getVersion() || '0.1.3',
+  currentVersion: app.getVersion() || '0.1.4',
   isPackaged: app.isPackaged,
   isInstalled: false,
   checking: false,
@@ -84,7 +84,7 @@ function compareSemver(current: string, target: string): number {
 }
 
 export function registerUpdaterHandlers(): void {
-  updaterStatus.currentVersion = app.getVersion() || '0.1.3'
+  updaterStatus.currentVersion = app.getVersion() || '0.1.4'
   updaterStatus.isPackaged = app.isPackaged
   updaterStatus.isInstalled = isInstalledApp()
 
@@ -258,7 +258,9 @@ function formatUpdaterError(msg: string): string {
 
   ipcMain.handle('updater:install', (): void => {
     if (updaterStatus.updateDownloaded) {
-      autoUpdater.quitAndInstall()
+      // isSilent = true: 採用 /S 靜默安裝，不彈出安裝引導畫面
+      // isForceRunAfter = true: 靜默安裝完成後自動重啟程式
+      autoUpdater.quitAndInstall(true, true)
     }
   })
 
