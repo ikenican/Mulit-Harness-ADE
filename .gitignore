@@ -13,6 +13,7 @@ release/
 # 每台機器各自的 runtime state，不進版控（extensions.yaml 是共用範本，保留）
 .workbench/settings.json
 .workbench/dashboard-state.json
+.workbench/dashboard-cache.json
 
 # 本機安裝的外部 skill（各自有 .git 與授權，不併入本專案）
 .agents/skills/

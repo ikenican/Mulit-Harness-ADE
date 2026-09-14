@@ -8,7 +8,7 @@ import type {
 import AgentMark from '@/components/AgentMark'
 import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical } from '@/components/Icons'
 import AppleAlertDialog from '@/components/AppleAlertDialog'
-import { openTerminalSession, setDraggedSession, useWorkbench, switchWorkspace, setSidebarTab } from '@/store'
+import { openTerminalSession, setDraggedSession, useWorkbench, switchWorkspace, setSidebarTab, openSettings } from '@/store'
 import { useTranslation } from '@/i18n'
 import './dashboard.css'
 
@@ -60,8 +60,13 @@ export default function DashboardPanel(): JSX.Element {
   const [sessionToDelete, setSessionToDelete] = useState<AgentSessionInfo | null>(null)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
-  const { workspaceRoot } = useWorkbench()
+  const { workspaceRoot, settingsTick } = useWorkbench()
   const { t } = useTranslation()
+  const [cliEnabled, setCliEnabled] = useState<Record<string, boolean | undefined>>({
+    claude: true,
+    antigravity: true,
+    codex: true
+  })
 
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -77,10 +82,40 @@ export default function DashboardPanel(): JSX.Element {
   }, [])
 
   useEffect(() => {
+    let active = true
+    window.api.settings.get().then((s) => {
+      if (!active) return
+      if (s?.cliEnabled) {
+        setCliEnabled(s.cliEnabled)
+      }
+      loadData(true)
+    }).catch((e) => {
+      console.error('Failed to load settings in dashboard:', e)
+    })
+    return () => {
+      active = false
+    }
+  }, [settingsTick, loadData])
+
+  useEffect(() => {
     loadData()
     const interval = setInterval(() => loadData(true), 5000)
     return () => clearInterval(interval)
   }, [loadData])
+
+  const isAgentEnabled = useCallback(
+    (agentId: AgentId) => cliEnabled[agentId] !== false,
+    [cliEnabled]
+  )
+
+  const allAgentIds: AgentId[] = ['claude', 'antigravity', 'codex']
+  const enabledAgentIds = allAgentIds.filter(isAgentEnabled)
+
+  useEffect(() => {
+    if (selectedAgent !== 'all' && !isAgentEnabled(selectedAgent)) {
+      setSelectedAgent('all')
+    }
+  }, [selectedAgent, isAgentEnabled])
 
   const toggleExpand = (id: string): void => {
     setExpandedSessionId((prev) => (prev === id ? null : id))
@@ -105,18 +140,18 @@ export default function DashboardPanel(): JSX.Element {
     await loadData()
   }
 
-  const agentList: AgentUsageSummary[] = data ? Object.values(data.agents) : []
+  const agentList: AgentUsageSummary[] = data
+    ? Object.values(data.agents).filter((a) => isAgentEnabled(a.agent))
+    : []
 
   const totalTokens: number = agentList.reduce(
     (acc: number, a: AgentUsageSummary) => acc + a.totalTokens,
     0
   )
 
-  const activeSessionsCount = data
-    ? data.sessions.filter((s) => s.status === 'active').length
-    : 0
+  const allSessions = (data?.sessions || []).filter((s) => isAgentEnabled(s.agent))
+  const activeSessionsCount = allSessions.filter((s) => s.status === 'active').length
 
-  const allSessions = data?.sessions || []
   const archivedSessions = allSessions.filter((s) => s.isArchived)
   const unarchivedSessions = allSessions.filter((s) => !s.isArchived)
   const baseSessions = viewFilter === 'archived' ? archivedSessions : unarchivedSessions
@@ -230,120 +265,139 @@ export default function DashboardPanel(): JSX.Element {
         <div className="dash-banner-divider" />
         <div className="dash-banner-metric">
           <span className="dash-metric-label">{t('dashboard.totalSessions')}</span>
-          <strong className="dash-metric-val">{data ? data.sessions.length : 0}</strong>
+          <strong className="dash-metric-val">{allSessions.length}</strong>
         </div>
       </div>
 
-      {/* Agent Usage Trio Cards */}
-      <div className="dash-agents-grid">
-        {(['claude', 'antigravity', 'codex'] as AgentId[]).map((agentId) => {
-          const cfg = AGENT_CONFIG[agentId]
-          const usage = data?.agents[agentId]
-          const activeCount = usage?.activeSessions ?? 0
-          const agentTokens = usage?.totalTokens ?? 0
-          const isSelected = selectedAgent === agentId
-
-          const total = agentTokens || 1
-          const promptTokens = usage?.promptTokens ?? 0
-          const toolTokens = usage?.toolTokens ?? 0
-          const completionTokens = usage?.completionTokens ?? 0
-
-          const pctPrompt = Math.min(100, Math.round((promptTokens / total) * 100))
-          const pctTools = Math.min(100, Math.round((toolTokens / total) * 100))
-          const pctComp = Math.max(0, 100 - pctPrompt - pctTools)
-
-          return (
-            <div
-              key={agentId}
-              className={`dash-agent-card dash-agent-${agentId} ${isSelected ? 'selected' : ''}`}
-              onClick={() => setSelectedAgent((prev) => (prev === agentId ? 'all' : agentId))}
-              title={`Click to filter sessions by ${cfg.name} (Total: ${agentTokens.toLocaleString()} tokens)`}
-            >
-              <div className="dash-agent-head">
-                <div className="dash-agent-brand">
-                  <AgentMark agent={agentId} size={18} />
-                  <div className="dash-agent-meta">
-                    <strong className="dash-agent-name">{cfg.name}</strong>
-                    <span className="dash-agent-sessions">
-                      {usage?.totalSessions ?? 0} {usage?.totalSessions === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
-                    </span>
-                  </div>
-                </div>
-                <div className="dash-agent-badges">
-                  {activeCount > 0 && (
-                    <span className="dash-active-pill" title={`${activeCount} active terminal session(s)`}>
-                      <span className="dash-pulse-dot" /> {t('dashboard.activeCount', { count: activeCount })}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Total Tokens Display */}
-              <div className="dash-agent-token-stat">
-                <div className="dash-agent-stat-number-row">
-                  <span className="dash-agent-stat-number">{formatTokens(agentTokens)}</span>
-                  <span className="dash-agent-stat-unit">{t('dashboard.totalTokensUnit')}</span>
-                </div>
-              </div>
-
-              {/* Segmented Token Distribution Bar */}
-              <div
-                className="dash-agent-tokens-meter"
-                title={`Input: ${promptTokens.toLocaleString()} (${pctPrompt}%) | Tools: ${toolTokens.toLocaleString()} (${pctTools}%) | Out: ${completionTokens.toLocaleString()} (${pctComp}%)`}
-              >
-                <div className="dash-agent-tokens-track">
-                  <div
-                    className="dash-agent-tokens-seg seg-prompt"
-                    style={{ width: `${pctPrompt}%` }}
-                  />
-                  <div
-                    className="dash-agent-tokens-seg seg-tools"
-                    style={{ width: `${pctTools}%` }}
-                  />
-                  <div
-                    className="dash-agent-tokens-seg seg-comp"
-                    style={{ width: `${pctComp}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Usage Breakdown 3-Column Grid */}
-              <div className="dash-agent-breakdown-grid">
-                <div
-                  className="dash-agent-breakdown-col"
-                  title={`Input & Context Tokens: ${promptTokens.toLocaleString()} (${pctPrompt}%)`}
-                >
-                  <div className="dash-agent-col-label">
-                    <span className="dash-agent-chip-dot dot-prompt" />
-                    <span>In</span>
-                  </div>
-                  <span className="dash-agent-col-val">{formatTokens(promptTokens)}</span>
-                </div>
-                <div
-                  className="dash-agent-breakdown-col"
-                  title={`Tool Execution & File Reads: ${toolTokens.toLocaleString()} (${pctTools}%)`}
-                >
-                  <div className="dash-agent-col-label">
-                    <span className="dash-agent-chip-dot dot-tools" />
-                    <span>Tools</span>
-                  </div>
-                  <span className="dash-agent-col-val">{formatTokens(toolTokens)}</span>
-                </div>
-                <div
-                  className="dash-agent-breakdown-col"
-                  title={`Model Completion & Output: ${completionTokens.toLocaleString()} (${pctComp}%)`}
-                >
-                  <div className="dash-agent-col-label">
-                    <span className="dash-agent-chip-dot dot-comp" />
-                    <span>Out</span>
-                  </div>
-                  <span className="dash-agent-col-val">{formatTokens(completionTokens)}</span>
-                </div>
-              </div>
+      {/* Agent Usage Trio Cards (filtered by CLI settings) */}
+      {enabledAgentIds.length === 0 ? (
+        <div className="dash-no-agents-banner">
+          <div className="dash-no-agents-content">
+            <span className="dash-no-agents-icon">⚙️</span>
+            <div className="dash-no-agents-text">
+              <strong className="dash-no-agents-title">{t('dashboard.noAgentsEnabled')}</strong>
+              <span className="dash-no-agents-desc">{t('dashboard.noAgentsEnabledDesc')}</span>
             </div>
-          )
-        })}
-      </div>
+          </div>
+          <button
+            type="button"
+            className="dash-no-agents-btn"
+            onClick={() => openSettings('cli')}
+          >
+            {t('sidebar.settings')} ➔
+          </button>
+        </div>
+      ) : (
+        <div className="dash-agents-grid">
+          {enabledAgentIds.map((agentId) => {
+            const cfg = AGENT_CONFIG[agentId]
+            const usage = data?.agents[agentId]
+            const activeCount = usage?.activeSessions ?? 0
+            const agentTokens = usage?.totalTokens ?? 0
+            const isSelected = selectedAgent === agentId
+
+            const total = agentTokens || 1
+            const promptTokens = usage?.promptTokens ?? 0
+            const toolTokens = usage?.toolTokens ?? 0
+            const completionTokens = usage?.completionTokens ?? 0
+
+            const pctPrompt = Math.min(100, Math.round((promptTokens / total) * 100))
+            const pctTools = Math.min(100, Math.round((toolTokens / total) * 100))
+            const pctComp = Math.max(0, 100 - pctPrompt - pctTools)
+
+            return (
+              <div
+                key={agentId}
+                className={`dash-agent-card dash-agent-${agentId} ${isSelected ? 'selected' : ''}`}
+                onClick={() => setSelectedAgent((prev) => (prev === agentId ? 'all' : agentId))}
+                title={`Click to filter sessions by ${cfg.name} (Total: ${agentTokens.toLocaleString()} tokens)`}
+              >
+                <div className="dash-agent-head">
+                  <div className="dash-agent-brand">
+                    <AgentMark agent={agentId} size={18} />
+                    <div className="dash-agent-meta">
+                      <strong className="dash-agent-name">{cfg.name}</strong>
+                      <span className="dash-agent-sessions">
+                        {usage?.totalSessions ?? 0} {usage?.totalSessions === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="dash-agent-badges">
+                    {activeCount > 0 && (
+                      <span className="dash-active-pill" title={`${activeCount} active terminal session(s)`}>
+                        <span className="dash-pulse-dot" /> {t('dashboard.activeCount', { count: activeCount })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Total Tokens Display */}
+                <div className="dash-agent-token-stat">
+                  <div className="dash-agent-stat-number-row">
+                    <span className="dash-agent-stat-number">{formatTokens(agentTokens)}</span>
+                    <span className="dash-agent-stat-unit">{t('dashboard.totalTokensUnit')}</span>
+                  </div>
+                </div>
+
+                {/* Segmented Token Distribution Bar */}
+                <div
+                  className="dash-agent-tokens-meter"
+                  title={`Input: ${promptTokens.toLocaleString()} (${pctPrompt}%) | Tools: ${toolTokens.toLocaleString()} (${pctTools}%) | Out: ${completionTokens.toLocaleString()} (${pctComp}%)`}
+                >
+                  <div className="dash-agent-tokens-track">
+                    <div
+                      className="dash-agent-tokens-seg seg-prompt"
+                      style={{ width: `${pctPrompt}%` }}
+                    />
+                    <div
+                      className="dash-agent-tokens-seg seg-tools"
+                      style={{ width: `${pctTools}%` }}
+                    />
+                    <div
+                      className="dash-agent-tokens-seg seg-comp"
+                      style={{ width: `${pctComp}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* Usage Breakdown 3-Column Grid */}
+                <div className="dash-agent-breakdown-grid">
+                  <div
+                    className="dash-agent-breakdown-col"
+                    title={`Input & Context Tokens: ${promptTokens.toLocaleString()} (${pctPrompt}%)`}
+                  >
+                    <div className="dash-agent-col-label">
+                      <span className="dash-agent-chip-dot dot-prompt" />
+                      <span>In</span>
+                    </div>
+                    <span className="dash-agent-col-val">{formatTokens(promptTokens)}</span>
+                  </div>
+                  <div
+                    className="dash-agent-breakdown-col"
+                    title={`Tool Execution & File Reads: ${toolTokens.toLocaleString()} (${pctTools}%)`}
+                  >
+                    <div className="dash-agent-col-label">
+                      <span className="dash-agent-chip-dot dot-tools" />
+                      <span>Tools</span>
+                    </div>
+                    <span className="dash-agent-col-val">{formatTokens(toolTokens)}</span>
+                  </div>
+                  <div
+                    className="dash-agent-breakdown-col"
+                    title={`Model Completion & Output: ${completionTokens.toLocaleString()} (${pctComp}%)`}
+                  >
+                    <div className="dash-agent-col-label">
+                      <span className="dash-agent-chip-dot dot-comp" />
+                      <span>Out</span>
+                    </div>
+                    <span className="dash-agent-col-val">{formatTokens(completionTokens)}</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Sessions & Token Breakdown Section */}
       <div className="dash-sessions-section">
@@ -407,15 +461,31 @@ export default function DashboardPanel(): JSX.Element {
 
         {displayedSessions.length === 0 ? (
           <div className="dash-empty-state">
-            <div className="dash-empty-icon">📋</div>
+            <div className="dash-empty-icon">{enabledAgentIds.length === 0 ? '⚙️' : '📋'}</div>
             <p className="dash-empty-title">
-              {viewFilter === 'archived' ? t('dashboard.noArchived') : t('dashboard.noSessions')}
+              {enabledAgentIds.length === 0
+                ? t('dashboard.noAgentsEnabled')
+                : viewFilter === 'archived'
+                ? t('dashboard.noArchived')
+                : t('dashboard.noSessions')}
             </p>
             <p className="dash-empty-desc">
-              {viewFilter === 'archived'
+              {enabledAgentIds.length === 0
+                ? t('dashboard.noAgentsEnabledDesc')
+                : viewFilter === 'archived'
                 ? t('dashboard.noArchivedDesc')
                 : t('dashboard.noSessionsDesc')}
             </p>
+            {enabledAgentIds.length === 0 && (
+              <button
+                type="button"
+                className="dash-no-agents-btn"
+                style={{ marginTop: 12 }}
+                onClick={() => openSettings('cli')}
+              >
+                {t('sidebar.settings')} ➔
+              </button>
+            )}
           </div>
         ) : (
           <div className="dash-session-list">

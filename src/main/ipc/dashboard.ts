@@ -5,6 +5,7 @@ import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { getActiveSessionMetas } from './pty'
 import { workspace } from '../index'
+import { isCliEnabled } from './settings'
 import type { AgentId, DashboardData, AgentSessionInfo } from '../../preload/index'
 
 const H = homedir()
@@ -564,33 +565,39 @@ export function registerDashboardHandlers(): void {
     const activePty = getActiveSessionMetas()
     const activePtySessions = activePty.filter((p) => !deletedSet.has(p.id))
 
-    // 2. 抓取歷史真實會話記錄
-    const agySessions = scanAntigravitySessions(20)
-      .filter((s) => !deletedSet.has(s.id))
-      .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+    // 2. 抓取歷史真實會話記錄（依 Settings 啟用狀態過濾）
+    const agySessions = isCliEnabled('antigravity')
+      ? scanAntigravitySessions(20)
+          .filter((s) => !deletedSet.has(s.id))
+          .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+      : []
 
-    const claudeSessions = scanClaudeSessions(20)
-      .filter((s) => !deletedSet.has(s.id))
-      .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+    const claudeSessions = isCliEnabled('claude')
+      ? scanClaudeSessions(20)
+          .filter((s) => !deletedSet.has(s.id))
+          .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+      : []
 
-    const codexSessions = scanCodexSessions(20)
-      .filter((s) => !deletedSet.has(s.id))
-      .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+    const codexSessions = isCliEnabled('codex')
+      ? scanCodexSessions(20)
+          .filter((s) => !deletedSet.has(s.id))
+          .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+      : []
 
     // 3. 智慧關聯活躍進程與真實 Session
-    // 只有真正屬於 Agent CLI 的進程才需要關聯；普通 Shell (PowerShell/CMD/Bash) 不作為 Agent Session 呈現
+    // 只有真正屬於已啟用的 Agent CLI 進程才需要關聯；普通 Shell (PowerShell/CMD/Bash) 與停用之 Agent 不作為 Session 呈現
     const standaloneSessions: AgentSessionInfo[] = []
     const matchedSet = new Set<string>()
 
     for (const p of activePtySessions) {
       const cmd = (p.command || '').toLowerCase()
       const lid = (p.launcherId || '').toLowerCase()
-      const isClaude = cmd.includes('claude') || lid.includes('claude')
-      const isAgy = cmd.includes('agy') || cmd.includes('antigravity') || lid.includes('antigravity')
-      const isCodex = cmd.includes('codex') || lid.includes('codex')
+      const isClaude = isCliEnabled('claude') && (cmd.includes('claude') || lid.includes('claude'))
+      const isAgy = isCliEnabled('antigravity') && (cmd.includes('agy') || cmd.includes('antigravity') || lid.includes('antigravity'))
+      const isCodex = isCliEnabled('codex') && (cmd.includes('codex') || lid.includes('codex'))
 
       if (!isClaude && !isAgy && !isCodex) {
-        // 一般 shell 不當作 Agent Session，杜絕幽靈假卡片
+        // 一般 shell 或已停用 Agent 不當作 Agent Session，杜絕幽靈假卡片
         continue
       }
 
