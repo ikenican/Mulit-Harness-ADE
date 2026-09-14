@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-09-14
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.4 帶來完整的自動化發布工作流、線上自動更新支援、真實 Codex/Antigravity 會話恢復與極窄防跑版佈局：
+1. **真實 Codex & Antigravity 會話恢復 (Real Session Resume - PR #4)**：修正點擊儀表板會話卡片時未能真實帶入 session resume 參數的問題，串接 Antigravity CLI 原生會話儲存庫與 Token 啟發式估算，並為 PTY 增加 WebContents 銷毀保護避免崩潰。
+2. **零停機線上自動更新與容錯 (Auto-Updater & Error Sanitization)**：支援桌面安裝版在線檢查更新與背景下載，消除 404 報錯；免安裝綠色版亦可一鍵獲取最新發布。
+3. **極窄邊欄響應式防重疊佈局 (Responsive Dashboard Sidebar)**：採用 CSS Container Query，側邊欄極度縮小或拖曳時按鈕自動動態轉為圖示，消除文字折行與多層卡片擠壓。
+4. **內建 Web 測試瀏覽器離線智慧引導 (Browser Dev Server Offline Guidance)**：本地 Web 開發伺服器未啟動時提供清楚引導卡片與常用 Port 快捷切換。
+5. **一鍵式自動發布與安裝 (Automated Release Publisher & Quick Installer)**：引入 `npm run release` 一鍵自動編譯、壓縮免安裝綠色包並直推 GitHub Releases；提供 PowerShell 單行快速安裝腳本。
+
+### Added / 新增功能
+- **一鍵式 Release 發布腳本 (`scripts/release.ps1` & `npm run release`)**:
+  - 自動讀取 `package.json` 版本號，執行 TypeScript 檢查與 electron-builder 打包。
+  - 自動壓縮綠色免安裝目錄 `release/win-unpacked` 為 `Agent-Workbench-<version>-portable.zip`。
+  - 自動調用 GitHub CLI (`gh`) 上傳安裝檔、免安裝包、`latest.yml` 與區塊校驗檔。
+- **PowerShell 一鍵安裝腳本 (`install.ps1`)**:
+  - 支援 TLS 1.2/1.3，自動抓取最新 Release 安裝檔並於使用者端一鍵下載安裝。
+- **內建 Web 測試瀏覽器未啟動引導 (`TestBrowserPanel.tsx`)**:
+  - 監聽 `did-fail-load`，伺服器離線時展示友善引導與常用 Port（:5173, :3000, :8080, :8000）按鈕。
+- **Auto-Updater 404 報錯過濾與備援檢查 (`updater.ts`)**:
+  - 消除無效的 404 錯誤堆疊傾印，在線版本即時確認無誤後提供打勾確認狀態。
+
+### Fixed / 修復問題
+- **真實 Codex & Antigravity 會話恢復 (PR #4 by Jerrywu-TT)**:
+  - 補齊 `TerminalPanel.tsx` 中 Codex resume 指令參數（`args = ['resume', req.id]`）。
+  - 對接 `scanAntigravityCliConversations` 至 CLI 原生資料庫目錄，避免 `--conversation` 參數被剔除。
+  - 加入 `estimateTokensFromBlob` 提供 Antigravity 會話 Token 統計。
+  - PTY 進程加入 `isDestroyed()` 守護，防止視窗關閉時觸發 WebContents 崩潰。
+- **儀表板側邊欄縮小重疊跑版 (`DashboardPanel.tsx` & `dashboard.css`)**:
+  - 資料夾標題重構為雙層結構，徹底解決切換按鈕文字折疊與標籤重疊。
+  - 導入 CSS 容器查詢（`@container dash-panel`），窄版自動將按鈕收縮為圖示。
+
+---
+
 ## [0.1.3] - 2026-09-14
 
 ### Highlights & Summary / 更新亮點

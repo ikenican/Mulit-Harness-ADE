@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconClose } from '@/components/Icons'
+import { useTranslation } from '@/i18n'
 import './browser.css'
 
 type ViewportMode = 'full' | 'tablet' | 'mobile'
@@ -16,9 +17,11 @@ interface TestBrowserPanelProps {
 }
 
 export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JSX.Element {
+  const { t } = useTranslation()
   const [url, setUrl] = useState('http://localhost:5173')
   const [inputVal, setInputVal] = useState('http://localhost:5173')
   const [isLoading, setIsLoading] = useState(false)
+  const [loadError, setLoadError] = useState<{ code: number; desc: string; url: string } | null>(null)
   const [viewport, setViewport] = useState<ViewportMode>('full')
   const [isLandscape, setIsLandscape] = useState(false)
   const webviewRef = useRef<any>(null)
@@ -32,6 +35,7 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
   }
 
   const navigate = (newUrl: string): void => {
+    setLoadError(null)
     const target = normalizeUrl(newUrl)
     setUrl(target)
     setInputVal(target)
@@ -45,6 +49,7 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
 
   const goBack = (): void => {
     try {
+      setLoadError(null)
       if (webviewRef.current && typeof webviewRef.current.goBack === 'function') {
         webviewRef.current.goBack()
       }
@@ -55,6 +60,7 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
 
   const goForward = (): void => {
     try {
+      setLoadError(null)
       if (webviewRef.current && typeof webviewRef.current.goForward === 'function') {
         webviewRef.current.goForward()
       }
@@ -64,6 +70,7 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
   }
 
   const reload = (): void => {
+    setLoadError(null)
     try {
       if (webviewRef.current && typeof webviewRef.current.reload === 'function') {
         webviewRef.current.reload()
@@ -90,7 +97,10 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
     const el = webviewRef.current
     if (!el) return
 
-    const onStart = (): void => setIsLoading(true)
+    const onStart = (): void => {
+      setIsLoading(true)
+      setLoadError(null)
+    }
     const onStop = (): void => {
       setIsLoading(false)
       try {
@@ -104,17 +114,27 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
         /* ignore */
       }
     }
+    const onFail = (e: any): void => {
+      setIsLoading(false)
+      if (e.errorCode && e.errorCode !== -3) {
+        setLoadError({
+          code: e.errorCode,
+          desc: e.errorDescription || 'Connection refused',
+          url: e.validatedURL || url
+        })
+      }
+    }
 
     el.addEventListener('did-start-loading', onStart)
     el.addEventListener('did-stop-loading', onStop)
     el.addEventListener('did-navigate', onStop)
-    el.addEventListener('did-fail-load', onStop)
+    el.addEventListener('did-fail-load', onFail)
 
     return () => {
       el.removeEventListener('did-start-loading', onStart)
       el.removeEventListener('did-stop-loading', onStop)
       el.removeEventListener('did-navigate', onStop)
-      el.removeEventListener('did-fail-load', onStop)
+      el.removeEventListener('did-fail-load', onFail)
     }
   }, [url])
 
@@ -181,7 +201,9 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
             }}
             title="Jump to standard local dev port"
           >
-            <option value="" disabled>Ports ▾</option>
+            <option value="" disabled>
+              Ports ▾
+            </option>
             {QUICK_PORTS.map((p) => (
               <option key={p.port} value={p.port}>
                 {p.label}
@@ -254,13 +276,86 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
           style={{ width: frameWidth, height: frameHeight }}
         >
           {url ? (
-            <webview
-              ref={webviewRef}
-              src={url}
-              className="browser-webview"
-              allowpopups={true}
-              webpreferences="contextIsolation=true, sandbox=false"
-            />
+            <>
+              <webview
+                ref={webviewRef}
+                src={url}
+                className="browser-webview"
+                allowpopups={true}
+                webpreferences="contextIsolation=true, sandbox=false"
+              />
+              {loadError && (
+                <div className="browser-error-overlay">
+                  <div className="browser-error-card">
+                    <div className="browser-error-icon">
+                      <svg
+                        width="36"
+                        height="36"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="2" y1="12" x2="22" y2="12" />
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                      </svg>
+                    </div>
+
+                    <h3 className="browser-error-title">
+                      {loadError.url.includes('localhost') || loadError.url.includes('127.0.0.1')
+                        ? t('browser.serverNotRunning')
+                        : t('browser.cannotConnect')}
+                    </h3>
+
+                    <p className="browser-error-desc">
+                      {loadError.url.includes('localhost') || loadError.url.includes('127.0.0.1')
+                        ? t('browser.serverNotRunningDesc', { url: loadError.url })
+                        : t('browser.cannotConnectDesc', { url: loadError.url })}
+                    </p>
+
+                    <div className="browser-error-actions">
+                      <button
+                        type="button"
+                        className="browser-action-pill primary"
+                        onClick={reload}
+                      >
+                        ↻ {t('browser.retry')}
+                      </button>
+                      <button
+                        type="button"
+                        className="browser-action-pill"
+                        onClick={openExternal}
+                      >
+                        ↗ {t('browser.openExternal')}
+                      </button>
+                    </div>
+
+                    {(loadError.url.includes('localhost') || loadError.url.includes('127.0.0.1')) && (
+                      <div className="browser-quick-ports-section">
+                        <span className="browser-quick-ports-label">
+                          {t('browser.tryPorts')}
+                        </span>
+                        <div className="browser-quick-ports-list">
+                          {QUICK_PORTS.map((p) => (
+                            <button
+                              key={p.port}
+                              type="button"
+                              className="browser-port-chip"
+                              onClick={() => navigate(`http://localhost:${p.port}`)}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="browser-empty-state">
               <h3>No URL loaded</h3>

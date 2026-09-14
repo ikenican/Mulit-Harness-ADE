@@ -17,7 +17,9 @@ import {
   IconShield,
   IconInfo,
   IconDownload,
-  IconSpark
+  IconSpark,
+  IconRefresh,
+  IconAppLogo
 } from './Icons'
 import './settingsModal.css'
 import type { WorkbenchSettings, DocToolPaths, UpdaterStatus } from '../../../preload/index'
@@ -1239,21 +1241,8 @@ export default function SettingsModal({
               <div className="macos-settings-body">
                 {/* App Brand Header Card */}
                 <div className="macos-group-box" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div
-                    style={{
-                      width: 52,
-                      height: 52,
-                      borderRadius: 13,
-                      background: 'linear-gradient(135deg, #0284c7, #6366f1)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#fff',
-                      boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)',
-                      flexShrink: 0
-                    }}
-                  >
-                    <IconTerminalBox size={26} />
+                  <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <IconAppLogo size={54} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -1290,10 +1279,15 @@ export default function SettingsModal({
                       className="macos-btn-secondary"
                       onClick={handleCheckUpdate}
                       disabled={checkingUpdate || updaterStatus?.checking || updaterStatus?.isDownloading}
-                      style={{ fontSize: '12px', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                      style={{ fontSize: '12px', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
                     >
-                      <IconSpark size={13} />
-                      {checkingUpdate || updaterStatus?.checking ? t('settings.checkingUpdates') : t('settings.checkForUpdates')}
+                      <IconRefresh
+                        size={13}
+                        className={checkingUpdate || updaterStatus?.checking ? 'macos-spin' : ''}
+                      />
+                      <span>
+                        {checkingUpdate || updaterStatus?.checking ? t('settings.checkingUpdates') : t('settings.checkForUpdates')}
+                      </span>
                     </button>
                   </div>
 
@@ -1410,24 +1404,32 @@ export default function SettingsModal({
                 </div>
 
                 {/* Auto Check Preference */}
-                <div className="macos-group-box">
-                  <div className="macos-group-content">
-                    <div className="macos-cell-row">
-                      <div className="macos-cell-label">
-                        <span className="macos-cell-title">{t('settings.autoCheckUpdates')}</span>
-                        <span className="macos-cell-desc">{t('settings.autoCheckUpdatesDesc')}</span>
-                      </div>
-                      <div className="macos-cell-control">
-                        <label className="macos-toggle">
-                          <input
-                            type="checkbox"
-                            checked={settings.autoCheckUpdates ?? true}
-                            onChange={(e) =>
-                              setSettings((prev) => ({ ...prev, autoCheckUpdates: e.target.checked }))
-                            }
-                          />
-                          <span className="macos-toggle-slider" />
-                        </label>
+                <div className="macos-section">
+                  <div className="macos-inset-group">
+                    <div className="macos-row">
+                      <div className="macos-row-main">
+                        <div className="macos-row-left">
+                          <div className="macos-row-info">
+                            <div className="macos-row-title-row">
+                              <span className="macos-row-title">{t('settings.autoCheckUpdates')}</span>
+                            </div>
+                            <span className="macos-row-sub">
+                              {t('settings.autoCheckUpdatesDesc')}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="macos-row-right">
+                          <label className="apple-toggle">
+                            <input
+                              type="checkbox"
+                              checked={settings.autoCheckUpdates ?? true}
+                              onChange={(e) =>
+                                setSettings((prev) => ({ ...prev, autoCheckUpdates: e.target.checked }))
+                              }
+                            />
+                            <span className="apple-toggle-slider" />
+                          </label>
+                        </div>
                       </div>
                     </div>
                   </div>

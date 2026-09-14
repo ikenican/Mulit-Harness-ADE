@@ -156,12 +156,23 @@ export function registerUpdaterHandlers(): void {
     broadcastStatus()
   })
 
+function formatUpdaterError(msg: string): string {
+  if (!msg) return ''
+  if (msg.includes('Cannot find latest.yml') || msg.includes('404')) {
+    return 'Online update manifest (latest.yml) is not yet published for this release.'
+  }
+  if (msg.includes('net::ERR_INTERNET_DISCONNECTED') || msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED')) {
+    return 'Network connection failed. Please check your internet connection.'
+  }
+  const firstLine = msg.split('\n')[0]
+  return firstLine.length > 120 ? firstLine.slice(0, 120) + '...' : firstLine
+}
+
   autoUpdater.on('error', (err: Error) => {
     console.warn('[Updater] autoUpdater error:', err.message)
     updaterStatus.checking = false
     updaterStatus.isDownloading = false
-    // 遇到非致命錯誤時標記錯誤訊息
-    updaterStatus.error = err.message
+    updaterStatus.error = formatUpdaterError(err.message)
     broadcastStatus()
   })
 
@@ -180,29 +191,45 @@ export function registerUpdaterHandlers(): void {
     // 1. 若為打包狀態的安裝版，嘗試透過 autoUpdater 檢查
     if (app.isPackaged && updaterStatus.isInstalled) {
       try {
-        await autoUpdater.checkForUpdates()
-        return updaterStatus
+        const checkPromise = autoUpdater.checkForUpdates()
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Update check timed out')), 8000)
+        )
+        const result = await Promise.race([checkPromise, timeoutPromise])
+        if (result) {
+          // autoUpdater 成功取得更新資訊
+          return updaterStatus
+        }
       } catch (err: unknown) {
         console.warn('[Updater] autoUpdater.checkForUpdates failed, falling back to GitHub API:', err)
       }
     }
 
-    // 2. 免安裝版、開發環境或 autoUpdater 失敗時，走 GitHub Releases API 備援查詢
+    // 2. 免安裝版、開發環境或 autoUpdater 失敗（如線上缺少 latest.yml 404）時，走 GitHub Releases API 備援查詢
     try {
       const ghRelease = await fetchLatestFromGitHub()
       updaterStatus.checking = false
-      if (ghRelease && compareSemver(updaterStatus.currentVersion, ghRelease.version) < 0) {
-        updaterStatus.updateAvailable = true
-        updaterStatus.updateInfo = ghRelease
+      if (ghRelease) {
+        // 備援查詢成功，清除 autoUpdater 的 404 報錯
+        updaterStatus.error = undefined
+        if (compareSemver(updaterStatus.currentVersion, ghRelease.version) < 0) {
+          updaterStatus.updateAvailable = true
+          updaterStatus.updateInfo = ghRelease
+        } else {
+          updaterStatus.updateAvailable = false
+        }
       } else {
-        updaterStatus.updateAvailable = false
+        // 若 GitHub API 也沒查到，且先前已有 error 則保留，否則標記
+        if (!updaterStatus.error) {
+          updaterStatus.updateAvailable = false
+        }
       }
       broadcastStatus()
       return updaterStatus
     } catch (err: unknown) {
       updaterStatus.checking = false
       const msg = err instanceof Error ? err.message : String(err)
-      updaterStatus.error = msg
+      updaterStatus.error = formatUpdaterError(msg)
       broadcastStatus()
       return updaterStatus
     }

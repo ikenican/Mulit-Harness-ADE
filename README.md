@@ -29,13 +29,48 @@ React + Vite.
 - **Bilingual i18n** — full interface localization supporting seamless toggling between Strict English and Traditional Chinese.
 - **CLI Permissions & Bypass Mode** — toggleable bypass mode skipping interactive approval prompts for Claude Code (`--permission-mode bypassPermissions`), Codex (`--dangerously-bypass-approvals-and-sandbox`), and Antigravity (`--dangerously-skip-permissions`).
 
-## Requirements
+## Installation
+
+### Method 1: One-Line Quick Install (Windows PowerShell)
+
+Run this command in **PowerShell** (no Git or Node.js required):
+
+```powershell
+irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
+```
+
+> **What this does:** Automatically fetches the latest release from GitHub, downloads the Windows setup installer (`.exe`), and starts the installation.
+>
+> *Options:*
+> - **Silent install** (no wizard prompt):
+>   ```powershell
+>   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -Silent
+>   ```
+> - **Download installer only** without running:
+>   ```powershell
+>   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -DownloadOnly
+>   ```
+
+### Method 2: Direct Download from GitHub Releases
+
+Prefer manual download? Grab the setup package directly from GitHub:
+
+- 🚀 **[Download Latest Release](https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/latest)**
+- Download `Agent Workbench-<version>-setup.exe` and double-click to install.
+- *(Portable version: download portable archive and run `Agent Workbench.exe` directly without installation.)*
+
+---
+
+## Development & Build from Source
+
+For developers who want to contribute or build from source:
+
+### Requirements
 
 - Node.js 18+ (LTS recommended)
-- On Windows the terminal uses a prebuilt native binary (`@lydell/node-pty`); no
-  compiler toolchain is required.
+- On Windows the terminal uses a prebuilt native binary (`@lydell/node-pty`); no compiler toolchain is required.
 
-## Getting started
+### Getting started
 
 ```bash
 git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
@@ -44,12 +79,13 @@ npm install
 npm run dev        # launch in development
 ```
 
-## Build
+## Build & Publish
 
 ```bash
 npm run typecheck  # TypeScript check, no emit
 npm run build      # compile main / preload / renderer
 npm run dist       # build an installer with electron-builder
+npm run release    # one-click release: builds installer, packages portable ZIP, and publishes to GitHub Releases
 ```
 
 Installer output goes to `release/`. Build config is in `electron-builder.yml`.
@@ -124,12 +160,46 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **雙語系支援**——全系統支援嚴謹英文與繁體中文介面即時無縫切換。
 - **CLI 啟動權限與略過模式**——全域開關支援切換 AI 代理（Claude Code、Codex、Antigravity）略過互動式審批確認模式，提升自動化執行流暢度。
 
-## 需求
+## 安裝指南
+
+### 方法一：PowerShell 一鍵快速安裝（Windows 推薦）
+
+在 **PowerShell** 貼上並執行以下單行指令（無需 Git 或 Node.js）：
+
+```powershell
+irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
+```
+
+> **說明：** 自動向 GitHub 取得最新版本安裝包（`.exe`），下載並自動啟動安裝精靈。
+>
+> *進階選項：*
+> - **靜默自動安裝**（不彈出安裝引導畫面）：
+>   ```powershell
+>   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -Silent
+>   ```
+> - **僅下載安裝檔到本地**（不立即執行）：
+>   ```powershell
+>   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -DownloadOnly
+>   ```
+
+### 方法二：直接自 GitHub Releases 下載
+
+- 🚀 **[前往最新發行頁面（GitHub Releases）](https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/latest)**
+- 下載 `Agent Workbench-<版本>-setup.exe` 雙擊即可安裝。
+- *(免安裝綠色版：解壓後直接雙擊 `Agent Workbench.exe` 即可使用)*
+
+---
+
+## 開發與自原始碼建置
+
+若您欲參與開發或進行除錯：
+
+### 需求
 
 - Node.js 18+（建議 LTS）
 - Windows 上終端使用預編譯原生二進位（`@lydell/node-pty`），無需編譯工具鏈。
 
-## 快速開始
+### 快速開始
 
 ```bash
 git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
@@ -138,12 +208,13 @@ npm install
 npm run dev        # 開發模式啟動
 ```
 
-## 建置
+## 建置與發佈 (Build & Publish)
 
 ```bash
 npm run typecheck  # TypeScript 型別檢查，不輸出
 npm run build      # 編譯 main / preload / renderer
 npm run dist       # 用 electron-builder 產生安裝檔
+npm run release    # 一鍵自動發布：自動編譯、打包免安裝綠色 ZIP、並上傳至 GitHub Releases
 ```
 
 安裝檔輸出於 `release/`；建置設定見 `electron-builder.yml`。

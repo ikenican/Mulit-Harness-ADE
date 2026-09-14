@@ -501,30 +501,50 @@ export default function DashboardPanel(): JSX.Element {
                     onClick={() => toggleFolderCollapse(group.key)}
                     title={`Click to ${isCollapsed ? 'expand' : 'collapse'} sessions in ${group.name}${group.path ? ` (${group.path})` : ''}`}
                   >
-                    <div className="dash-folder-left">
-                      <span className={`dash-folder-chevron ${isCollapsed ? '' : 'expanded'}`}>
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <polyline points="9 18 15 12 9 6" />
-                        </svg>
+                    {/* Top Row: Chevron, Folder Icon, Name, and Total Tokens */}
+                    <div className="dash-folder-top">
+                      <div className="dash-folder-title-left">
+                        <span className={`dash-folder-chevron ${isCollapsed ? '' : 'expanded'}`}>
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="9 18 15 12 9 6" />
+                          </svg>
+                        </span>
+                        <span className="dash-folder-icon">
+                          <IconFolder size={14} />
+                        </span>
+                        <strong className="dash-folder-name" title={group.path || group.name}>
+                          {group.name}
+                        </strong>
+                        {group.isCurrentWorkspace && (
+                          <span className="dash-folder-badge current">{t('dashboard.currentWorkspace')}</span>
+                        )}
+                      </div>
+                      <span className="dash-folder-tokens" title={`${group.totalTokens.toLocaleString()} tokens`}>
+                        {formatTokens(group.totalTokens)} {t('common.tokens')}
                       </span>
-                      <span className="dash-folder-icon">
-                        <IconFolder size={14} />
-                      </span>
-                      <strong className="dash-folder-name" title={group.path || group.name}>
-                        {group.name}
-                      </strong>
-                      {group.isCurrentWorkspace && (
-                        <span className="dash-folder-badge current">{t('dashboard.currentWorkspace')}</span>
-                      )}
+                    </div>
+
+                    {/* Sub Row: Active indicator, Session count, and Switch Folder button */}
+                    <div className="dash-folder-sub">
+                      <div className="dash-folder-sub-left">
+                        {group.activeCount > 0 && (
+                          <span className="dash-folder-active-tag">
+                            <span className="dash-pulse-dot" /> {t('dashboard.activeCount', { count: group.activeCount })}
+                          </span>
+                        )}
+                        <span className="dash-folder-badge count">
+                          {group.sessions.length} {group.sessions.length === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
+                        </span>
+                      </div>
                       {group.path && !group.isCurrentWorkspace && (
                         <button
                           type="button"
@@ -542,20 +562,6 @@ export default function DashboardPanel(): JSX.Element {
                           <span>{t('dashboard.switchFolder')} ➔</span>
                         </button>
                       )}
-                      <span className="dash-folder-badge count">
-                        {group.sessions.length} {group.sessions.length === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
-                      </span>
-                    </div>
-
-                    <div className="dash-folder-right">
-                      {group.activeCount > 0 && (
-                        <span className="dash-folder-active-tag">
-                          <span className="dash-pulse-dot" /> {t('dashboard.activeCount', { count: group.activeCount })}
-                        </span>
-                      )}
-                      <span className="dash-folder-tokens">
-                        {formatTokens(group.totalTokens)} {t('common.tokens')}
-                      </span>
                     </div>
                   </div>
 
@@ -787,18 +793,20 @@ function SessionCard({
           </div>
         </div>
 
-        <div
-          className="dash-session-token-summary"
-          onClick={onToggle}
-          title="Click to toggle token breakdown"
-        >
-          <strong className="dash-token-amount">{formatTokens(totalTokens)}</strong>
-          <span className="dash-token-unit">{t('common.tokens')}</span>
-        </div>
+        <div className="dash-session-right-col">
+          <div
+            className="dash-session-token-summary"
+            onClick={onToggle}
+            title="Click to toggle token breakdown"
+          >
+            <strong className="dash-token-amount">{formatTokens(totalTokens)}</strong>
+            <span className="dash-token-unit">{t('common.tokens')}</span>
+          </div>
 
-        <button className="dash-expand-chevron" onClick={onToggle} title="Show token breakdown">
-          {isExpanded ? '▲' : '▼'}
-        </button>
+          <button className="dash-expand-chevron" onClick={onToggle} title="Show token breakdown">
+            {isExpanded ? '▲' : '▼'}
+          </button>
+        </div>
       </div>
 
       {/* Apple Health Segmented Token Meter Bar */}
@@ -838,20 +846,20 @@ function SessionCard({
         </button>
         <div className="dash-session-actions-right">
           <button
-            className="dash-action-btn"
+            className="dash-action-btn dash-action-icon-btn"
             onClick={onArchive}
-            title={session.isArchived ? 'Restore to active list' : 'Archive session'}
+            title={session.isArchived ? t('dashboard.restore') : t('dashboard.archive')}
           >
             <IconArchive size={12} />
-            <span>{session.isArchived ? t('dashboard.restore') : t('dashboard.archive')}</span>
+            <span className="dash-action-label">{session.isArchived ? t('dashboard.restore') : t('dashboard.archive')}</span>
           </button>
           <button
-            className="dash-action-btn dash-action-delete"
+            className="dash-action-btn dash-action-delete dash-action-icon-btn"
             onClick={onDelete}
-            title="Delete session record"
+            title={t('dashboard.delete')}
           >
             <IconTrash size={12} />
-            <span>{t('dashboard.delete')}</span>
+            <span className="dash-action-label">{t('dashboard.delete')}</span>
           </button>
         </div>
       </div>

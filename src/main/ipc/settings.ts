@@ -59,10 +59,14 @@ export function getGlobalSettingsPath(): string {
  * 工作區專案特定設定檔路徑（若工作區非系統保護目錄則回傳）
  */
 export function getWorkspaceSettingsPath(): string | null {
-  if (typeof workspace === 'undefined' || !workspace || !workspace.root || isProtectedPath(workspace.root)) {
+  try {
+    if (!workspace || !workspace.root || isProtectedPath(workspace.root)) {
+      return null
+    }
+    return join(workspace.root, SETTINGS_REL)
+  } catch {
     return null
   }
-  return join(workspace.root, SETTINGS_REL)
 }
 
 export function loadSettings(): WorkbenchSettings {

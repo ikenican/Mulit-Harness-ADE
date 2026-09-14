@@ -220,6 +220,15 @@ export const translations = {
       splitRows2: 'Split H',
       splitGrid4: 'Grid',
       awaitingApproval: '{count} Awaiting Approval'
+    },
+    browser: {
+      serverNotRunning: 'Local Dev Server Not Running',
+      cannotConnect: 'Cannot Connect to Site',
+      serverNotRunningDesc: 'No active web server detected on {url}. Start your dev server in the terminal (e.g. npm run dev), or select another port above.',
+      cannotConnectDesc: 'Unable to reach {url}. Please check that the URL is correct or verify your network connection.',
+      retry: 'Retry',
+      openExternal: 'Open in External Browser',
+      tryPorts: 'Try common dev ports:'
     }
   },
   'zh-TW': {
@@ -439,6 +448,15 @@ export const translations = {
       splitRows2: '水平分割',
       splitGrid4: '四格分割',
       awaitingApproval: '{count} 個等待授權'
+    },
+    browser: {
+      serverNotRunning: '本地開發伺服器未啟動',
+      cannotConnect: '無法連線至此網站',
+      serverNotRunningDesc: '目前在 {url} 尚未偵測到任何運作中的 Web 伺服器。請先在右側終端執行專案啟動指令（如 npm run dev），或是從上方切換其他 Port / 輸入網址。',
+      cannotConnectDesc: '無法連線至 {url}。請確認網址輸入正確，或是檢查網路連線狀態。',
+      retry: '重新載入',
+      openExternal: '在系統瀏覽器開啟',
+      tryPorts: '快速切換常用 Port：'
     }
   }
 } as const

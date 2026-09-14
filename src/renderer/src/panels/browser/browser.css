@@ -219,3 +219,139 @@
   text-align: center;
   padding: 24px;
 }
+
+/* Error / Server Offline Overlay */
+.browser-error-overlay {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 95%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  z-index: 10;
+}
+
+.browser-error-card {
+  max-width: 440px;
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 26px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.28);
+  box-sizing: border-box;
+}
+
+.browser-error-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.browser-error-title {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.015em;
+}
+
+.browser-error-desc {
+  margin: 0 0 18px 0;
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.55;
+}
+
+.browser-error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.browser-action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--bg3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  transition: all 0.15s ease;
+}
+
+.browser-action-pill:hover {
+  background: var(--bg);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.browser-action-pill.primary {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.browser-action-pill.primary:hover {
+  filter: brightness(1.1);
+}
+
+.browser-quick-ports-section {
+  width: 100%;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.browser-quick-ports-label {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.browser-quick-ports-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.browser-port-chip {
+  padding: 2.5px 8px;
+  border-radius: 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.browser-port-chip:hover {
+  background: var(--bg3);
+  color: var(--accent);
+  border-color: var(--accent);
+}

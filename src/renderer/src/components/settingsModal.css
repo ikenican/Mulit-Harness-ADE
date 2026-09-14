@@ -25,6 +25,16 @@
   to { transform: scale(1); opacity: 1; }
 }
 
+@keyframes macosSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.macos-spin {
+  animation: macosSpin 0.9s linear infinite;
+  transform-origin: center center;
+}
+
 /* Authentic macOS Settings Window */
 .macos-settings-window {
   width: 820px;
