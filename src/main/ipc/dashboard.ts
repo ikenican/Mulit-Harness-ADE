@@ -334,6 +334,118 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
 }
 
 /**
+ * 從二進位 blob 裡掃出連續的可讀 UTF-8 文字段落，粗估這個 session 用掉的 token 數。
+ * Antigravity CLI conversation 的 .db 內部欄位是 protobuf blob、無官方 schema 可正確
+ * 解析，但使用者訊息、系統提示詞、工具輸出等文字內容仍以明文 UTF-8 散落其中——用類似
+ * Unix `strings` 指令的做法，把整個檔案當 UTF-8 解碼，無法解碼的位元組會變成 U+FFFD
+ * 替代字元，直接排除掉；剩下連續 4 字元以上的可讀段落全部算進總長度，
+ * 再套用跟 estimateTokens() 一樣的字元數量級公式（約 3.5 字元 ≈ 1 token）。
+ * 不是精確值，但比恆定 0 更貼近真實使用量，而且只是掃 bytes，不依賴 protobuf 內部
+ * 欄位順序或結構，Antigravity 版本更新也不容易讓它失效。
+ */
+function estimateTokensFromBlob(buf: Buffer): number {
+  const text = buf.toString('utf8')
+  const MIN_RUN = 4
+  let totalChars = 0
+  let runLen = 0
+  for (const ch of text) {
+    const code = ch.codePointAt(0) || 0
+    const isReadable = code !== 0xfffd && (code >= 0x20 || code === 0x0a || code === 0x0d || code === 0x09)
+    if (isReadable) {
+      runLen++
+    } else {
+      if (runLen >= MIN_RUN) totalChars += runLen
+      runLen = 0
+    }
+  }
+  if (runLen >= MIN_RUN) totalChars += runLen
+  return Math.ceil(totalChars / 3.5)
+}
+
+/**
+ * 掃描 Antigravity CLI 自己的 conversation 儲存區（`~/.gemini/antigravity-cli/conversations/*.db`，
+ * 一個 session 一個 SQLite 檔）。這裡的檔名就是 `agy --conversation <id>` 真正吃得動的 ID——
+ * 跟 scanAntigravitySessions() 讀的 IDE 面板 brain session 是兩組完全不重疊的 ID 空間，
+ * 過去 Dashboard 只掃 brain session，導致點擊 resume 時帶的 ID 在 CLI 這邊永遠找不到對應紀錄，
+ * 送出的 --conversation 會被 pty.ts 的防呆邏輯直接拔掉，於是每次都變成全新啟動。
+ *
+ * token 數用 estimateTokensFromBlob() 粗估（見上），標題目前仍只能給通用名稱——
+ * 沒有官方 schema，換不到真實的對話標題或 workspace 路徑。
+ */
+function scanAntigravityCliConversations(max = 20): AgentSessionInfo[] {
+  const dir = join(H, '.gemini', 'antigravity-cli', 'conversations')
+  if (!fs.existsSync(dir)) return []
+
+  const list: AgentSessionInfo[] = []
+  const cache = loadDashboardCache()
+
+  try {
+    const files = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.db'))
+      .map((e) => {
+        const p = join(dir, e.name)
+        let mtime = 0
+        try {
+          mtime = fs.statSync(p).mtimeMs
+        } catch {
+          mtime = 0
+        }
+        return { id: e.name.slice(0, -3), path: p, mtime }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, max)
+
+    for (const f of files) {
+      const timeSinceLastActive = Date.now() - f.mtime
+      const status: 'active' | 'idle' | 'completed' =
+        timeSinceLastActive < 90 * 1000 ? 'active' : timeSinceLastActive < 15 * 60 * 1000 ? 'idle' : 'completed'
+      const lastTime = new Date(f.mtime || Date.now()).toISOString()
+
+      const cached = cache.get(f.path)
+      if (cached && cached.mtime === f.mtime) {
+        const s: AgentSessionInfo = { ...cached.session, status, lastActiveTime: lastTime }
+        list.push(s)
+        continue
+      }
+
+      let promptTokens = 0
+      try {
+        promptTokens = estimateTokensFromBlob(fs.readFileSync(f.path))
+      } catch {
+        promptTokens = 0
+      }
+
+      const sessionObj: AgentSessionInfo = {
+        id: f.id,
+        agent: 'antigravity',
+        title: `Antigravity Session (${f.id.slice(0, 8)})`,
+        status,
+        startTime: new Date(Math.max(0, f.mtime - 180000)).toISOString(),
+        lastActiveTime: lastTime,
+        totalTokens: promptTokens,
+        model: 'Gemini 3.8 Flash',
+        tokenBreakdown: {
+          promptTokens,
+          toolReadTokens: 0,
+          completionTokens: 0,
+          details: [
+            { category: 'Estimated from binary content (approximate)', tokens: promptTokens, percentage: 100 }
+          ]
+        }
+      }
+
+      cache.set(f.path, { mtime: f.mtime, session: sessionObj })
+      cacheDirty = true
+      list.push(sessionObj)
+    }
+  } catch {
+    // ignore
+  }
+  return list
+}
+
+/**
  * 讀取 Claude 本地專案日誌與真實 Token 概況（支援 mtime 快速快取）
  */
 function scanClaudeSessions(max = 20): AgentSessionInfo[] {
@@ -717,7 +829,7 @@ export function registerDashboardHandlers(): void {
 
         // 2. 抓取歷史真實會話記錄（依 Settings 啟用狀態過濾）
         const agySessions = isCliEnabled('antigravity')
-          ? scanAntigravitySessions(20)
+          ? [...scanAntigravitySessions(20), ...scanAntigravityCliConversations(20)]
               .filter((s) => !deletedSet.has(s.id))
               .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
           : []
