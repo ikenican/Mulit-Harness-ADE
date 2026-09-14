@@ -142,6 +142,20 @@ $setupExe = Get-ChildItem "release" -Filter "*$version*-setup.exe" | Select-Obje
 $latestYml = "release\latest.yml"
 $blockmap = Get-ChildItem "release" -Filter "*$version*.blockmap" | Select-Object -First 1
 
+# Normalize spaces to hyphens so GitHub Release URLs match latest.yml and avoid 404
+if ($setupExe -and $setupExe.Name -match '\s') {
+    $cleanExeName = $setupExe.Name -replace '\s+', '-'
+    $cleanExePath = Join-Path $setupExe.DirectoryName $cleanExeName
+    Copy-Item $setupExe.FullName $cleanExePath -Force
+    $setupExe = Get-Item $cleanExePath
+}
+if ($blockmap -and $blockmap.Name -match '\s') {
+    $cleanBlockmapName = $blockmap.Name -replace '\s+', '-'
+    $cleanBlockmapPath = Join-Path $blockmap.DirectoryName $cleanBlockmapName
+    Copy-Item $blockmap.FullName $cleanBlockmapPath -Force
+    $blockmap = Get-Item $cleanBlockmapPath
+}
+
 $uploadFiles = @()
 if ($setupExe) { $uploadFiles += $setupExe.FullName }
 if (Test-Path $latestYml) { $uploadFiles += (Resolve-Path $latestYml).Path }

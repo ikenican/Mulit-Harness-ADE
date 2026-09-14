@@ -38,6 +38,28 @@ interface TestResult {
   error?: string
 }
 
+function formatReleaseNotes(notes: unknown): string {
+  if (!notes) return ''
+  let text = ''
+  if (Array.isArray(notes)) {
+    text = notes.map((n) => (typeof n === 'string' ? n : (n as { note?: string })?.note || '')).join('\n')
+  } else if (typeof notes === 'string') {
+    text = notes
+  } else {
+    return ''
+  }
+  return text
+    .replace(/<br\s*[\/]?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim()
+}
+
 interface CliConfigItem {
   id: string
   name: string
@@ -1331,7 +1353,7 @@ export default function SettingsModal({
                               border: '1px solid var(--border-subtle)'
                             }}
                           >
-                            {updaterStatus.updateInfo.releaseNotes}
+                            {formatReleaseNotes(updaterStatus.updateInfo.releaseNotes)}
                           </div>
                         )}
 
