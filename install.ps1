@@ -129,6 +129,21 @@ if ($env:INSTALL_DOWNLOAD_ONLY -eq "1" -or $env:DOWNLOAD_ONLY -eq "1") { $Downlo
 $DestDir = if ($DownloadOnly) { (Get-Location).Path } else { $env:TEMP }
 $DestPath = Join-Path $DestDir $FileName
 
+# If destination file already exists and is locked by an old abandoned process, use a unique name
+try {
+    if (Test-Path $DestPath) {
+        $testStream = [System.IO.File]::Open($DestPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $testStream.Close()
+        Remove-Item $DestPath -Force -ErrorAction SilentlyContinue
+    }
+} catch {
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+    $ext = [System.IO.Path]::GetExtension($FileName)
+    $randomTag = [System.IO.Path]::GetRandomFileName().Substring(0, 6)
+    $DestPath = Join-Path $DestDir "$baseName-$randomTag$ext"
+}
+
+
 function Download-FileWithProgress {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
@@ -136,17 +151,24 @@ function Download-FileWithProgress {
         [long]$ExpectedBytes = 0
     )
 
-    # 1. Prefer curl.exe (standard in Windows 10/11) for high-speed download with live progress bar
+    # 1. Prefer curl.exe (standard in Windows 10/11) with live progress bar
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        if (Test-Path $DestinationPath) { Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue }
         & curl.exe -fL --progress-bar --user-agent "AgentWorkbench-Installer" -o $DestinationPath $Url
-        if ($LASTEXITCODE -eq 0 -and (Test-Path $DestinationPath) -and (Get-Item $DestinationPath).Length -gt 0) {
-            return
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $DestinationPath)) {
+            $actualLen = (Get-Item $DestinationPath).Length
+            if ($ExpectedBytes -eq 0 -or $actualLen -ge ($ExpectedBytes * 0.99)) {
+                return
+            }
         }
-        Write-Host "[Warning] curl.exe download did not complete successfully. Falling back to .NET streaming..." -ForegroundColor Yellow
+        Write-Host "[Warning] curl.exe download was incomplete or failed. Falling back to .NET streaming..." -ForegroundColor Yellow
         if (Test-Path $DestinationPath) { Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue }
     }
 
-    # 2. Fallback: .NET streaming download with live progress bar and status
+    # 2. Fallback: .NET streaming download with live progress bar and guaranteed cleanup
+    $res = $null
+    $stream = $null
+    $fileStream = $null
     try {
         $req = [System.Net.HttpWebRequest]::Create($Url)
         $req.AllowAutoRedirect = $true
@@ -174,20 +196,39 @@ function Download-FileWithProgress {
                 Write-Host -NoNewline "`rProgress: $pct% ($mb MB / $totalMb MB)  "
             }
         }
-        $fileStream.Close()
-        $stream.Close()
-        $res.Close()
         Write-Progress -Activity "Downloading Agent Workbench" -Completed
         Write-Host "`rProgress: 100.0% ($([math]::Round($downloaded / 1MB, 2)) MB) - Completed!          " -ForegroundColor Green
         return
     } catch {
         Write-Host ""
         Write-Host "[Warning] Streaming download failed: $($_.Exception.Message). Falling back to Invoke-WebRequest..." -ForegroundColor Yellow
-        if (Test-Path $DestinationPath) { Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue }
+    } finally {
+        if ($fileStream) { $fileStream.Dispose(); $fileStream = $null }
+        if ($stream) { $stream.Dispose(); $stream = $null }
+        if ($res) { $res.Dispose(); $res = $null }
     }
 
     # 3. Final fallback: Invoke-WebRequest
-    Invoke-WebRequest -Uri $Url -OutFile $DestinationPath -UseBasicParsing -UserAgent "AgentWorkbench-Installer"
+    try {
+        if (Test-Path $DestinationPath) { Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue }
+        Invoke-WebRequest -Uri $Url -OutFile $DestinationPath -UseBasicParsing -UserAgent "AgentWorkbench-Installer"
+    } catch {
+        Write-Host "[ERROR] All download attempts failed: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+
+    # Size validation
+    if (Test-Path $DestinationPath) {
+        $actual = (Get-Item $DestinationPath).Length
+        if ($ExpectedBytes -gt 0 -and $actual -lt ($ExpectedBytes * 0.95)) {
+            Write-Host "[ERROR] Downloaded file is incomplete ($([math]::Round($actual / 1MB, 2)) MB of $([math]::Round($ExpectedBytes / 1MB, 2)) MB)." -ForegroundColor Red
+            Write-Host "Please download the installer directly from: https://github.com/$RepoOwner/$RepoName/releases/latest" -ForegroundColor Cyan
+            exit 1
+        }
+    } else {
+        Write-Host "[ERROR] Installer file was not saved." -ForegroundColor Red
+        exit 1
+    }
 }
 
 Write-Host "Downloading $FileName ($FileSizeMB MB)..." -ForegroundColor Cyan
@@ -244,6 +285,13 @@ if ($FileName.EndsWith(".exe")) {
         }
     } else {
         $proc = Start-Process @ProcessArgs -PassThru
+        Start-Sleep -Milliseconds 500
+        if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+            Write-Host ""
+            Write-Host "[ERROR] Installer failed to start or crashed (Exit code: $($proc.ExitCode))." -ForegroundColor Red
+            Write-Host "You can try running the installer manually from: $DestPath" -ForegroundColor Yellow
+            exit 1
+        }
         Write-Host ""
         Write-Host "[SUCCESS] Setup wizard started. Follow the on-screen steps." -ForegroundColor Green
     }
