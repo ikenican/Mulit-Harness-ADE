@@ -98,7 +98,7 @@ if (-not $SkipBuild) {
         Write-Host "[ERROR] TypeScript typecheck failed! Aborting release." -ForegroundColor Red
         exit 1
     }
-    Write-Host "✓ Typecheck passed with 0 errors." -ForegroundColor Green
+    Write-Host "[OK] Typecheck passed with 0 errors." -ForegroundColor Green
 
     Write-Host ""
     Write-Host "==========================================" -ForegroundColor DarkGray
@@ -109,7 +109,7 @@ if (-not $SkipBuild) {
         Write-Host "[ERROR] npm run dist failed! Aborting release." -ForegroundColor Red
         exit 1
     }
-    Write-Host "✓ electron-builder finished successfully." -ForegroundColor Green
+    Write-Host "[OK] electron-builder finished successfully." -ForegroundColor Green
 } else {
     Write-Host "[Notice] -SkipBuild specified: Skipping typecheck and electron-builder." -ForegroundColor Yellow
 }
@@ -128,7 +128,7 @@ if (Test-Path "release\win-unpacked") {
     Write-Host "Compressing release\win-unpacked -> $portableZip..." -ForegroundColor Gray
     Compress-Archive -Path "release\win-unpacked\*" -DestinationPath $portableZip -Force
     $zipSizeMB = [math]::Round((Get-Item $portableZip).Length / 1MB, 2)
-    Write-Host "✓ Portable ZIP package created ($zipSizeMB MB)." -ForegroundColor Green
+    Write-Host "[OK] Portable ZIP package created ($zipSizeMB MB)." -ForegroundColor Green
 } else {
     Write-Host "[Warning] release\win-unpacked not found; portable ZIP skipped." -ForegroundColor Yellow
 }
@@ -172,7 +172,7 @@ Write-Host "Assets prepared for upload:" -ForegroundColor White
 foreach ($f in $uploadFiles) {
     $item = Get-Item $f
     $mb = [math]::Round($item.Length / 1MB, 2)
-    Write-Host "  • $($item.Name) ($mb MB)" -ForegroundColor Cyan
+    Write-Host "  * $($item.Name) ($mb MB)" -ForegroundColor Cyan
 }
 
 # Determine release notes
@@ -243,7 +243,7 @@ if ($GoogleDrivePath) {
 # Summary output
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host "      🎉 Release $tagName Successfully Published!         " -ForegroundColor Green
+Write-Host "      Release $tagName Successfully Published!         " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Release Page URL:" -ForegroundColor White
