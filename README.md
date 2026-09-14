@@ -44,14 +44,10 @@ irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/inst
 > *Options:*
 > - **Silent install** (no wizard prompt):
 >   ```powershell
->   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -Silent
->   # Or shorthand:
 >   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
-> - **Download installer only** without running:
+> - **Download installer only** (saves to current folder without running):
 >   ```powershell
->   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -DownloadOnly
->   # Or shorthand:
 >   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 
@@ -181,14 +177,10 @@ irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/inst
 > *進階選項：*
 > - **靜默自動安裝**（不彈出安裝引導畫面）：
 >   ```powershell
->   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -Silent
->   # 或簡潔寫法：
 >   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
-> - **僅下載安裝檔到本地**（不立即執行）：
+> - **僅下載安裝檔到本地**（儲存至當前目錄，不立即執行）：
 >   ```powershell
->   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -DownloadOnly
->   # 或簡潔寫法：
 >   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 
