@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
 import { useWorkbench, getDraggedSession } from '@/store'
 import type { DraggedSessionPayload } from '@/store'
+import { useTranslation } from '@/i18n'
 import { looksLikeApprovalPrompt } from './approvalDetect'
 import AgentMark from '@/components/AgentMark'
 import {
@@ -46,6 +47,7 @@ interface TerminalSession {
   disposables: (() => void)[]
   isExited: boolean
   needsApproval: boolean
+  associatedSessionId?: string
 }
 
 export interface AgentDefinition {
@@ -164,6 +166,7 @@ const SPLIT_MODES = [
 type SplitMode = (typeof SPLIT_MODES)[number]['id']
 
 export default function TerminalPanel(): JSX.Element {
+  const { t } = useTranslation()
   const { theme, terminalDispatch, terminalOpenSession, settingsTick } = useWorkbench()
   const [settings, setSettings] = useState<WorkbenchSettings>({
     cliPaths: {},
@@ -498,7 +501,8 @@ export default function TerminalPanel(): JSX.Element {
     (
       launcherOverride?: string,
       args?: string[],
-      titleOverride?: string
+      titleOverride?: string,
+      associatedSessionId?: string
     ): string => {
       let key = launcherOverride || selectedLauncher
       if (!key || (DIRECT_IDS.includes(key) && !isCliEnabled(key))) {
@@ -533,7 +537,8 @@ export default function TerminalPanel(): JSX.Element {
           fitAddon,
           disposables: [],
           isExited: false,
-          needsApproval: false
+          needsApproval: false,
+          associatedSessionId
         }
       ])
       setMru((prev) => [sessionId, ...prev])
@@ -584,7 +589,7 @@ export default function TerminalPanel(): JSX.Element {
           : `@${req.agent}`
       const title = req.title ? `${titlePrefix}: ${req.title.slice(0, 18)}` : titlePrefix
 
-      const newId = handleNewTerminal(req.agent, args, title)
+      const newId = handleNewTerminal(req.agent, args, title, req.id)
       selectSession(newId)
       return newId
     },
@@ -1746,7 +1751,8 @@ function TerminalInstance({
     const opts: Parameters<typeof window.api.pty.spawn>[0] = {
       cols: session.term.cols,
       rows: session.term.rows,
-      args: session.args
+      args: session.args,
+      sessionId: session.associatedSessionId
     }
     if (DIRECT_IDS.includes(launcherKey)) {
       opts.command = launcherKey

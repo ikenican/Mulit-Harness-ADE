@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import type {
   DashboardData,
   AgentId,
@@ -8,8 +8,19 @@ import type {
 import AgentMark from '@/components/AgentMark'
 import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical } from '@/components/Icons'
 import AppleAlertDialog from '@/components/AppleAlertDialog'
-import { openTerminalSession, setDraggedSession } from '@/store'
+import { openTerminalSession, setDraggedSession, useWorkbench, switchWorkspace, setSidebarTab } from '@/store'
+import { useTranslation } from '@/i18n'
 import './dashboard.css'
+
+interface SessionFolderGroup {
+  key: string
+  name: string
+  path?: string
+  isCurrentWorkspace: boolean
+  sessions: AgentSessionInfo[]
+  totalTokens: number
+  activeCount: number
+}
 
 const AGENT_CONFIG: Record<
   AgentId,
@@ -47,9 +58,13 @@ export default function DashboardPanel(): JSX.Element {
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null)
   const [lastRefreshed, setLastRefreshed] = useState<string>('')
   const [sessionToDelete, setSessionToDelete] = useState<AgentSessionInfo | null>(null)
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
+  const { workspaceRoot } = useWorkbench()
+  const { t } = useTranslation()
+
+  const loadData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const res = await window.api.dashboard.data()
       setData(res)
@@ -57,13 +72,13 @@ export default function DashboardPanel(): JSX.Element {
     } catch (e) {
       console.error('Failed to load dashboard data:', e)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     loadData()
-    const interval = setInterval(loadData, 5000)
+    const interval = setInterval(() => loadData(true), 5000)
     return () => clearInterval(interval)
   }, [loadData])
 
@@ -110,17 +125,93 @@ export default function DashboardPanel(): JSX.Element {
       ? baseSessions
       : baseSessions.filter((s) => s.agent === selectedAgent)
 
+  // 依執行資料夾歸類 Session
+  const folderGroups = useMemo<SessionFolderGroup[]>(() => {
+    const map = new Map<string, SessionFolderGroup>()
+    const normRoot = workspaceRoot ? workspaceRoot.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
+    const currentName = workspaceRoot ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() || '' : ''
+
+    for (const session of displayedSessions) {
+      const rawPath = session.workspacePath?.trim() || ''
+      const normPath = rawPath ? rawPath.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
+      const wsName = session.workspace?.trim() || (rawPath ? rawPath.split(/[\\/]/).filter(Boolean).pop() || '' : 'Other')
+
+      const isCurrentWs = Boolean(
+        (normRoot && normPath && (normPath === normRoot || normRoot.endsWith(normPath))) ||
+        (currentName && wsName && wsName.toLowerCase() === currentName)
+      )
+
+      const groupKey = normPath || wsName.toLowerCase()
+
+      let grp = map.get(groupKey)
+      if (!grp) {
+        grp = {
+          key: groupKey,
+          name: isCurrentWs && workspaceRoot ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || wsName : wsName,
+          path: rawPath || (isCurrentWs ? workspaceRoot : undefined),
+          isCurrentWorkspace: isCurrentWs,
+          sessions: [],
+          totalTokens: 0,
+          activeCount: 0
+        }
+        map.set(groupKey, grp)
+      } else if (isCurrentWs && !grp.isCurrentWorkspace) {
+        grp.isCurrentWorkspace = true
+      }
+
+      grp.sessions.push(session)
+      grp.totalTokens += session.totalTokens || 0
+      if (session.status === 'active') {
+        grp.activeCount += 1
+      }
+    }
+
+    const list = Array.from(map.values())
+    // 排序：當前工作區置頂，其次為含有活躍 Session 者，最後依各組中最新 session 排序
+    list.sort((a, b) => {
+      if (a.isCurrentWorkspace && !b.isCurrentWorkspace) return -1
+      if (!a.isCurrentWorkspace && b.isCurrentWorkspace) return 1
+      if (a.activeCount > 0 && b.activeCount === 0) return -1
+      if (a.activeCount === 0 && b.activeCount > 0) return 1
+      const aLatest = Math.max(...a.sessions.map((s) => new Date(s.lastActiveTime).getTime() || 0))
+      const bLatest = Math.max(...b.sessions.map((s) => new Date(s.lastActiveTime).getTime() || 0))
+      return bLatest - aLatest
+    })
+
+    return list
+  }, [displayedSessions, workspaceRoot])
+
+  const toggleFolderCollapse = (key: string): void => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
+
+  const handleCollapseAll = (): void => {
+    setCollapsedFolders(new Set(folderGroups.map((g) => g.key)))
+  }
+
+  const handleExpandAll = (): void => {
+    setCollapsedFolders(new Set())
+  }
+
   return (
     <div className="dash-root">
       {/* Dashboard Header */}
       <div className="dash-header">
         <div className="dash-title-block">
-          <h2 className="dash-title">Agent Telemetry & Usage</h2>
+          <h2 className="dash-title">{t('dashboard.telemetryTitle')}</h2>
           <span className="dash-subtitle">
-            {lastRefreshed ? `Updated ${lastRefreshed}` : 'Analyzing workspace sessions...'}
+            {lastRefreshed ? t('dashboard.updatedAt', { time: lastRefreshed }) : t('dashboard.analyzingSessions')}
           </span>
         </div>
-        <button className="dash-refresh-btn" onClick={loadData} disabled={loading} title="Refresh telemetry">
+        <button className="dash-refresh-btn" onClick={() => loadData(false)} disabled={loading} title={t('dashboard.refreshTooltip')}>
           <span className={loading ? 'dash-spinning' : ''}>↻</span>
         </button>
       </div>
@@ -128,17 +219,17 @@ export default function DashboardPanel(): JSX.Element {
       {/* Overview Metric Banner */}
       <div className="dash-banner">
         <div className="dash-banner-metric">
-          <span className="dash-metric-label">Workspace Tokens</span>
+          <span className="dash-metric-label">{t('dashboard.workspaceTokens')}</span>
           <strong className="dash-metric-val">{data ? formatTokens(totalTokens) : '—'}</strong>
         </div>
         <div className="dash-banner-divider" />
         <div className="dash-banner-metric">
-          <span className="dash-metric-label">Active Processes</span>
+          <span className="dash-metric-label">{t('dashboard.activeProcesses')}</span>
           <strong className="dash-metric-val">{activeSessionsCount}</strong>
         </div>
         <div className="dash-banner-divider" />
         <div className="dash-banner-metric">
-          <span className="dash-metric-label">Total Sessions</span>
+          <span className="dash-metric-label">{t('dashboard.totalSessions')}</span>
           <strong className="dash-metric-val">{data ? data.sessions.length : 0}</strong>
         </div>
       </div>
@@ -174,14 +265,14 @@ export default function DashboardPanel(): JSX.Element {
                   <div className="dash-agent-meta">
                     <strong className="dash-agent-name">{cfg.name}</strong>
                     <span className="dash-agent-sessions">
-                      {usage?.totalSessions ?? 0} sessions
+                      {usage?.totalSessions ?? 0} {usage?.totalSessions === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
                     </span>
                   </div>
                 </div>
                 <div className="dash-agent-badges">
                   {activeCount > 0 && (
                     <span className="dash-active-pill" title={`${activeCount} active terminal session(s)`}>
-                      <span className="dash-pulse-dot" /> {activeCount} active
+                      <span className="dash-pulse-dot" /> {t('dashboard.activeCount', { count: activeCount })}
                     </span>
                   )}
                 </div>
@@ -191,7 +282,7 @@ export default function DashboardPanel(): JSX.Element {
               <div className="dash-agent-token-stat">
                 <div className="dash-agent-stat-number-row">
                   <span className="dash-agent-stat-number">{formatTokens(agentTokens)}</span>
-                  <span className="dash-agent-stat-unit">total tokens</span>
+                  <span className="dash-agent-stat-unit">{t('dashboard.totalTokensUnit')}</span>
                 </div>
               </div>
 
@@ -262,51 +353,159 @@ export default function DashboardPanel(): JSX.Element {
               className={viewFilter === 'all' ? 'active' : ''}
               onClick={() => setViewFilter('all')}
             >
-              Sessions ({unarchivedSessions.length})
+              {t('dashboard.sessionsTab', { count: unarchivedSessions.length })}
             </button>
             <button
               className={viewFilter === 'archived' ? 'active' : ''}
               onClick={() => setViewFilter('archived')}
             >
-              Archived ({archivedSessions.length})
+              {t('dashboard.archivedTab', { count: archivedSessions.length })}
             </button>
           </div>
 
-          {selectedAgent !== 'all' && (
-            <button
-              className="dash-active-filter-badge"
-              onClick={() => setSelectedAgent('all')}
-              title="Click to clear filter"
-            >
-              Filtered: {AGENT_CONFIG[selectedAgent].name} ✕
-            </button>
-          )}
+          <div className="dash-section-actions">
+            {selectedAgent !== 'all' && (
+              <button
+                className="dash-active-filter-badge"
+                onClick={() => setSelectedAgent('all')}
+                title="Click to clear filter"
+              >
+                {t('dashboard.filterClear', { name: AGENT_CONFIG[selectedAgent].name })}
+              </button>
+            )}
+
+            {folderGroups.length > 0 && (
+              <div className="dash-folder-toggle-group">
+                <button
+                  type="button"
+                  className="dash-folder-tool-btn"
+                  onClick={handleExpandAll}
+                  title={t('dashboard.expandAll')}
+                  aria-label={t('dashboard.expandAll')}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="7 11 12 6 17 11" />
+                    <polyline points="7 18 12 13 17 18" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="dash-folder-tool-btn"
+                  onClick={handleCollapseAll}
+                  title={t('dashboard.collapseAll')}
+                  aria-label={t('dashboard.collapseAll')}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="7 13 12 18 17 13" />
+                    <polyline points="7 6 12 11 17 6" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {displayedSessions.length === 0 ? (
           <div className="dash-empty-state">
             <div className="dash-empty-icon">📋</div>
             <p className="dash-empty-title">
-              {viewFilter === 'archived' ? 'No archived sessions' : 'No active session records'}
+              {viewFilter === 'archived' ? t('dashboard.noArchived') : t('dashboard.noSessions')}
             </p>
             <p className="dash-empty-desc">
               {viewFilter === 'archived'
-                ? 'Sessions you archive will appear here.'
-                : 'Launch Claude, Antigravity, or Codex from the Agent Terminals. Live token consumption will stream here.'}
+                ? t('dashboard.noArchivedDesc')
+                : t('dashboard.noSessionsDesc')}
             </p>
           </div>
         ) : (
           <div className="dash-session-list">
-            {displayedSessions.map((session: AgentSessionInfo) => (
-              <SessionCard
-                key={session.id}
-                session={session}
-                isExpanded={expandedSessionId === session.id}
-                onToggle={() => toggleExpand(session.id)}
-                onArchive={(e) => handleArchive(session.id, !!session.isArchived, e)}
-                onDelete={(e) => handleDeletePrompt(session, e)}
-              />
-            ))}
+            {folderGroups.map((group) => {
+              const isCollapsed = collapsedFolders.has(group.key)
+              return (
+                <div
+                  key={group.key}
+                  className={`dash-folder-group ${group.isCurrentWorkspace ? 'is-current' : ''}`}
+                >
+                  <div
+                    className={`dash-folder-header ${isCollapsed ? 'collapsed' : 'expanded'}`}
+                    onClick={() => toggleFolderCollapse(group.key)}
+                    title={`Click to ${isCollapsed ? 'expand' : 'collapse'} sessions in ${group.name}${group.path ? ` (${group.path})` : ''}`}
+                  >
+                    <div className="dash-folder-left">
+                      <span className={`dash-folder-chevron ${isCollapsed ? '' : 'expanded'}`}>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                      </span>
+                      <span className="dash-folder-icon">
+                        <IconFolder size={14} />
+                      </span>
+                      <strong className="dash-folder-name" title={group.path || group.name}>
+                        {group.name}
+                      </strong>
+                      {group.isCurrentWorkspace && (
+                        <span className="dash-folder-badge current">{t('dashboard.currentWorkspace')}</span>
+                      )}
+                      {group.path && !group.isCurrentWorkspace && (
+                        <button
+                          type="button"
+                          className="dash-folder-switch-btn"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (group.path) {
+                              switchWorkspace(group.path)
+                            } else {
+                              setSidebarTab('files')
+                            }
+                          }}
+                          title={`${t('dashboard.switchFolder')}: ${group.path}`}
+                        >
+                          <span>{t('dashboard.switchFolder')} ➔</span>
+                        </button>
+                      )}
+                      <span className="dash-folder-badge count">
+                        {group.sessions.length} {group.sessions.length === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
+                      </span>
+                    </div>
+
+                    <div className="dash-folder-right">
+                      {group.activeCount > 0 && (
+                        <span className="dash-folder-active-tag">
+                          <span className="dash-pulse-dot" /> {t('dashboard.activeCount', { count: group.activeCount })}
+                        </span>
+                      )}
+                      <span className="dash-folder-tokens">
+                        {formatTokens(group.totalTokens)} {t('common.tokens')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {!isCollapsed && (
+                    <div className="dash-folder-sessions">
+                      {group.sessions.map((session: AgentSessionInfo) => (
+                        <SessionCard
+                          key={session.id}
+                          session={session}
+                          isExpanded={expandedSessionId === session.id}
+                          onToggle={() => toggleExpand(session.id)}
+                          onArchive={(e) => handleArchive(session.id, !!session.isArchived, e)}
+                          onDelete={(e) => handleDeletePrompt(session, e)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
@@ -314,10 +513,10 @@ export default function DashboardPanel(): JSX.Element {
       {/* Apple HIG Destructive Alert Dialog */}
       <AppleAlertDialog
         isOpen={Boolean(sessionToDelete)}
-        title="Delete Session Record?"
-        description="This will permanently delete this session's telemetry and token metrics from the dashboard. This action cannot be undone."
-        confirmLabel="Delete Record"
-        cancelLabel="Cancel"
+        title={t('dashboard.deleteDialogTitle')}
+        description={t('dashboard.deleteDialogDesc')}
+        confirmLabel={t('dashboard.deleteConfirm')}
+        cancelLabel={t('common.cancel')}
         isDestructive={true}
         detail={
           sessionToDelete ? (
@@ -330,7 +529,13 @@ export default function DashboardPanel(): JSX.Element {
                   </span>
                 </div>
                 <span className={`dash-status-badge ${sessionToDelete.status}`}>
-                  {sessionToDelete.status}
+                  {sessionToDelete.status === 'active'
+                    ? t('dashboard.statusActive')
+                    : sessionToDelete.status === 'waiting_approval'
+                    ? t('dashboard.statusWaitingApproval')
+                    : sessionToDelete.status === 'completed'
+                    ? t('dashboard.statusCompleted')
+                    : t('dashboard.statusIdle')}
                 </span>
               </div>
               <div className="dash-alert-session-title" title={sessionToDelete.title}>
@@ -373,6 +578,7 @@ function SessionCard({
   onArchive: (e: React.MouseEvent) => void
   onDelete: (e: React.MouseEvent) => void
 }): JSX.Element {
+  const { t } = useTranslation()
   const cfg = AGENT_CONFIG[session.agent]
   const { tokenBreakdown, totalTokens } = session
   const total = totalTokens || 1
@@ -388,12 +594,12 @@ function SessionCard({
 
   const statusLabel =
     session.status === 'active'
-      ? 'Active'
+      ? t('dashboard.statusActive')
       : session.status === 'waiting_approval'
-      ? 'Needs Approval'
+      ? t('dashboard.statusWaitingApproval')
       : session.status === 'completed'
-      ? 'Completed'
-      : 'Idle'
+      ? t('dashboard.statusCompleted')
+      : t('dashboard.statusIdle')
 
   const startTimeStr = new Date(session.startTime).toLocaleTimeString([], {
     hour: '2-digit',
@@ -411,6 +617,16 @@ function SessionCard({
       status: session.status,
       ensureRightDock: true
     })
+  }
+
+  const handleWorkspaceClick = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    const targetPath = session.workspacePath
+    if (targetPath) {
+      await switchWorkspace(targetPath)
+    } else {
+      setSidebarTab('files')
+    }
   }
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>): void => {
@@ -480,13 +696,19 @@ function SessionCard({
               {session.workspace && (
                 <>
                   <span>•</span>
-                  <span
+                  <button
+                    type="button"
                     className="dash-session-workspace"
-                    title={session.workspacePath ? `Workspace: ${session.workspacePath}` : `Workspace: ${session.workspace}`}
+                    onClick={handleWorkspaceClick}
+                    title={
+                      session.workspacePath
+                        ? `${t('dashboard.switchFolder')}: ${session.workspacePath}`
+                        : `${t('dashboard.switchFolder')}: ${session.workspace}`
+                    }
                   >
                     <IconFolder size={11} />
                     <span>{session.workspace}</span>
-                  </span>
+                  </button>
                 </>
               )}
               <span>•</span>
@@ -501,7 +723,7 @@ function SessionCard({
           title="Click to toggle token breakdown"
         >
           <strong className="dash-token-amount">{formatTokens(totalTokens)}</strong>
-          <span className="dash-token-unit">tokens</span>
+          <span className="dash-token-unit">{t('common.tokens')}</span>
         </div>
 
         <button className="dash-expand-chevron" onClick={onToggle} title="Show token breakdown">
@@ -542,7 +764,7 @@ function SessionCard({
           }
         >
           <IconTerminalBox size={12} />
-          <span>{session.status === 'active' ? 'Switch CLI ➔' : 'Resume CLI ➔'}</span>
+          <span>{session.status === 'active' ? t('dashboard.switchCli') : t('dashboard.resumeCli')}</span>
         </button>
         <div className="dash-session-actions-right">
           <button
@@ -551,7 +773,7 @@ function SessionCard({
             title={session.isArchived ? 'Restore to active list' : 'Archive session'}
           >
             <IconArchive size={12} />
-            <span>{session.isArchived ? 'Restore' : 'Archive'}</span>
+            <span>{session.isArchived ? t('dashboard.restore') : t('dashboard.archive')}</span>
           </button>
           <button
             className="dash-action-btn dash-action-delete"
@@ -559,7 +781,7 @@ function SessionCard({
             title="Delete session record"
           >
             <IconTrash size={12} />
-            <span>Delete</span>
+            <span>{t('dashboard.delete')}</span>
           </button>
         </div>
       </div>
@@ -569,12 +791,17 @@ function SessionCard({
         <div className="dash-session-breakdown">
           {tokenBreakdown?.details && tokenBreakdown.details.length > 0 && (
             <div className="dash-breakdown-analysis">
-              <span className="dash-analysis-badge">ANALYSIS</span>
+              <span className="dash-analysis-badge">{t('dashboard.analysisBadge')}</span>
               <p className="dash-analysis-text">
                 {tokenBreakdown.details
                   .map(
-                    (d: { category: string; tokens: number; percentage: number }) =>
-                      `${d.category}: ${d.percentage}% (${formatTokens(d.tokens)})`
+                    (d: { category: string; tokens: number; percentage: number }) => {
+                      let catName = d.category
+                      if (/context|系統|提示/i.test(catName)) catName = t('dashboard.categoryContext')
+                      else if (/tool|檔案|代碼|工具/i.test(catName)) catName = t('dashboard.categoryTools')
+                      else if (/thinking|推論|思考|回覆/i.test(catName)) catName = t('dashboard.categoryThinking')
+                      return `${catName}: ${d.percentage}% (${formatTokens(d.tokens)})`
+                    }
                   )
                   .join(' • ')}
               </p>
@@ -585,7 +812,7 @@ function SessionCard({
             <div className="dash-breakdown-pill">
               <span className="dash-pill-indicator seg-prompt" />
               <div className="dash-pill-text">
-                <span className="dash-pill-label">Context & Prompts</span>
+                <span className="dash-pill-label">{t('dashboard.contextPrompt')}</span>
                 <strong>{formatTokens(promptTokens)} ({pctPrompt}%)</strong>
               </div>
             </div>
@@ -593,7 +820,7 @@ function SessionCard({
             <div className="dash-breakdown-pill">
               <span className="dash-pill-indicator seg-tools" />
               <div className="dash-pill-text">
-                <span className="dash-pill-label">Tool Execution</span>
+                <span className="dash-pill-label">{t('dashboard.toolExecution')}</span>
                 <strong>{formatTokens(toolTokens)} ({pctTools}%)</strong>
               </div>
             </div>
@@ -601,7 +828,7 @@ function SessionCard({
             <div className="dash-breakdown-pill">
               <span className="dash-pill-indicator seg-comp" />
               <div className="dash-pill-text">
-                <span className="dash-pill-label">Output Generation</span>
+                <span className="dash-pill-label">{t('dashboard.outputGeneration')}</span>
                 <strong>{formatTokens(completionTokens)} ({pctComp}%)</strong>
               </div>
             </div>

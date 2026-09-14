@@ -12,6 +12,8 @@ const api = {
     list: (dir: string): Promise<FsEntry[]> => ipcRenderer.invoke('files:list', dir),
     exists: (path: string): Promise<boolean> => ipcRenderer.invoke('files:exists', path),
     workspaceRoot: (): Promise<string> => ipcRenderer.invoke('files:workspaceRoot'),
+    setWorkspaceRoot: (path: string): Promise<boolean> =>
+      ipcRenderer.invoke('files:setWorkspaceRoot', path),
     pickWorkspace: (): Promise<string | null> => ipcRenderer.invoke('files:pickWorkspace'),
     openExternal: (path: string, customToolPath?: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('files:openExternal', path, customToolPath),
@@ -29,6 +31,11 @@ const api = {
       ): void => cb(info)
       ipcRenderer.on('files:externalChange', listener)
       return () => ipcRenderer.removeListener('files:externalChange', listener)
+    },
+    onTreeChange: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('files:treeChange', listener)
+      return () => ipcRenderer.removeListener('files:treeChange', listener)
     }
   },
   // OS 原生通知 —— main/ipc/notify.ts
@@ -218,6 +225,7 @@ export interface WorkbenchSettings {
   }
   docToolPaths?: DocToolPaths
   autoOpenAgentModifiedFiles?: boolean
+  language?: 'en' | 'zh-TW'
 }
 
 export interface SessionTokenBreakdown {
@@ -376,4 +384,5 @@ export interface PtySpawnOptions {
   cwd?: string
   cols?: number
   rows?: number
+  sessionId?: string
 }

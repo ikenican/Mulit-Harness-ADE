@@ -73,7 +73,8 @@ export function loadSettings(): WorkbenchSettings {
         ...(parsed.cliEnabled || {})
       },
       docToolPaths,
-      autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true
+      autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true,
+      language: parsed.language === 'en' || parsed.language === 'zh-TW' ? parsed.language : undefined
     }
   } catch {
     return {
@@ -97,7 +98,8 @@ export function loadSettings(): WorkbenchSettings {
         powerpoint: '',
         pdf: ''
       },
-      autoOpenAgentModifiedFiles: true
+      autoOpenAgentModifiedFiles: true,
+      language: undefined
     }
   }
 }
@@ -176,7 +178,8 @@ export function registerSettingsHandlers(): void {
       docToolPaths: {
         ...(current.docToolPaths || {}),
         ...(patch.docToolPaths || {})
-      }
+      },
+      language: patch.language !== undefined ? patch.language : current.language
     }
     saveSettings(updated)
     return updated

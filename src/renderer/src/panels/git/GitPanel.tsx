@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, type JSX } from 'react'
 import { openDiff, openCommitDiff, useWorkbench } from '@/store'
+import { useTranslation } from '@/i18n'
 import GitGraphView from './GitGraphView'
 import './git.css'
 import type { GitGraphNode, GitCommitDetail } from '../../../../preload/index'
@@ -37,6 +38,7 @@ function formatDate(dateStr: string): string {
 
 export default function GitPanel(): JSX.Element {
   const { gitTick, activeCommitDiff } = useWorkbench()
+  const { t } = useTranslation()
 
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [commits, setCommits] = useState<GitCommit[]>([])
@@ -204,13 +206,13 @@ export default function GitPanel(): JSX.Element {
             className={activeView === 'changes' ? 'on' : ''}
             onClick={() => setActiveView('changes')}
           >
-            Changes {isClean ? '' : `(${stagedCount + unstagedCount + untrackedCount})`}
+            {t('git.changesView')} {isClean ? '' : `(${stagedCount + unstagedCount + untrackedCount})`}
           </button>
           <button
             className={activeView === 'graph' ? 'on' : ''}
             onClick={() => setActiveView('graph')}
           >
-            Git Graph ({graphNodes.length})
+            {t('git.graphView')} ({graphNodes.length})
           </button>
         </div>
       </div>
@@ -307,7 +309,7 @@ export default function GitPanel(): JSX.Element {
             onClick={() => setStagedOpen(!stagedOpen)}
           >
             <span>
-              {stagedOpen ? '▾' : '▸'} Staged Changes
+              {stagedOpen ? '▾' : '▸'} {t('git.stagedChanges')}
             </span>
             <span className="git-badge">{stagedCount}</span>
           </div>
@@ -357,7 +359,7 @@ export default function GitPanel(): JSX.Element {
             onClick={() => setUnstagedOpen(!unstagedOpen)}
           >
             <span>
-              {unstagedOpen ? '▾' : '▸'} Changes
+              {unstagedOpen ? '▾' : '▸'} {t('git.changes')}
             </span>
             <span className="git-badge">{unstagedCount}</span>
           </div>
@@ -414,7 +416,7 @@ export default function GitPanel(): JSX.Element {
             onClick={() => setUntrackedOpen(!untrackedOpen)}
           >
             <span>
-              {untrackedOpen ? '▾' : '▸'} Untracked
+              {untrackedOpen ? '▾' : '▸'} {t('git.untrackedFiles')}
             </span>
             <span className="git-badge">{untrackedCount}</span>
           </div>
@@ -468,7 +470,7 @@ export default function GitPanel(): JSX.Element {
             onClick={() => setLogOpen(!logOpen)}
           >
             <span>
-              {logOpen ? '▾' : '▸'} Recent Commits
+              {logOpen ? '▾' : '▸'} {t('git.recentCommits')}
             </span>
             <span className="git-badge">{commits.length}</span>
           </div>
@@ -506,7 +508,7 @@ export default function GitPanel(): JSX.Element {
           className="git-commit-textarea"
           value={commitMsg}
           onChange={(e) => setCommitMsg(e.target.value)}
-          placeholder="Commit message (Ctrl+Enter to commit)..."
+          placeholder={t('git.commitMsgPlaceholder')}
           rows={3}
           onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -525,7 +527,7 @@ export default function GitPanel(): JSX.Element {
               : 'Commit staged changes (Ctrl+Enter)'
           }
         >
-          {committing ? 'Committing...' : 'Commit'}
+          {committing ? t('git.committing') : t('git.commit')}
         </button>
       </div>
     </>
