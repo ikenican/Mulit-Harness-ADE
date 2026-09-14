@@ -123,8 +123,16 @@ $DownloadUrl = $Asset.browser_download_url
 $FileSizeMB = [math]::Round($Asset.size / 1MB, 2)
 
 # Environment variable overrides (convenient when invoked via iex)
-if ($env:INSTALL_SILENT -eq "1" -or $env:SILENT -eq "1") { $Silent = [switch]::Present }
-if ($env:INSTALL_DOWNLOAD_ONLY -eq "1" -or $env:DOWNLOAD_ONLY -eq "1") { $DownloadOnly = [switch]::Present }
+if ($env:INSTALL_SILENT -eq "1" -or $env:SILENT -eq "1") {
+    $Silent = [switch]::Present
+    $env:INSTALL_SILENT = $null
+    $env:SILENT = $null
+}
+if ($env:INSTALL_DOWNLOAD_ONLY -eq "1" -or $env:DOWNLOAD_ONLY -eq "1") {
+    $DownloadOnly = [switch]::Present
+    $env:INSTALL_DOWNLOAD_ONLY = $null
+    $env:DOWNLOAD_ONLY = $null
+}
 
 $DestDir = if ($DownloadOnly) { (Get-Location).Path } else { $env:TEMP }
 $DestPath = Join-Path $DestDir $FileName
