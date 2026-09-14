@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.5] - 2026-09-14
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.5 針對安裝與發布體驗進行關鍵優化：
+1. **即時下載進度條與狀態反饋 (`install.ps1`)**：替換原先靜默無感的下載機制，優先採用 `curl.exe` 動態即時進度條與百分比顯示；並於靜默安裝 (`-Silent`) 期間提供動態 Spinner 與秒數計時，徹底消除安裝卡頓與凍結假象。
+2. **安裝指令簡便模式**：支援 `$env:INSTALL_SILENT=1` 與 `$env:INSTALL_DOWNLOAD_ONLY=1`，提供更簡潔的單行 PowerShell 安裝方式。
+3. **發布權限與安全標註 (`README.md` & `release.ps1`)**：明確標註 `npm run release` 為專案維護者專用（Maintainers only），強化開源協作之安全界線說明。
+
+### Added / 新增功能
+- **PowerShell 安裝腳本即時進度條 (`install.ps1`)**:
+  - `Download-FileWithProgress` 優先調用 Windows 內建 `curl.exe -fL --progress-bar`，提供動態即時進度條與百分比。
+  - 自動容錯降級為 `.NET HttpWebRequest` 串流下載與 `Write-Progress` 頂部進度條。
+  - 在 `-Silent` 靜默安裝模式下加入即時動態 Spinner 與已耗時秒數顯示。
+  - 支援 `$env:INSTALL_SILENT=1` 與 `$env:INSTALL_DOWNLOAD_ONLY=1` 單行環境變數快捷開關。
+
+### Changed / 變更與調整
+- **README 與 Release 腳本標註維護者權限 (`README.md` & `scripts/release.ps1`)**:
+  - 中英文文檔清楚標示 `npm run release` 僅限專案維護者（需要本機 `gh` 倉庫寫入權限），並說明外部貢獻者無法擅自發布或更改專案資產。
+
+---
+
 ## [0.1.4] - 2026-09-14
 
 ### Highlights & Summary / 更新亮點

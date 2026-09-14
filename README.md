@@ -45,10 +45,14 @@ irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/inst
 > - **Silent install** (no wizard prompt):
 >   ```powershell
 >   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -Silent
+>   # Or shorthand:
+>   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 > - **Download installer only** without running:
 >   ```powershell
 >   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -DownloadOnly
+>   # Or shorthand:
+>   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 
 ### Method 2: Direct Download from GitHub Releases
@@ -85,8 +89,10 @@ npm run dev        # launch in development
 npm run typecheck  # TypeScript check, no emit
 npm run build      # compile main / preload / renderer
 npm run dist       # build an installer with electron-builder
-npm run release    # one-click release: builds installer, packages portable ZIP, and publishes to GitHub Releases
+npm run release    # (Maintainers only) one-click build and publish to GitHub Releases
 ```
+
+> **Note on `npm run release`**: This script is strictly for **project maintainers** with repository write permissions. It uses your local GitHub CLI (`gh`) authentication to upload assets. External contributors cannot publish releases or modify repository assets.
 
 Installer output goes to `release/`. Build config is in `electron-builder.yml`.
 
@@ -176,10 +182,14 @@ irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/inst
 > - **靜默自動安裝**（不彈出安裝引導畫面）：
 >   ```powershell
 >   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -Silent
+>   # 或簡潔寫法：
+>   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 > - **僅下載安裝檔到本地**（不立即執行）：
 >   ```powershell
 >   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1))) -DownloadOnly
+>   # 或簡潔寫法：
+>   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 
 ### 方法二：直接自 GitHub Releases 下載
@@ -211,11 +221,13 @@ npm run dev        # 開發模式啟動
 ## 建置與發佈 (Build & Publish)
 
 ```bash
-npm run typecheck  # TypeScript 型別檢查，不輸出
+npm run typecheck  # TypeScript型別檢查，不輸出
 npm run build      # 編譯 main / preload / renderer
 npm run dist       # 用 electron-builder 產生安裝檔
-npm run release    # 一鍵自動發布：自動編譯、打包免安裝綠色 ZIP、並上傳至 GitHub Releases
+npm run release    # （僅限專案維護者）一鍵自動編譯、打包並發布至 GitHub Releases
 ```
+
+> **關於 `npm run release` 的權限說明**：此指令為**專案維護者專用**，執行時會校驗本機 GitHub CLI (`gh`) 身分憑證。未獲授權的外部貢獻者（無倉庫寫入權限者）無法發布 Release，亦無法更動任何 GitHub 上的專案發行檔案。
 
 安裝檔輸出於 `release/`；建置設定見 `electron-builder.yml`。
 

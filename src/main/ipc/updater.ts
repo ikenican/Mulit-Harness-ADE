@@ -6,7 +6,7 @@ import { isProtectedPath } from './settings'
 import type { UpdaterStatus, UpdateInfo } from '../../preload/index'
 
 let updaterStatus: UpdaterStatus = {
-  currentVersion: app.getVersion() || '0.1.4',
+  currentVersion: app.getVersion() || '0.1.5',
   isPackaged: app.isPackaged,
   isInstalled: false,
   checking: false,

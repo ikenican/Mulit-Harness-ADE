@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
     Automated Release & Publish Workflow for Agent Workbench (Mulit-Harness-ADE).
+    (Maintainers only - requires repository write permissions via GitHub CLI 'gh')
 
 .DESCRIPTION
     1. Validates GitHub CLI authentication (`gh`).

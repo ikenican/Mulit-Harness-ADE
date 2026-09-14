@@ -122,21 +122,78 @@ $FileName = $Asset.name
 $DownloadUrl = $Asset.browser_download_url
 $FileSizeMB = [math]::Round($Asset.size / 1MB, 2)
 
+# Environment variable overrides (convenient when invoked via iex)
+if ($env:INSTALL_SILENT -eq "1" -or $env:SILENT -eq "1") { $Silent = [switch]::Present }
+if ($env:INSTALL_DOWNLOAD_ONLY -eq "1" -or $env:DOWNLOAD_ONLY -eq "1") { $DownloadOnly = [switch]::Present }
+
 $DestDir = if ($DownloadOnly) { (Get-Location).Path } else { $env:TEMP }
 $DestPath = Join-Path $DestDir $FileName
+
+function Download-FileWithProgress {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [long]$ExpectedBytes = 0
+    )
+
+    # 1. Prefer curl.exe (standard in Windows 10/11) for high-speed download with live progress bar
+    if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        & curl.exe -fL --progress-bar --user-agent "AgentWorkbench-Installer" -o $DestinationPath $Url
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $DestinationPath) -and (Get-Item $DestinationPath).Length -gt 0) {
+            return
+        }
+        Write-Host "[Warning] curl.exe download did not complete successfully. Falling back to .NET streaming..." -ForegroundColor Yellow
+        if (Test-Path $DestinationPath) { Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue }
+    }
+
+    # 2. Fallback: .NET streaming download with live progress bar and status
+    try {
+        $req = [System.Net.HttpWebRequest]::Create($Url)
+        $req.AllowAutoRedirect = $true
+        $req.UserAgent = "AgentWorkbench-Installer"
+        $req.Timeout = 60000
+        $res = $req.GetResponse()
+
+        $totalBytes = if ($res.ContentLength -gt 0) { $res.ContentLength } else { $ExpectedBytes }
+        $stream = $res.GetResponseStream()
+        $fileStream = [System.IO.File]::Create($DestinationPath)
+        $buffer = New-Object byte[] 65536
+        $downloaded = [long]0
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $lastUpdate = [long]0
+
+        while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $fileStream.Write($buffer, 0, $read)
+            $downloaded += $read
+            if ($sw.ElapsedMilliseconds - $lastUpdate -gt 250) {
+                $lastUpdate = $sw.ElapsedMilliseconds
+                $pct = if ($totalBytes -gt 0) { [math]::Min(100, [math]::Round(($downloaded / $totalBytes) * 100, 1)) } else { 0 }
+                $mb = [math]::Round($downloaded / 1MB, 2)
+                $totalMb = if ($totalBytes -gt 0) { [math]::Round($totalBytes / 1MB, 2) } else { "?" }
+                Write-Progress -Activity "Downloading Agent Workbench" -Status "$pct% completed ($mb MB / $totalMb MB)" -PercentComplete $pct
+                Write-Host -NoNewline "`rProgress: $pct% ($mb MB / $totalMb MB)  "
+            }
+        }
+        $fileStream.Close()
+        $stream.Close()
+        $res.Close()
+        Write-Progress -Activity "Downloading Agent Workbench" -Completed
+        Write-Host "`rProgress: 100.0% ($([math]::Round($downloaded / 1MB, 2)) MB) - Completed!          " -ForegroundColor Green
+        return
+    } catch {
+        Write-Host ""
+        Write-Host "[Warning] Streaming download failed: $($_.Exception.Message). Falling back to Invoke-WebRequest..." -ForegroundColor Yellow
+        if (Test-Path $DestinationPath) { Remove-Item $DestinationPath -Force -ErrorAction SilentlyContinue }
+    }
+
+    # 3. Final fallback: Invoke-WebRequest
+    Invoke-WebRequest -Uri $Url -OutFile $DestinationPath -UseBasicParsing -UserAgent "AgentWorkbench-Installer"
+}
 
 Write-Host "Downloading $FileName ($FileSizeMB MB)..." -ForegroundColor Cyan
 Write-Host "From: $DownloadUrl" -ForegroundColor Gray
 
-try {
-    # Use WebClient for reliable download
-    $WebClient = New-Object System.Net.WebClient
-    $WebClient.Headers.Add("User-Agent", "AgentWorkbench-Installer")
-    $WebClient.DownloadFile($DownloadUrl, $DestPath)
-} catch {
-    Write-Host "Retrying download with Invoke-WebRequest..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestPath -UseBasicParsing
-}
+Download-FileWithProgress -Url $DownloadUrl -DestinationPath $DestPath -ExpectedBytes $Asset.size
 
 Write-Host "Download completed successfully!" -ForegroundColor Green
 Write-Host "Saved to: $DestPath" -ForegroundColor Gray
@@ -158,14 +215,35 @@ if ($FileName.EndsWith(".exe")) {
     }
     if ($Silent) {
         $ProcessArgs["ArgumentList"] = "/S"
-        Write-Host "Executing silent installation..." -ForegroundColor Gray
-    }
-    $proc = Start-Process @ProcessArgs -PassThru
-    if ($Silent) {
+        Write-Host "Executing silent installation in background..." -ForegroundColor Cyan
+        $proc = Start-Process @ProcessArgs -PassThru
+        $spinner = @('|', '/', '-', '\')
+        $sIdx = 0
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        while (-not $proc.HasExited) {
+            $char = $spinner[$sIdx % $spinner.Length]
+            $elapsedSec = [math]::Round($sw.Elapsed.TotalSeconds, 0)
+            Write-Host -NoNewline "`rInstalling Agent Workbench... $char (${elapsedSec}s elapsed) "
+            Start-Sleep -Milliseconds 250
+            $sIdx++
+        }
         $proc.WaitForExit()
+        $elapsedTotal = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+        Write-Host "`rInstalling Agent Workbench... Done! (${elapsedTotal}s)                          " -ForegroundColor Green
+
         Write-Host ""
-        Write-Host "[SUCCESS] Agent Workbench has been installed!" -ForegroundColor Green
+        if ($proc.ExitCode -eq 0) {
+            Write-Host "[SUCCESS] Agent Workbench has been installed successfully!" -ForegroundColor Green
+            $InstalledApp = Join-Path $env:LOCALAPPDATA "Programs\Agent Workbench\Agent Workbench.exe"
+            if (Test-Path $InstalledApp) {
+                Write-Host "Installed location: $InstalledApp" -ForegroundColor Gray
+            }
+            Write-Host "You can start Agent Workbench from your Start Menu or Desktop shortcut." -ForegroundColor Cyan
+        } else {
+            Write-Host "[WARNING] Installer exited with code $($proc.ExitCode)." -ForegroundColor Yellow
+        }
     } else {
+        $proc = Start-Process @ProcessArgs -PassThru
         Write-Host ""
         Write-Host "[SUCCESS] Setup wizard started. Follow the on-screen steps." -ForegroundColor Green
     }
@@ -176,6 +254,7 @@ if ($FileName.EndsWith(".exe")) {
     Write-Host "[SUCCESS] Extracted to $ExtractDir" -ForegroundColor Green
     $ExePath = Join-Path $ExtractDir "Agent Workbench.exe"
     if (Test-Path $ExePath) {
+        Write-Host "Launching Agent Workbench..." -ForegroundColor Cyan
         Start-Process -FilePath $ExePath
     }
 }
