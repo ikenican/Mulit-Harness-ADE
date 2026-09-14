@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useWorkbench, setTheme, bumpSettings } from '@/store'
+import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import {
   IconSun,
@@ -144,6 +145,7 @@ export default function SettingsModal({
   initialTab
 }: SettingsModalProps): JSX.Element | null {
   const { theme } = useWorkbench()
+  const { t, language, setLanguage } = useTranslation()
   const [tab, setTab] = useState<SettingsTab>(initialTab || 'appearance')
   const [settings, setSettings] = useState<WorkbenchSettings>({
     cliPaths: { claude: '', antigravity: '', codex: '', powershell: '', cmd: '' },
@@ -414,7 +416,10 @@ export default function SettingsModal({
   const handleSave = async (): Promise<void> => {
     setSaving(true)
     try {
-      await window.api.settings.set(settings)
+      await window.api.settings.set({
+        ...settings,
+        language
+      })
       bumpSettings()
       setSaveSuccess(true)
       setTimeout(() => {
@@ -432,7 +437,7 @@ export default function SettingsModal({
         {/* Left Sidebar */}
         <div className="macos-settings-sidebar">
           <div className="macos-sidebar-header">
-            <h3 className="macos-sidebar-title">Settings</h3>
+            <h3 className="macos-sidebar-title">{t('settings.title')}</h3>
           </div>
 
           <nav className="macos-sidebar-nav">
@@ -444,7 +449,7 @@ export default function SettingsModal({
               <div className="macos-icon-squircle" style={{ background: 'var(--morandi-blue)' }}>
                 <IconPalette size={14} />
               </div>
-              <span className="macos-sidebar-item-text">Appearance</span>
+              <span className="macos-sidebar-item-text">{t('settings.appearance')}</span>
             </button>
 
             <button
@@ -455,7 +460,7 @@ export default function SettingsModal({
               <div className="macos-icon-squircle" style={{ background: 'var(--morandi-green)' }}>
                 <IconTerminalBox size={14} />
               </div>
-              <span className="macos-sidebar-item-text">CLI & Agents</span>
+              <span className="macos-sidebar-item-text">{t('settings.cliAgents')}</span>
             </button>
 
             <button
@@ -466,7 +471,7 @@ export default function SettingsModal({
               <div className="macos-icon-squircle" style={{ background: 'var(--morandi-orange)' }}>
                 <IconFileText size={14} />
               </div>
-              <span className="macos-sidebar-item-text">Document Tools</span>
+              <span className="macos-sidebar-item-text">{t('settings.documentTools')}</span>
             </button>
 
             <button
@@ -477,7 +482,7 @@ export default function SettingsModal({
               <div className="macos-icon-squircle" style={{ background: 'var(--morandi-purple)' }}>
                 <IconPuzzle size={14} />
               </div>
-              <span className="macos-sidebar-item-text">Extensions</span>
+              <span className="macos-sidebar-item-text">{t('settings.extensions')}</span>
             </button>
           </nav>
         </div>
@@ -489,16 +494,16 @@ export default function SettingsModal({
               <div className="macos-settings-header">
                 <div className="macos-settings-header-top">
                   <div>
-                    <h2 className="macos-settings-title">Appearance</h2>
+                    <h2 className="macos-settings-title">{t('settings.appearanceTitle')}</h2>
                     <p className="macos-settings-desc">
-                      Select the interface appearance style for the workbench.
+                      {t('settings.appearanceDesc')}
                     </p>
                   </div>
                   <button
                     type="button"
                     className="macos-close-btn"
                     onClick={onClose}
-                    title="Close (Esc)"
+                    title={t('settings.closeEsc')}
                   >
                     <IconClose size={12} />
                   </button>
@@ -506,8 +511,48 @@ export default function SettingsModal({
               </div>
 
               <div className="macos-settings-body">
+                {/* Language Selection */}
                 <div className="macos-section">
-                  <span className="macos-section-header">Interface Theme</span>
+                  <span className="macos-section-header">{t('settings.languageSection')}</span>
+                  <div className="macos-inset-group" style={{ padding: '14px 16px' }}>
+                    <div className="macos-lang-cards">
+                      <button
+                        type="button"
+                        className={`macos-lang-card ${language === 'en' ? 'active' : ''}`}
+                        onClick={() => {
+                          setLanguage('en')
+                          setSettings((prev) => ({ ...prev, language: 'en' }))
+                        }}
+                      >
+                        <div className="macos-lang-flag">EN</div>
+                        <div className="macos-lang-info">
+                          <span className="macos-lang-name">{t('settings.langEnglish')}</span>
+                          <span className="macos-lang-sub">{t('settings.langEnglishSub')}</span>
+                        </div>
+                        <span className="macos-radio-dot" />
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`macos-lang-card ${language === 'zh-TW' ? 'active' : ''}`}
+                        onClick={() => {
+                          setLanguage('zh-TW')
+                          setSettings((prev) => ({ ...prev, language: 'zh-TW' }))
+                        }}
+                      >
+                        <div className="macos-lang-flag">繁</div>
+                        <div className="macos-lang-info">
+                          <span className="macos-lang-name">{t('settings.langZhTW')}</span>
+                          <span className="macos-lang-sub">{t('settings.langZhTWSub')}</span>
+                        </div>
+                        <span className="macos-radio-dot" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="macos-section">
+                  <span className="macos-section-header">{t('settings.themeSection')}</span>
                   <div className="macos-inset-group" style={{ padding: '16px' }}>
                     <div className="macos-theme-cards">
                       <button
@@ -527,7 +572,7 @@ export default function SettingsModal({
                         </div>
                         <div className="macos-theme-label-row">
                           <span className="macos-radio-dot" />
-                          <span>Light Mode</span>
+                          <span>{t('settings.lightMode')}</span>
                         </div>
                       </button>
 
@@ -548,7 +593,7 @@ export default function SettingsModal({
                         </div>
                         <div className="macos-theme-label-row">
                           <span className="macos-radio-dot" />
-                          <span>Dark Mode</span>
+                          <span>{t('settings.darkMode')}</span>
                         </div>
                       </button>
 
@@ -569,7 +614,7 @@ export default function SettingsModal({
                         </div>
                         <div className="macos-theme-label-row">
                           <span className="macos-radio-dot" />
-                          <span>Light Morandi (晨霧)</span>
+                          <span>{t('settings.lightMorandi')}</span>
                         </div>
                       </button>
 
@@ -590,7 +635,7 @@ export default function SettingsModal({
                         </div>
                         <div className="macos-theme-label-row">
                           <span className="macos-radio-dot" />
-                          <span>Dark Morandi (暮靄)</span>
+                          <span>{t('settings.darkMorandi')}</span>
                         </div>
                       </button>
                     </div>
@@ -598,7 +643,7 @@ export default function SettingsModal({
                 </div>
 
                 <div className="macos-section">
-                  <span className="macos-section-header">Editor & Agent Integration</span>
+                  <span className="macos-section-header">{t('settings.integrationSection')}</span>
                   <div className="macos-inset-group">
                     <div className="macos-row">
                       <div className="macos-row-main">
@@ -611,11 +656,11 @@ export default function SettingsModal({
                           </div>
                           <div className="macos-row-info">
                             <div className="macos-row-title-row">
-                              <span className="macos-row-title">Auto-Open Files Modified by Agent</span>
-                              <span className="macos-type-pill">Live Link</span>
+                              <span className="macos-row-title">{t('settings.autoOpenFiles')}</span>
+                              <span className="macos-type-pill">{t('settings.liveLink')}</span>
                             </div>
                             <span className="macos-row-sub">
-                              When Claude, Antigravity, or Codex edits files in the terminal, automatically open them as editor tabs
+                              {t('settings.autoOpenFilesDesc')}
                             </span>
                           </div>
                         </div>
@@ -654,16 +699,16 @@ export default function SettingsModal({
               <div className="macos-settings-header">
                 <div className="macos-settings-header-top">
                   <div>
-                    <h2 className="macos-settings-title">CLI Tools & Agents</h2>
+                    <h2 className="macos-settings-title">{t('settings.cliTitle')}</h2>
                     <p className="macos-settings-desc">
-                      Decide which tools are active in the workbench and configure custom executable paths.
+                      {t('settings.cliDesc')}
                     </p>
                   </div>
                   <button
                     type="button"
                     className="macos-close-btn"
                     onClick={onClose}
-                    title="Close (Esc)"
+                    title={t('settings.closeEsc')}
                   >
                     <IconClose size={12} />
                   </button>
@@ -673,7 +718,7 @@ export default function SettingsModal({
               <div className="macos-settings-body">
                 <div className="macos-section">
                   <div className="macos-section-header-bar">
-                    <span className="macos-section-header">Supported Tools</span>
+                    <span className="macos-section-header">{t('settings.supportedTools')}</span>
                     <div className="macos-section-actions">
                       <button
                         type="button"
@@ -681,7 +726,7 @@ export default function SettingsModal({
                         onClick={handleResetToAuto}
                         title="Clear custom paths and use dynamic auto-detection"
                       >
-                        Reset to Auto
+                        {t('settings.resetToAuto')}
                       </button>
                       <button
                         type="button"
@@ -689,7 +734,7 @@ export default function SettingsModal({
                         onClick={handleDetectAll}
                         title="Fill all detected paths into inputs"
                       >
-                        Auto-detect All
+                        {t('settings.autoDetectAll')}
                       </button>
                     </div>
                   </div>
@@ -1005,7 +1050,7 @@ export default function SettingsModal({
             </span>
             <div className="macos-footer-actions">
               <button type="button" className="macos-btn-cancel" onClick={onClose}>
-                Cancel
+                {t('settings.cancel')}
               </button>
               <button
                 type="button"
@@ -1013,7 +1058,7 @@ export default function SettingsModal({
                 onClick={handleSave}
                 disabled={saving}
               >
-                {saveSuccess ? 'Saved ✓' : saving ? 'Saving…' : 'Save Changes'}
+                {saveSuccess ? `${t('common.saved')} ✓` : saving ? t('common.saving') : t('settings.saveChanges')}
               </button>
             </div>
           </div>

@@ -17,82 +17,123 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.5)
 }
 
+function normalizePath(p?: string): string {
+  if (!p) return ''
+  return p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '')
+}
+
+function isSameWorkspace(wsPath1?: string, wsName1?: string, wsPath2?: string, wsName2?: string): boolean {
+  const norm1 = normalizePath(wsPath1)
+  const norm2 = normalizePath(wsPath2)
+  if (norm1 && norm2) {
+    if (norm1 === norm2 || norm1.endsWith('/' + norm2) || norm2.endsWith('/' + norm1)) {
+      return true
+    }
+  }
+  const n1 = (wsName1 || (wsPath1 ? basename(wsPath1) : '')).trim().toLowerCase()
+  const n2 = (wsName2 || (wsPath2 ? basename(wsPath2) : '')).trim().toLowerCase()
+  if (n1 && n2 && n1 === n2) {
+    return true
+  }
+  return false
+}
+
 /**
- * 從 Antigravity 會話日誌中萃取工作區名稱與路徑
+ * 從 Antigravity 會話日誌中萃取工作區名稱與真實路徑
  */
 function extractAntigravityWorkspace(logPath: string): { workspace: string; workspacePath?: string } {
-  const currentName = workspace.root ? basename(workspace.root) : 'Workspace'
-  const currentPath = workspace.root || ''
-
   if (!fs.existsSync(logPath)) {
-    return { workspace: currentName, workspacePath: currentPath }
+    return { workspace: 'Antigravity Session', workspacePath: undefined }
   }
 
   try {
-    // 讀取前 12KB 內容，提取工作區或文件路徑
     const fd = fs.openSync(logPath, 'r')
-    const buf = Buffer.alloc(12288)
-    const bytesRead = fs.readSync(fd, buf, 0, 12288, 0)
+    const buf = Buffer.alloc(65536)
+    const bytesRead = fs.readSync(fd, buf, 0, 65536, 0)
     fs.closeSync(fd)
     const header = buf.toString('utf8', 0, bytesRead)
 
-    // 若包含當前 workspace.root，直接匹配
-    if (currentPath && header.toLowerCase().includes(currentPath.toLowerCase())) {
-      return { workspace: currentName, workspacePath: currentPath }
+    // 1. 最高優先級：若日誌包含當前 workspace.root，直接關聯當前專案
+    if (workspace.root) {
+      const normWs = normalizePath(workspace.root)
+      const normHeader = header.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase()
+      if (normHeader.includes(normWs)) {
+        return { workspace: basename(workspace.root), workspacePath: workspace.root }
+      }
     }
 
-    // 匹配 [URI] -> [CorpusName]: <path>
-    const uriMatch = header.match(/\[URI\]\s*->\s*\[CorpusName\]:\s*([^\r\n\->]+)/)
+    // 2. 匹配 [URI] -> [CorpusName] 格式
+    const uriMatch = header.match(/([a-zA-Z]:[^\r\n]+?)\s*->\s*[^\r\n]+/)
     if (uriMatch && uriMatch[1]) {
       const target = uriMatch[1].trim()
-      return { workspace: basename(target) || currentName, workspacePath: target }
+      if (target.length > 3 && fs.existsSync(target)) {
+        return { workspace: basename(target) || target, workspacePath: target }
+      }
     }
 
-    // 匹配 "Cwd": "<path>"
-    const cwdMatch = header.match(/"Cwd"\s*:\s*"([^"]+)"/)
+    // 3. 匹配 Cwd (工具調用參數，排除引號與跳脫字元)
+    const cwdMatch = header.match(/"[Cc]wd"\s*:\s*(?:"\\?"|")([^"\r\n]+?)(?:\\?"|")/)
     if (cwdMatch && cwdMatch[1]) {
-      const target = cwdMatch[1].replace(/\\\\/g, '\\').trim()
-      return { workspace: basename(target) || currentName, workspacePath: target }
+      const target = cwdMatch[1].replace(/^[\\"]+|[\\"]+$/g, '').replace(/\\\\/g, '\\').trim()
+      if (target.length > 3 && fs.existsSync(target)) {
+        return { workspace: basename(target) || target, workspacePath: target }
+      }
     }
 
-    // 匹配 Active Document: <path> 或 Other open documents: - <path>
-    const docMatch = header.match(/(?:Active Document|Other open documents: -)\s*[:\-]?\s*([A-Za-z]:[^\r\n"]+|\/[^\r\n"]+)/)
+    // 4. 匹配 Active Document: <path>
+    const docMatch = header.match(/(?:Active Document|Other open documents: -)\s*[:\-]?\s*([A-Za-z]:[^\r\n"()]+)/)
     if (docMatch && docMatch[1]) {
       const full = docMatch[1].trim()
       const dir = dirname(full)
-      // 若是專案深層檔案，嘗試往上找到專案根
-      return { workspace: basename(dir) || currentName, workspacePath: dir }
+      if (dir.length > 3 && fs.existsSync(dir)) {
+        return { workspace: basename(dir) || dir, workspacePath: dir }
+      }
     }
   } catch {
     // ignore
   }
 
-  return { workspace: currentName, workspacePath: currentPath }
+  return { workspace: 'Antigravity Workspace', workspacePath: undefined }
 }
 
 /**
- * 從 Claude 專案目錄名稱中萃取工作區名稱
+ * 從 Claude 專案日誌或目錄名稱中萃取工作區名稱與真實路徑
  */
-function extractClaudeWorkspace(dirName: string): { workspace: string; workspacePath?: string } {
-  const currentName = workspace.root ? basename(workspace.root) : 'Workspace'
-  const currentPath = workspace.root || ''
-
-  if (currentName && dirName.toLowerCase().includes(currentName.toLowerCase())) {
-    return { workspace: currentName, workspacePath: currentPath }
+function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace: string; workspacePath?: string } {
+  if (jsonlCwd && jsonlCwd.trim()) {
+    const cleanCwd = jsonlCwd.trim()
+    return { workspace: basename(cleanCwd) || cleanCwd, workspacePath: cleanCwd }
   }
 
-  // Claude 專案目錄格式如：C--Users-...-IDE-remade--2 或 rdbom-wt-packaging
+  // 若目錄名稱包含當前 workspace.root 的名稱
+  if (workspace.root) {
+    const wsBase = basename(workspace.root).toLowerCase()
+    if (dirName.toLowerCase().includes(wsBase)) {
+      return { workspace: basename(workspace.root), workspacePath: workspace.root }
+    }
+  }
+
+  // Claude 專案目錄格式如：D--Cloud-OneDrive-AI-workspace-...
+  // 嘗試反解目錄名為真實磁碟路徑
+  let restored = dirName
+  if (restored.match(/^[A-Za-z]--/)) {
+    restored = restored.charAt(0) + ':\\' + restored.slice(3).replace(/--/g, '\\').replace(/-/g, ' ')
+  }
+  if (fs.existsSync(restored)) {
+    return { workspace: basename(restored) || restored, workspacePath: restored }
+  }
+
   const parts = dirName.split('--')
   const lastPart = parts[parts.length - 1] || dirName
   const cleanName = lastPart.replace(/^.*?-([A-Za-z0-9_\-\s]+)$/, '$1') || lastPart
 
-  return { workspace: cleanName || currentName, workspacePath: currentPath }
+  return { workspace: cleanName || dirName, workspacePath: undefined }
 }
 
 /**
- * 讀取 Antigravity 本地會話日誌與 Token 概況
+ * 讀取 Antigravity 本地會話日誌與真實 Token 概況
  */
-function scanAntigravitySessions(max = 10): AgentSessionInfo[] {
+function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
   const brainDir = join(H, '.gemini', 'antigravity-ide', 'brain')
   if (!fs.existsSync(brainDir)) return []
 
@@ -103,23 +144,35 @@ function scanAntigravitySessions(max = 10): AgentSessionInfo[] {
       .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'tempmediaStorage')
       .map((e) => {
         const p = join(brainDir, e.name)
-        const stat = fs.statSync(p)
-        return { name: e.name, path: p, mtime: stat.mtimeMs }
+        const logPath = join(p, '.system_generated', 'logs', 'transcript.jsonl')
+        let mtime = 0
+        try {
+          if (fs.existsSync(logPath)) {
+            mtime = fs.statSync(logPath).mtimeMs
+          } else {
+            mtime = fs.statSync(p).mtimeMs
+          }
+        } catch {
+          mtime = 0
+        }
+        return { name: e.name, path: p, logPath, mtime }
       })
       .sort((a, b) => b.mtime - a.mtime)
       .slice(0, max)
 
     for (const d of dirs) {
-      const logPath = join(d.path, '.system_generated', 'logs', 'transcript.jsonl')
+      const logPath = d.logPath
       let title = 'Antigravity Session'
-      let promptTokens = 11500 // 基礎系統提示詞與規則
+      let promptTokens = 0
       let toolTokens = 0
       let completionTokens = 0
-      let lastTime = new Date(d.mtime).toISOString()
+      let lastTimeMs = d.mtime
       const { workspace: wsName, workspacePath: wsPath } = extractAntigravityWorkspace(logPath)
 
       if (fs.existsSync(logPath)) {
         try {
+          const stat = fs.statSync(logPath)
+          lastTimeMs = stat.mtimeMs
           const content = fs.readFileSync(logPath, 'utf8')
           const lines = content.trim().split(/\r?\n/)
           for (const line of lines) {
@@ -128,8 +181,9 @@ function scanAntigravitySessions(max = 10): AgentSessionInfo[] {
               if (row.type === 'USER_INPUT' && row.content) {
                 const match = row.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)
                 if (match) {
-                  title = match[1].trim().split(/\r?\n/)[0].slice(0, 40)
+                  title = match[1].trim().split(/\r?\n/)[0].slice(0, 45)
                 }
+                promptTokens += estimateTokens(row.content)
               }
               if (row.source === 'MODEL' && row.type === 'PLANNER_RESPONSE') {
                 if (row.thinking) completionTokens += estimateTokens(row.thinking)
@@ -151,12 +205,21 @@ function scanAntigravitySessions(max = 10): AgentSessionInfo[] {
       const toolPct = totalTokens > 0 ? Math.round((toolTokens / totalTokens) * 100) : 18
       const compPct = Math.max(0, 100 - promptPct - toolPct)
 
+      const timeSinceLastActive = Date.now() - lastTimeMs
+      const lastTime = new Date(lastTimeMs || Date.now()).toISOString()
+      const status: 'active' | 'idle' | 'completed' =
+        timeSinceLastActive < 90 * 1000
+          ? 'active'
+          : timeSinceLastActive < 15 * 60 * 1000
+          ? 'idle'
+          : 'completed'
+
       list.push({
         id: d.name,
         agent: 'antigravity',
         title,
-        status: 'completed',
-        startTime: new Date(d.mtime - 180000).toISOString(),
+        status,
+        startTime: new Date(Math.max(0, lastTimeMs - 180000)).toISOString(),
         lastActiveTime: lastTime,
         totalTokens,
         model: 'Gemini 3.8 Flash',
@@ -167,9 +230,9 @@ function scanAntigravitySessions(max = 10): AgentSessionInfo[] {
           toolReadTokens: toolTokens,
           completionTokens,
           details: [
-            { category: '系統與上下文提示詞', tokens: promptTokens, percentage: promptPct },
-            { category: '檔案讀取與工具輸出', tokens: toolTokens, percentage: toolPct },
-            { category: '思考與回覆生成', tokens: completionTokens, percentage: compPct }
+            { category: 'Context & System Prompt', tokens: promptTokens, percentage: promptPct },
+            { category: 'Tool Execution & Files', tokens: toolTokens, percentage: toolPct },
+            { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
           ]
         }
       })
@@ -181,25 +244,26 @@ function scanAntigravitySessions(max = 10): AgentSessionInfo[] {
 }
 
 /**
- * 讀取 Claude 本地專案日誌與 Token 概況
+ * 讀取 Claude 本地專案日誌與真實 Token 概況
  */
-function scanClaudeSessions(max = 10): AgentSessionInfo[] {
+function scanClaudeSessions(max = 20): AgentSessionInfo[] {
   const projectsDir = join(H, '.claude', 'projects')
   if (!fs.existsSync(projectsDir)) return []
 
   const list: AgentSessionInfo[] = []
   try {
     const projs = fs.readdirSync(projectsDir, { withFileTypes: true })
-    // 找出匹配當前工作區名稱的目錄
-    const currentName = workspace.root ? basename(workspace.root) : ''
-    const matched = currentName
-      ? projs.filter((p) => p.isDirectory() && p.name.toLowerCase().includes(currentName.toLowerCase()))
-      : []
-    const targetDirs = matched.length > 0 ? matched : projs.filter((p) => p.isDirectory()).slice(0, 2)
+      .filter((p) => p.isDirectory())
+      .map((p) => {
+        const fp = join(projectsDir, p.name)
+        return { name: p.name, path: fp, mtime: fs.statSync(fp).mtimeMs }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      // 掃描最近活躍的各專案目錄，絕不隨意 fallback 硬指定其他無關專案
+      .slice(0, 10)
 
-    for (const td of targetDirs) {
-      const fullPath = join(projectsDir, td.name)
-      const { workspace: wsName, workspacePath: wsPath } = extractClaudeWorkspace(td.name)
+    for (const td of projs) {
+      const fullPath = td.path
       const files = fs.readdirSync(fullPath, { withFileTypes: true })
         .filter((f) => f.isFile() && f.name.endsWith('.jsonl'))
         .map((f) => {
@@ -211,28 +275,44 @@ function scanClaudeSessions(max = 10): AgentSessionInfo[] {
 
       for (const f of files) {
         let title = 'Claude Session'
-        let promptTokens = 12000
-        let toolTokens = 2500
-        let completionTokens = 1200
+        let promptTokens = 0
+        let toolTokens = 0
+        let completionTokens = 0
         let model = 'Claude 3.7 Sonnet'
+        let sessionCwd: string | undefined = undefined
 
         try {
           const content = fs.readFileSync(f.path, 'utf8')
           const lines = content.trim().split(/\r?\n/)
-          for (const line of lines.slice(0, 40)) {
+          for (const line of lines) {
             try {
               const row = JSON.parse(line)
+              if (!sessionCwd && row.cwd) {
+                sessionCwd = row.cwd
+              }
               if (row.type === 'user' && row.message?.content) {
-                const text = typeof row.message.content === 'string' ? row.message.content : ''
-                if (text) title = text.split(/\r?\n/)[0].slice(0, 40)
+                const text =
+                  typeof row.message.content === 'string'
+                    ? row.message.content
+                    : Array.isArray(row.message.content)
+                    ? row.message.content.map((c: any) => c.text || '').join(' ')
+                    : ''
+                if (text && title === 'Claude Session') {
+                  title = text.split(/\r?\n/)[0].slice(0, 45)
+                }
               }
               if (row.attachment?.type === 'model' && row.attachment.identity?.marketingName) {
                 model = row.attachment.identity.marketingName
               }
               if (row.message?.usage) {
                 const u = row.message.usage
-                if (u.input_tokens) promptTokens = Math.max(promptTokens, u.input_tokens)
+                const inp = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
+                if (inp > 0) promptTokens = Math.max(promptTokens, inp)
                 if (u.output_tokens) completionTokens += u.output_tokens
+              }
+              if (row.type === 'tool_use' || row.type === 'tool_result') {
+                const len = JSON.stringify(row).length
+                toolTokens += Math.ceil(len / 3.5)
               }
             } catch {
               // ignore
@@ -242,16 +322,23 @@ function scanClaudeSessions(max = 10): AgentSessionInfo[] {
           // ignore
         }
 
+        const { workspace: wsName, workspacePath: wsPath } = extractClaudeWorkspace(td.name, sessionCwd)
         const totalTokens = promptTokens + toolTokens + completionTokens
         const promptPct = totalTokens > 0 ? Math.round((promptTokens / totalTokens) * 100) : 75
         const toolPct = totalTokens > 0 ? Math.round((toolTokens / totalTokens) * 100) : 15
         const compPct = Math.max(0, 100 - promptPct - toolPct)
 
+        const timeSinceLastActive = Date.now() - f.mtime
+        const status: 'active' | 'idle' | 'completed' =
+          timeSinceLastActive < 15 * 60 * 1000
+            ? 'idle'
+            : 'completed'
+
         list.push({
           id: f.name.replace('.jsonl', ''),
           agent: 'claude',
           title,
-          status: 'completed',
+          status,
           startTime: new Date(f.mtime - 300000).toISOString(),
           lastActiveTime: new Date(f.mtime).toISOString(),
           totalTokens,
@@ -263,9 +350,9 @@ function scanClaudeSessions(max = 10): AgentSessionInfo[] {
             toolReadTokens: toolTokens,
             completionTokens,
             details: [
-              { category: '系統指令與記憶上下文', tokens: promptTokens, percentage: promptPct },
-              { category: '代碼檢索與工具執行', tokens: toolTokens, percentage: toolPct },
-              { category: '模型推論與回覆生成', tokens: completionTokens, percentage: compPct }
+              { category: 'Context & System Prompt', tokens: promptTokens, percentage: promptPct },
+              { category: 'Tool Execution & Files', tokens: toolTokens, percentage: toolPct },
+              { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
             ]
           }
         })
@@ -274,6 +361,161 @@ function scanClaudeSessions(max = 10): AgentSessionInfo[] {
   } catch {
     // ignore
   }
+  return list
+}
+
+/**
+ * 讀取 Codex 的 session_index.jsonl，取得每個 session id 對應的最新自動標題。
+ * 該檔為 append-only，同一 id 會有多筆（標題隨對話推進而更新），取最後一筆即最新。
+ */
+function loadCodexTitleMap(): Map<string, string> {
+  const map = new Map<string, string>()
+  const indexPath = join(H, '.codex', 'session_index.jsonl')
+  try {
+    const content = fs.readFileSync(indexPath, 'utf8')
+    for (const line of content.trim().split(/\r?\n/)) {
+      try {
+        const row = JSON.parse(line)
+        if (row.id && row.thread_name) map.set(row.id, row.thread_name)
+      } catch {
+        // ignore malformed line
+      }
+    }
+  } catch {
+    // session_index.jsonl 可能不存在
+  }
+  return map
+}
+
+/** 遞迴找出 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl，依檔名萃取 session id */
+function findCodexRolloutFiles(max: number): { id: string; path: string; mtime: number }[] {
+  const sessionsDir = join(H, '.codex', 'sessions')
+  const out: { id: string; path: string; mtime: number }[] = []
+  const idRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/
+
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 4) return
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) {
+        walk(p, depth + 1)
+      } else if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith('.jsonl')) {
+        const m = e.name.match(idRe)
+        if (!m) continue
+        try {
+          out.push({ id: m[1], path: p, mtime: fs.statSync(p).mtimeMs })
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+  walk(sessionsDir, 0)
+  return out.sort((a, b) => b.mtime - a.mtime).slice(0, max)
+}
+
+/**
+ * 讀取 Codex 本地 rollout 紀錄與 Token 概況。
+ * Codex 的 token_count 事件是「累計值」（每個 turn 印一次目前為止的總量），
+ * 所以取檔案中最後一筆 total_token_usage 即為該 session 的最終總量，不能逐行加總。
+ */
+function scanCodexSessions(max = 10): AgentSessionInfo[] {
+  const sessionsDir = join(H, '.codex', 'sessions')
+  if (!fs.existsSync(sessionsDir)) return []
+
+  const titleMap = loadCodexTitleMap()
+  const files = findCodexRolloutFiles(max)
+  const list: AgentSessionInfo[] = []
+
+  for (const f of files) {
+    const indexTitle = titleMap.get(f.id)
+    let title = indexTitle || 'Codex Session'
+    let promptTokens = 0
+    let cachedTokens = 0
+    let completionTokens = 0
+    let model = 'Codex CLI'
+    let wsName = workspace.root ? basename(workspace.root) : 'Workspace'
+    let wsPath = workspace.root || ''
+
+    try {
+      const content = fs.readFileSync(f.path, 'utf8')
+      const lines = content.trim().split(/\r?\n/)
+
+      for (const line of lines) {
+        try {
+          const row = JSON.parse(line)
+          if (row.type === 'session_meta' && row.payload?.cwd) {
+            wsPath = row.payload.cwd
+            wsName = basename(wsPath) || wsName
+          }
+          if (!indexTitle && row.type === 'response_item' && row.payload?.role === 'user') {
+            const parts = row.payload.content
+            const found = Array.isArray(parts)
+              ? parts.find(
+                  (c: { type?: string; text?: string }) =>
+                    c?.type === 'input_text' && c.text && !c.text.trimStart().startsWith('<')
+                )
+              : undefined
+            if (found?.text) title = found.text.trim().split(/\r?\n/)[0].slice(0, 40)
+          }
+          const usage = row.payload?.info?.total_token_usage
+          if (usage) {
+            cachedTokens = usage.cached_input_tokens || 0
+            if (usage.input_tokens || usage.output_tokens) {
+              promptTokens = usage.input_tokens || 0
+              completionTokens = usage.output_tokens || 0
+            } else if (usage.total_tokens) {
+              // 某些 resumed/壓縮過的 session，input/output 明細會歸零但 total_tokens
+              // 仍保留真實累計值——此時把它算進 prompt，避免整個 session 顯示成 0 token。
+              promptTokens = usage.total_tokens
+              completionTokens = 0
+            }
+          }
+          const provModel = row.payload?.base_instructions?.provenance?.model
+          if (provModel) model = provModel
+        } catch {
+          // ignore malformed line
+        }
+      }
+    } catch {
+      // ignore unreadable rollout file
+    }
+
+    const totalTokens = promptTokens + completionTokens
+    const promptPct = totalTokens > 0 ? Math.round((promptTokens / totalTokens) * 100) : 85
+    const compPct = Math.max(0, 100 - promptPct)
+    const cachedPct = promptTokens > 0 ? Math.round((cachedTokens / promptTokens) * 100) : 0
+
+    list.push({
+      id: f.id,
+      agent: 'codex',
+      title,
+      status: 'completed',
+      startTime: new Date(f.mtime - 300000).toISOString(),
+      lastActiveTime: new Date(f.mtime).toISOString(),
+      totalTokens,
+      model,
+      workspace: wsName,
+      workspacePath: wsPath,
+      tokenBreakdown: {
+        promptTokens,
+        toolReadTokens: 0,
+        completionTokens,
+        details: [
+          { category: 'Context & System Prompt', tokens: promptTokens, percentage: promptPct },
+          { category: 'Cached Input Context', tokens: cachedTokens, percentage: cachedPct },
+          { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
+        ]
+      }
+    })
+  }
+
   return list
 }
 
@@ -312,7 +554,6 @@ function saveDashboardState(state: DashboardState): void {
   }
 }
 
-
 export function registerDashboardHandlers(): void {
   ipcMain.handle('dashboard:data', async (): Promise<DashboardData> => {
     const state = loadDashboardState()
@@ -324,87 +565,102 @@ export function registerDashboardHandlers(): void {
     const activePtySessions = activePty.filter((p) => !deletedSet.has(p.id))
 
     // 2. 抓取歷史真實會話記錄
-    const agySessions = scanAntigravitySessions(10)
+    const agySessions = scanAntigravitySessions(20)
       .filter((s) => !deletedSet.has(s.id))
       .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
 
-    const claudeSessions = scanClaudeSessions(10)
+    const claudeSessions = scanClaudeSessions(20)
       .filter((s) => !deletedSet.has(s.id))
       .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
 
-    // 3. 智慧關聯活躍進程與真實 Session，避免產生重複且孤立的 "Terminal: ... (PID)" 假卡片
-    const claimedPtyIds = new Set<string>()
+    const codexSessions = scanCodexSessions(20)
+      .filter((s) => !deletedSet.has(s.id))
+      .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
 
-    // 關聯 Antigravity 活躍行程
-    const activeAgyPty = activePtySessions.find((p) => {
+    // 3. 智慧關聯活躍進程與真實 Session
+    // 只有真正屬於 Agent CLI 的進程才需要關聯；普通 Shell (PowerShell/CMD/Bash) 不作為 Agent Session 呈現
+    const standaloneSessions: AgentSessionInfo[] = []
+    const matchedSet = new Set<string>()
+
+    for (const p of activePtySessions) {
       const cmd = (p.command || '').toLowerCase()
       const lid = (p.launcherId || '').toLowerCase()
-      return cmd.includes('agy') || cmd.includes('antigravity') || lid.includes('antigravity')
-    })
-    if (activeAgyPty && agySessions.length > 0) {
-      // 依 mtime 最新的未歸檔 session 優先認領為活躍狀態
-      const target = agySessions.find((s) => !s.isArchived) || agySessions[0]
-      if (target) {
-        target.status = 'active'
-        target.lastActiveTime = new Date().toISOString()
-        claimedPtyIds.add(activeAgyPty.id)
+      const isClaude = cmd.includes('claude') || lid.includes('claude')
+      const isAgy = cmd.includes('agy') || cmd.includes('antigravity') || lid.includes('antigravity')
+      const isCodex = cmd.includes('codex') || lid.includes('codex')
+
+      if (!isClaude && !isAgy && !isCodex) {
+        // 一般 shell 不當作 Agent Session，杜絕幽靈假卡片
+        continue
       }
-    }
 
-    // 關聯 Claude 活躍行程
-    const activeClaudePty = activePtySessions.find((p) => {
-      const cmd = (p.command || '').toLowerCase()
-      const lid = (p.launcherId || '').toLowerCase()
-      return cmd.includes('claude') || lid.includes('claude')
-    })
-    if (activeClaudePty && claudeSessions.length > 0) {
-      const target = claudeSessions.find((s) => !s.isArchived) || claudeSessions[0]
-      if (target) {
-        target.status = 'active'
-        target.lastActiveTime = new Date().toISOString()
-        claimedPtyIds.add(activeClaudePty.id)
+      const agentType: AgentId = isClaude ? 'claude' : isAgy ? 'antigravity' : 'codex'
+      const candidates =
+        agentType === 'claude'
+          ? claudeSessions
+          : agentType === 'antigravity'
+          ? agySessions
+          : codexSessions
+      const targetCwd = p.cwd || workspace.root
+
+      // 優先 1：若 PTY 帶有明確關聯的 sessionId（例如點擊 resume 或 handoff）
+      let matched = p.sessionId ? candidates.find((s) => s.id === p.sessionId && !matchedSet.has(s.id)) : undefined
+
+      // 優先 2：同工作區且在 PTY 啟動前不久或之後活躍之 Session
+      if (!matched) {
+        matched = candidates.find(
+          (s) =>
+            !s.isArchived &&
+            !matchedSet.has(s.id) &&
+            isSameWorkspace(s.workspacePath, s.workspace, targetCwd) &&
+            new Date(s.lastActiveTime).getTime() >= p.startTime - 60000
+        )
       }
-    }
 
-    // 4. 對於未與具體 Agent Session 匹配的獨立終端（例如使用者另開的 PowerShell/Bash 或自訂命令）
-    const standaloneSessions: AgentSessionInfo[] = activePtySessions
-      .filter((p) => !claimedPtyIds.has(p.id))
-      .map((p) => {
-        let agent: AgentId = 'claude'
-        const cmd = (p.command || '').toLowerCase()
-        const lid = (p.launcherId || '').toLowerCase()
-        if (cmd.includes('agy') || cmd.includes('antigravity') || lid.includes('antigravity')) agent = 'antigravity'
-        else if (cmd.includes('codex') || lid.includes('codex')) agent = 'codex'
-        else if (cmd.includes('claude') || lid.includes('claude')) agent = 'claude'
+      // 優先 3：同工作區目錄中最新之 Session
+      if (!matched) {
+        matched = candidates.find(
+          (s) =>
+            !s.isArchived &&
+            !matchedSet.has(s.id) &&
+            isSameWorkspace(s.workspacePath, s.workspace, targetCwd)
+        )
+      }
 
-        const currentName = workspace.root ? basename(workspace.root) : 'Workspace'
-        return {
+      if (matched) {
+        matchedSet.add(matched.id)
+        matched.status = 'active'
+        matched.lastActiveTime = new Date().toISOString()
+      } else {
+        const currentName = targetCwd ? basename(targetCwd) : 'Workspace'
+        standaloneSessions.push({
           id: p.id,
-          agent,
-          title: `Terminal: ${p.command} (PID: ${p.pid})`,
+          agent: agentType,
+          title: `${agentType === 'claude' ? 'Claude Code' : agentType === 'antigravity' ? 'Antigravity' : 'Codex'} (Active Session)`,
           status: 'active',
           startTime: new Date(p.startTime).toISOString(),
           lastActiveTime: new Date().toISOString(),
-          totalTokens: 15400,
-          model: agent === 'claude' ? 'Claude 3.7 Sonnet' : agent === 'antigravity' ? 'Gemini 3.8 Flash' : 'Codex CLI',
+          totalTokens: 0,
+          model: agentType === 'claude' ? 'Claude 3.7 Sonnet' : agentType === 'antigravity' ? 'Gemini 3.8 Flash' : 'Codex CLI',
           isArchived: archivedSet.has(p.id),
           workspace: currentName,
-          workspacePath: workspace.root,
+          workspacePath: targetCwd,
           tokenBreakdown: {
-            promptTokens: 11200,
-            toolReadTokens: 2800,
-            completionTokens: 1400,
+            promptTokens: 0,
+            toolReadTokens: 0,
+            completionTokens: 0,
             details: [
-              { category: 'Context & Prompt', tokens: 11200, percentage: 73 },
-              { category: 'Tool & File Reads', tokens: 2800, percentage: 18 },
-              { category: 'Output Generation', tokens: 1400, percentage: 9 }
+              { category: 'Context & System Prompt', tokens: 0, percentage: 0 },
+              { category: 'Tool Execution & Files', tokens: 0, percentage: 0 },
+              { category: 'Thinking & Generation', tokens: 0, percentage: 0 }
             ]
           }
-        }
-      })
+        })
+      }
+    }
 
-    // 5. 合併清單：活躍的優先排在最前，其餘依最後活躍時間排序
-    const allSessions = [...standaloneSessions, ...agySessions, ...claudeSessions].sort((a, b) => {
+    // 4. 合併清單：活躍的優先排在最前，其餘依最後活躍時間排序
+    const allSessions = [...standaloneSessions, ...agySessions, ...claudeSessions, ...codexSessions].sort((a, b) => {
       if (a.status === 'active' && b.status !== 'active') return -1
       if (a.status !== 'active' && b.status === 'active') return 1
       return new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime()

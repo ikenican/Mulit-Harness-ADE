@@ -44,6 +44,24 @@ const suppressedByIdeWrite = new Set<string>()
 let workspaceWatcher: fsSync.FSWatcher | null = null
 const pendingDebounceTimers = new Map<string, NodeJS.Timeout>()
 
+// 全域檔案樹更新防抖計時器
+let treeDebounceTimer: NodeJS.Timeout | null = null
+
+export function triggerTreeChange(): void {
+  if (treeDebounceTimer) {
+    clearTimeout(treeDebounceTimer)
+  }
+  treeDebounceTimer = setTimeout(() => {
+    treeDebounceTimer = null
+    const wins = BrowserWindow.getAllWindows()
+    for (const w of wins) {
+      if (!w.isDestroyed()) {
+        w.webContents.send('files:treeChange')
+      }
+    }
+  }, 250)
+}
+
 /**
  * 啟動或重啟工作區檔案變更監聽
  */
@@ -58,6 +76,9 @@ export function initWorkspaceWatcher(): void {
   }
 
   if (!workspace.root || !existsSync(workspace.root)) return
+
+  // 初始或重啟時通知前端更新檔案樹
+  triggerTreeChange()
 
   try {
     workspaceWatcher = fsSync.watch(workspace.root, { recursive: true }, (_eventType, filename) => {
@@ -87,6 +108,9 @@ export function initWorkspaceWatcher(): void {
       ) {
         return
       }
+
+      // 檔案或目錄有任何異動，觸發檔案樹自動更新
+      triggerTreeChange()
 
       const ext = path.extname(filename).toLowerCase()
       if (!SUPPORTED_EDITOR_EXTENSIONS.has(ext)) {
@@ -188,6 +212,7 @@ export function registerFileHandlers(): void {
 
       await fs.mkdir(path.dirname(safePath), { recursive: true })
       await fs.writeFile(safePath, content, 'utf-8')
+      triggerTreeChange()
     }
   )
 
@@ -243,6 +268,17 @@ export function registerFileHandlers(): void {
     }
 
     return null
+  })
+
+  // Set current workspace root directly
+  ipcMain.handle('files:setWorkspaceRoot', async (_event, targetPath: string): Promise<boolean> => {
+    if (targetPath && existsSync(targetPath)) {
+      workspace.root = targetPath
+      initWorkspaceWatcher()
+      triggerTreeChange()
+      return true
+    }
+    return false
   })
 
   // Open file with external application (custom tool or system default)

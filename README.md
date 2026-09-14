@@ -23,8 +23,9 @@ React + Vite.
 - **Multi-CLI terminals** — each CLI gets its own `xterm.js` terminal tab, run
   natively as a child process via `node-pty`. No keys stored; the CLIs use their
   own subscriptions/auth.
-- **Preview** — live Markdown / HTML preview that auto-syncs on edit and save.
-- **Dashboard** — local session/token statistics scanned from local records.
+- **Preview & Documents** — live Markdown / HTML preview that auto-syncs on edit and save, plus built-in document viewing for Word, Excel, PowerPoint, and PDF.
+- **Dashboard & Telemetry** — local session/token statistics scanned from local CLI records (Claude Code, Codex, Antigravity) with folder grouping, one-click workspace switching, and standardized token breakdowns.
+- **Bilingual i18n** — full interface localization supporting seamless toggling between Strict English and Traditional Chinese.
 
 ## Requirements
 
@@ -71,6 +72,10 @@ src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
   is the checked-in template. CLI and document-tool paths are auto-detected at
   runtime and default to unspecified until configured in the app.
 
+## Release Notes & Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for full version history and release details.
+
 ## License
 
 [MIT](LICENSE) © 2026 zkylek1212-k.
@@ -111,8 +116,9 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **Git 面板**——狀態、暫存、commit、切換分支、commit graph，以及最近 commit／檔案 diff。
 - **多 CLI 終端**——每個 CLI 各有一個 `xterm.js` 終端分頁，透過 `node-pty` 以子行程原生執行。
   不儲存金鑰；CLI 使用其自身的訂閱／驗證。
-- **預覽**——Markdown／HTML 即時預覽，編輯與存檔時自動同步。
-- **儀表板**——從本機紀錄掃描出的本機 session／token 統計。
+- **預覽與文件**——Markdown／HTML 即時預覽（編輯與存檔自動同步），並內建 Word、Excel、PowerPoint 與 PDF 檢視器。
+- **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）精準掃描 session／token 統計，具備資料夾群組分類、一鍵工作區切換與標準化 Token 結構分析。
+- **雙語系支援**——全系統支援嚴謹英文與繁體中文介面即時無縫切換。
 
 ## 需求
 
@@ -155,6 +161,10 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 - 每台機器各自的 runtime state（`.workbench/settings.json`、`.workbench/dashboard-state.json`）
   已被 git 忽略；`.workbench/extensions.yaml` 為納入版控的範本。CLI 與文件工具路徑於執行時
   自動偵測，在 app 內設定前預設為未指定（unspecified）。
+
+## 版本紀錄與變更日誌
+
+請參閱 [CHANGELOG.md](CHANGELOG.md) 了解詳細的版本歷程與更新內容。
 
 ## 授權
 

@@ -17,6 +17,8 @@ export interface ActiveSessionMeta {
   launcherId?: string
   startTime: number
   pid: number
+  sessionId?: string
+  cwd?: string
 }
 const ptySessionMetas = new Map<string, ActiveSessionMeta>()
 
@@ -222,7 +224,9 @@ export function registerPtyHandlers(): void {
         command: opts.command || opts.launcherId || 'shell',
         launcherId: opts.launcherId,
         startTime: Date.now(),
-        pid: ptyProcess.pid
+        pid: ptyProcess.pid,
+        sessionId: opts.sessionId,
+        cwd: opts.cwd || workspace.root
       })
       
       ptyProcess.onData((data) => {

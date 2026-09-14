@@ -1,6 +1,7 @@
 /// <reference path="../../../../preload/index.d.ts" />
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { openFile, useWorkbench, setWorkspaceRoot as setGlobalWorkspaceRoot, bumpGit } from '@/store'
+import { useTranslation } from '@/i18n'
 import './FileTreePanel.css'
 
 interface FsEntry {
@@ -207,7 +208,8 @@ function TreeNode({
 }
 
 export default function FileTreePanel(): JSX.Element {
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>('')
+  const { activeFilePath, workspaceRoot, fileTreeTick, gitTick } = useWorkbench()
+  const { t } = useTranslation()
   const [rootEntries, setRootEntries] = useState<FsEntry[]>([])
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
@@ -215,19 +217,63 @@ export default function FileTreePanel(): JSX.Element {
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
-  const { activeFilePath } = useWorkbench()
+  const workspaceRootRef = useRef(workspaceRoot)
+  workspaceRootRef.current = workspaceRoot
+  const expandedPathsRef = useRef(expandedPaths)
+  expandedPathsRef.current = expandedPaths
 
-  const loadTree = useCallback(async (dir?: string) => {
+  const refreshTree = useCallback(async (dir?: string, preserveState = true) => {
     try {
-      setLoading(true)
+      if (!preserveState) {
+        setLoading(true)
+      }
       setError(null)
-      const targetRoot = dir || (await window.api.files.workspaceRoot())
-      setWorkspaceRoot(targetRoot)
-      setGlobalWorkspaceRoot(targetRoot)
+      const targetRoot = dir || workspaceRootRef.current || (await window.api.files.workspaceRoot())
+      if (!targetRoot) return
+
+      if (!workspaceRootRef.current || workspaceRootRef.current !== targetRoot) {
+        setGlobalWorkspaceRoot(targetRoot)
+      }
+
       const entries = await window.api.files.list(targetRoot)
       setRootEntries(entries)
-      setExpandedPaths(new Set())
-      setChildrenMap({})
+
+      if (!preserveState) {
+        setExpandedPaths(new Set())
+        setChildrenMap({})
+      } else {
+        const currentExpanded = Array.from(expandedPathsRef.current)
+        if (currentExpanded.length > 0) {
+          const results = await Promise.all(
+            currentExpanded.map(async (folderPath) => {
+              try {
+                const children = await window.api.files.list(folderPath)
+                return { folderPath, children, exists: true }
+              } catch {
+                return { folderPath, children: [], exists: false }
+              }
+            })
+          )
+          setChildrenMap((prevMap) => {
+            const nextMap = { ...prevMap }
+            for (const res of results) {
+              if (res.exists) {
+                nextMap[res.folderPath] = res.children
+              } else {
+                delete nextMap[res.folderPath]
+              }
+            }
+            return nextMap
+          })
+          setExpandedPaths((prev) => {
+            const next = new Set(prev)
+            for (const res of results) {
+              if (!res.exists) next.delete(res.folderPath)
+            }
+            return next
+          })
+        }
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(`Cannot read directory: ${msg}`)
@@ -236,9 +282,35 @@ export default function FileTreePanel(): JSX.Element {
     }
   }, [])
 
+  // 初始載入
   useEffect(() => {
-    loadTree()
-  }, [loadTree])
+    refreshTree(undefined, false)
+  }, [refreshTree])
+
+  // 當工作區根目錄切換時，自動載入新目錄之檔案樹
+  useEffect(() => {
+    if (workspaceRoot) {
+      refreshTree(workspaceRoot, false)
+    }
+  }, [workspaceRoot, refreshTree])
+
+  // 自動依據 fileTreeTick / gitTick 即時同步（無縫保留目前展開狀態）
+  useEffect(() => {
+    if (fileTreeTick > 0 || gitTick > 0) {
+      refreshTree(workspaceRootRef.current, true)
+    }
+  }, [fileTreeTick, gitTick, refreshTree])
+
+  // 視窗重新聚焦時自動檢測最新變更
+  useEffect(() => {
+    const onFocus = (): void => {
+      if (workspaceRootRef.current) {
+        refreshTree(workspaceRootRef.current, true)
+      }
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshTree])
 
   const handlePickWorkspace = async (): Promise<void> => {
     try {
@@ -246,7 +318,7 @@ export default function FileTreePanel(): JSX.Element {
       if (newRoot) {
         setGlobalWorkspaceRoot(newRoot)
         bumpGit()
-        await loadTree(newRoot)
+        await refreshTree(newRoot, false)
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -304,15 +376,15 @@ export default function FileTreePanel(): JSX.Element {
           <button
             className="filetree-btn"
             onClick={handlePickWorkspace}
-            title="Choose and open a folder"
+            title={t('fileTree.openFolder')}
           >
             <OpenFolderIcon />
-            <span>Open Folder</span>
+            <span>{t('fileTree.openFolder')}</span>
           </button>
           <button
             className="filetree-btn filetree-btn-icon"
-            onClick={() => loadTree(workspaceRoot)}
-            title="Refresh file tree"
+            onClick={() => refreshTree(workspaceRoot, true)}
+            title={t('fileTree.refreshTree')}
           >
             <RefreshIcon />
           </button>
@@ -322,7 +394,7 @@ export default function FileTreePanel(): JSX.Element {
       <div className="filetree-body">
         {loading && (
           <div className="filetree-center-msg">
-            <span>Loading…</span>
+            <span>{t('common.loading')}</span>
           </div>
         )}
 
@@ -331,16 +403,16 @@ export default function FileTreePanel(): JSX.Element {
             <span className="error-text">{error}</span>
             <button
               className="filetree-btn"
-              onClick={() => loadTree(workspaceRoot)}
+              onClick={() => refreshTree(workspaceRoot, false)}
             >
-              Retry
+              {t('common.retry')}
             </button>
           </div>
         )}
 
         {!loading && !error && rootEntries.length === 0 && (
           <div className="filetree-center-msg">
-            <span>This workspace is empty</span>
+            <span>{t('fileTree.emptyWorkspace')}</span>
           </div>
         )}
 

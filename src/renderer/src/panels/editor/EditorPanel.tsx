@@ -11,6 +11,7 @@ import {
   clearEditorDraft,
   type GitCommitDiffTarget
 } from '@/store'
+import { useTranslation } from '@/i18n'
 import DocumentViewer, { isDocumentFile } from './DocumentViewer'
 import './EditorPanel.css'
 
@@ -57,6 +58,7 @@ function detectLanguage(filePath: string): string {
 }
 
 function EmptyEditorState(): JSX.Element {
+  const { t } = useTranslation()
   return (
     <div className="editor-empty-container">
       <svg
@@ -74,9 +76,9 @@ function EmptyEditorState(): JSX.Element {
         <line x1="16" y1="17" x2="8" y2="17" />
         <polyline points="10 9 9 9 8 9" />
       </svg>
-      <div className="editor-empty-title">No file open</div>
+      <div className="editor-empty-title">{t('editor.noFileOpen')}</div>
       <div className="editor-empty-desc">
-        Click a file in the Files panel to start editing, or pick a changed file in the Git panel to view its diff.
+        {t('editor.noFileOpenDesc')}
       </div>
     </div>
   )
@@ -163,19 +165,18 @@ function getMonacoTheme(theme?: string): string {
 }
 
 export default function EditorPanel(): JSX.Element {
-  const workbench = useWorkbench() as {
-    activeFilePath: string | null
-    viewMode: 'edit' | 'diff'
-    gitTick: number
-    openTabs: string[]
-    theme?: string
-    agentModifiedFiles?: Set<string>
-    fileReloadTick?: Record<string, number>
-    activeCommitDiff?: GitCommitDiffTarget | null
-  }
-
-  const { activeFilePath, viewMode, gitTick, openTabs, agentModifiedFiles, fileReloadTick, activeCommitDiff } = workbench
-  const monacoTheme = getMonacoTheme(workbench.theme)
+  const {
+    activeFilePath,
+    viewMode,
+    gitTick,
+    openTabs,
+    theme,
+    agentModifiedFiles,
+    fileReloadTick,
+    activeCommitDiff
+  } = useWorkbench()
+  const { t } = useTranslation()
+  const monacoTheme = getMonacoTheme(theme)
 
   // 每個檔一份 model：切換分頁不會弄丟尚未存檔的編輯
   const [models, setModels] = useState<Record<string, { content: string; initial: string }>>({})
@@ -407,7 +408,7 @@ export default function EditorPanel(): JSX.Element {
                   viewMode === 'edit' ? 'badge-edit' : 'badge-diff'
                 }`}
               >
-                {viewMode === 'edit' ? 'Edit' : 'Diff'}
+                {viewMode === 'edit' ? t('editor.editMode') : t('editor.diffMode')}
               </span>
               <div className="editor-filename-wrapper" title={activeFilePath}>
                 <span className="editor-filename">{fileName}</span>
@@ -441,7 +442,7 @@ export default function EditorPanel(): JSX.Element {
                     <polyline points="17 21 17 13 7 13 7 21" />
                     <polyline points="7 3 7 8 15 8" />
                   </svg>
-                  <span>{isSaving ? 'Saving…' : 'Save'}</span>
+                  <span>{isSaving ? t('common.saving') : t('common.save')}</span>
                 </button>
               )}
             </div>
@@ -479,7 +480,7 @@ export default function EditorPanel(): JSX.Element {
                   }
                 }}
               >
-                Retry
+                {t('common.retry')}
               </button>
             </div>
           )}
@@ -487,7 +488,7 @@ export default function EditorPanel(): JSX.Element {
           <div className="editor-body">
             {loading && (
               <div className="editor-loading-overlay">
-                <span>Loading…</span>
+                <span>{t('common.loading')}</span>
               </div>
             )}
 

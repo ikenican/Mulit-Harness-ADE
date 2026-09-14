@@ -56,6 +56,8 @@ export const AGENT_PATHS: Record<AgentId, AgentPaths> = {
     supported: true,
     pending: false,
     configHome: join(H, '.codex'),
+    skillsDir: join(H, '.codex', 'skills'),
+    pluginsDir: join(H, '.codex', 'plugins'),
     mcpConfig: join(H, '.codex', 'config.toml')
   }
 }

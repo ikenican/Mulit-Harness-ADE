@@ -681,17 +681,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.macos-theme-card.active .macos-radio-dot {
+.macos-theme-card.active .macos-radio-dot,
+.macos-lang-card.active .macos-radio-dot,
+.active .macos-radio-dot {
   border-color: var(--accent);
   background: var(--accent);
 }
 
-.macos-theme-card.active .macos-radio-dot:after {
+.macos-theme-card.active .macos-radio-dot:after,
+.macos-lang-card.active .macos-radio-dot:after,
+.active .macos-radio-dot:after {
   content: "";
-  width: 4px;
-  height: 4px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: #ffffff;
 }
@@ -991,4 +996,94 @@
 
 .macos-doctool-test-msg.err {
   color: #ff453a;
+}
+
+/* ── Language Selection Cards ────────────────────────────────────────────── */
+.macos-lang-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.macos-lang-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg2);
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+
+.macos-lang-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg3);
+}
+
+.macos-lang-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg2));
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.macos-lang-flag {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg);
+  flex-shrink: 0;
+}
+
+.macos-lang-card.active .macos-lang-flag {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.macos-lang-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.macos-lang-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.macos-lang-sub {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.macos-lang-card .macos-radio-dot {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.macos-lang-card.active .macos-radio-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.macos-lang-card.active .macos-radio-dot:after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ffffff;
 }

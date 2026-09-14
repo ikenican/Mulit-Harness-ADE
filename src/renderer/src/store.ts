@@ -8,6 +8,8 @@ import type { AgentId } from '../../preload/index'
 //   bumpGit()       → 通知 Git panel 重新抓 status（存檔 / commit 後呼叫）
 //   toggleTheme()   → 切換亮暗；panel 需 JS 感知主題時讀 useWorkbench().theme
 export type Theme = 'light' | 'dark' | 'light-morandi' | 'dark-morandi'
+export type Language = 'en' | 'zh-TW'
+export type SidebarTab = 'dashboard' | 'files' | 'git'
 
 /** 要送進終端的文字（例如 markdown code block 的指令）。nonce 遞增即代表有新的一筆。 */
 export interface TerminalDispatch {
@@ -58,6 +60,10 @@ export interface WorkbenchState {
   centerMaximized: boolean
   isTerminalDetached: boolean
   settingsModal: SettingsModalState
+  language: Language
+  sidebarTab: SidebarTab
+  /** 檔案樹變更計數器，促使 FileTreePanel 自動更新 */
+  fileTreeTick: number
   /** 記錄被終端 Agent 修改過的工作區檔案集合（供 Editor Tabs 呈現視覺標記） */
   agentModifiedFiles: Set<string>
   /** 每個檔案的外部變更計數器，促使 Editor 自動重新載入最新磁碟內容 */
@@ -93,6 +99,23 @@ function applyTheme(theme: Theme): void {
   }
 }
 
+function initialLanguage(): Language {
+  try {
+    const saved = localStorage.getItem('wb-language')
+    if (saved === 'en' || saved === 'zh-TW') {
+      return saved
+    }
+  } catch {
+    /* localStorage 不可用時忽略 */
+  }
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    if (navigator.language.toLowerCase().startsWith('zh')) {
+      return 'zh-TW'
+    }
+  }
+  return 'en'
+}
+
 let state: WorkbenchState = {
   activeFilePath: null,
   openTabs: [],
@@ -101,19 +124,22 @@ let state: WorkbenchState = {
   gitTick: 0,
   settingsTick: 0,
   theme: initialTheme(),
+  language: initialLanguage(),
   terminalDispatch: null,
   terminalOpenSession: null,
   workspaceRoot: '',
   centerMaximized: false,
   isTerminalDetached: false,
   settingsModal: { isOpen: false, tab: 'appearance' },
+  sidebarTab: 'files',
+  fileTreeTick: 0,
   agentModifiedFiles: new Set<string>(),
   fileReloadTick: {},
   editorDraft: null
 }
 applyTheme(state.theme)
 
-// 異步載入後端工作區根目錄
+// 異步載入後端工作區根目錄與偏好設定
 if (typeof window !== 'undefined' && window.api?.files?.workspaceRoot) {
   window.api.files
     .workspaceRoot()
@@ -123,6 +149,31 @@ if (typeof window !== 'undefined' && window.api?.files?.workspaceRoot) {
       }
     })
     .catch(() => {})
+}
+
+// 異步同步後端儲存之語言設定（若本機尚未指定或後端有更優先紀錄）
+if (typeof window !== 'undefined' && window.api?.settings?.get) {
+  window.api.settings
+    .get()
+    .then((s) => {
+      if (s?.language && (s.language === 'en' || s.language === 'zh-TW')) {
+        const local = localStorage.getItem('wb-language')
+        if (!local && s.language !== state.language) {
+          set({ language: s.language })
+        }
+      }
+    })
+    .catch(() => {})
+}
+
+// 監聽工作區檔案樹整體變更（新增/刪除/改名等）自動遞增 fileTreeTick 與 gitTick
+if (typeof window !== 'undefined' && window.api?.files?.onTreeChange) {
+  window.api.files.onTreeChange(() => {
+    set({
+      fileTreeTick: state.fileTreeTick + 1,
+      gitTick: state.gitTick + 1
+    })
+  })
 }
 
 // 監聽後端工作區檔案變更（終端機 Agent 修改檔案時自動開檔與標記）
@@ -195,6 +246,28 @@ export function clearAgentModified(path: string): void {
 
 export function setWorkspaceRoot(path: string): void {
   set({ workspaceRoot: path })
+}
+
+export function setSidebarTab(tab: SidebarTab): void {
+  set({ sidebarTab: tab })
+}
+
+export async function switchWorkspace(path: string): Promise<boolean> {
+  if (path && window.api?.files?.setWorkspaceRoot) {
+    const ok = await window.api.files.setWorkspaceRoot(path).catch(() => false)
+    if (ok) {
+      set({
+        workspaceRoot: path,
+        sidebarTab: 'files',
+        fileTreeTick: state.fileTreeTick + 1,
+        gitTick: state.gitTick + 1
+      })
+      return true
+    }
+  }
+  // If no path or path doesn't exist on disk, still switch sidebar to files
+  set({ sidebarTab: 'files' })
+  return false
 }
 
 export function toggleCenterMaximized(): void {
@@ -270,6 +343,9 @@ export function closeTab(path: string): void {
 export function bumpGit(): void {
   set({ gitTick: state.gitTick + 1 })
 }
+export function bumpFileTree(): void {
+  set({ fileTreeTick: state.fileTreeTick + 1 })
+}
 export function bumpSettings(): void {
   set({ settingsTick: state.settingsTick + 1 })
 }
@@ -343,6 +419,17 @@ export function setTheme(theme: Theme): void {
     /* 忽略 */
   }
   set({ theme })
+}
+
+export function setLanguage(language: Language): void {
+  if (state.language === language) return
+  try {
+    localStorage.setItem('wb-language', language)
+  } catch {
+    /* 忽略 */
+  }
+  set({ language })
+  window.api?.settings?.set?.({ language }).catch(() => {})
 }
 
 export function toggleTheme(): void {

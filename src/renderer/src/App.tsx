@@ -19,7 +19,8 @@ import {
   IconMinimize,
   IconClose
 } from '@/components/Icons'
-import { toggleCenterMaximized, useWorkbench, openSettings, closeSettings } from '@/store'
+import { toggleCenterMaximized, useWorkbench, openSettings, closeSettings, setSidebarTab } from '@/store'
+import { useTranslation } from '@/i18n'
 import {
   clamp,
   DEFAULT_LAYOUT,
@@ -30,7 +31,6 @@ import {
   type LayoutState
 } from '@/layout'
 
-type LeftTab = 'dashboard' | 'files' | 'git'
 type CenterTab = 'editor' | 'preview' | 'browser' | 'memory'
 
 export default function App(): JSX.Element {
@@ -49,10 +49,10 @@ export default function App(): JSX.Element {
     )
   }
 
-  const [left, setLeft] = useState<LeftTab>('files')
   const [center, setCenter] = useState<CenterTab>('editor')
   const [browserOpened, setBrowserOpened] = useState(false)
-  const { centerMaximized, terminalOpenSession, settingsModal } = useWorkbench()
+  const { centerMaximized, terminalOpenSession, settingsModal, sidebarTab } = useWorkbench()
+  const { t } = useTranslation()
 
   useEffect(() => {
     if (center === 'browser') {
@@ -74,6 +74,17 @@ export default function App(): JSX.Element {
       }))
     }
   }, [terminalOpenSession, layout.dock])
+
+  // 切換側邊欄標籤時，若側邊欄原本為摺疊狀態，自動展開以利立即檢視內容
+  useEffect(() => {
+    if (layout.leftCollapsed && sidebarTab) {
+      setLayout((l) => ({
+        ...l,
+        leftCollapsed: false,
+        leftW: Math.max(l.leftW, LIMITS.leftMin)
+      }))
+    }
+  }, [sidebarTab])
 
   const isBottom = layout.dock === 'bottom'
   const isCenterMaximized = Boolean(centerMaximized)
@@ -141,7 +152,7 @@ export default function App(): JSX.Element {
             <button
               className="btn-collapse-left"
               onClick={() => setLayout((l) => ({ ...l, leftCollapsed: true }))}
-              title="Collapse sidebar"
+              title={t('header.collapseSidebar')}
             >
               <IconSidebarCollapse size={13} />
             </button>
@@ -156,10 +167,10 @@ export default function App(): JSX.Element {
                   leftW: l.leftW >= LIMITS.leftMin ? l.leftW : DEFAULT_LAYOUT.leftW
                 }))
               }
-              title="Expand sidebar"
+              title={t('header.expandSidebar')}
             >
               <IconSidebarExpand size={13} />
-              <span>Sidebar</span>
+              <span>{t('header.sidebar')}</span>
             </button>
           )}
         </div>
@@ -167,22 +178,22 @@ export default function App(): JSX.Element {
         <div className="app-header-center">
           <div className="segmented">
             <button className={center === 'editor' ? 'on' : ''} onClick={() => setCenter('editor')}>
-              Editor
+              {t('header.editor')}
             </button>
             <button
               className={center === 'preview' ? 'on' : ''}
               onClick={() => setCenter('preview')}
             >
-              Preview
+              {t('header.preview')}
             </button>
             <button className={center === 'memory' ? 'on' : ''} onClick={() => setCenter('memory')}>
-              Memory
+              {t('header.memory')}
             </button>
             <button
               className={center === 'browser' ? 'on' : ''}
               onClick={() => setCenter('browser')}
             >
-              Browser
+              {t('header.browser')}
             </button>
           </div>
         </div>
@@ -191,7 +202,7 @@ export default function App(): JSX.Element {
           {/* Focus / Maximize Center View */}
           <button
             className={`btn-icon ${isCenterMaximized ? 'active' : ''}`}
-            title={isCenterMaximized ? 'Exit Focus Mode' : 'Focus / Maximize Workspace'}
+            title={isCenterMaximized ? t('header.exitFocus') : t('header.focusWorkspace')}
             onClick={toggleCenterMaximized}
           >
             {isCenterMaximized ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
@@ -201,14 +212,14 @@ export default function App(): JSX.Element {
             <button
               className={!isBottom ? 'on' : ''}
               onClick={() => setDock('right')}
-              title="Dock terminals to the right"
+              title={t('header.dockRight')}
             >
               <IconDockRight size={13} />
             </button>
             <button
               className={isBottom ? 'on' : ''}
               onClick={() => setDock('bottom')}
-              title="Dock terminals to the bottom"
+              title={t('header.dockBottom')}
             >
               <IconDockBottom size={13} />
             </button>
@@ -216,7 +227,7 @@ export default function App(): JSX.Element {
 
           <button
             className="btn-icon"
-            title="Settings, Appearance & Extensions"
+            title={t('header.settingsTooltip')}
             onClick={() => openSettings()}
           >
             <IconSettings size={14} />
@@ -236,25 +247,25 @@ export default function App(): JSX.Element {
         >
           <div className="tabbar">
             <div className="segmented left-segmented">
-              <button className={left === 'dashboard' ? 'on' : ''} onClick={() => setLeft('dashboard')}>
-                Dashboard
+              <button className={sidebarTab === 'dashboard' ? 'on' : ''} onClick={() => setSidebarTab('dashboard')}>
+                {t('sidebarTabs.dashboard')}
               </button>
-              <button className={left === 'files' ? 'on' : ''} onClick={() => setLeft('files')}>
-                Files
+              <button className={sidebarTab === 'files' ? 'on' : ''} onClick={() => setSidebarTab('files')}>
+                {t('sidebarTabs.files')}
               </button>
-              <button className={left === 'git' ? 'on' : ''} onClick={() => setLeft('git')}>
-                Git
+              <button className={sidebarTab === 'git' ? 'on' : ''} onClick={() => setSidebarTab('git')}>
+                {t('sidebarTabs.git')}
               </button>
             </div>
           </div>
           <div className="panel-body">
-            <div hidden={left !== 'dashboard'} className="fill">
+            <div hidden={sidebarTab !== 'dashboard'} className="fill">
               <DashboardPanel />
             </div>
-            <div hidden={left !== 'files'} className="fill">
+            <div hidden={sidebarTab !== 'files'} className="fill">
               <FileTreePanel />
             </div>
-            <div hidden={left !== 'git'} className="fill">
+            <div hidden={sidebarTab !== 'git'} className="fill">
               <GitPanel />
             </div>
           </div>
