@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.1.3] - 2026-09-14
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.3 為需要高度自動化工作流的開發者引入 AI Agent 啟動權限略過模式（Bypass Mode）：
+1. **一鍵全自動無人值守 (Bypass Permissions Mode)**：在設定面板提供全域開關，啟動 Claude Code、OpenAI Codex 或 Google Antigravity 時自動注入官方免審批與跳過權限參數。
+2. **終端與卡片即時狀態可視化**：終端面板與 Launchpad 卡片即時呈現醒目的橘色 Bypass 懸浮徽章，並針對排版進行強化修復，確保無截斷、不跑版。
+3. **安全預設與防重複注入**：預設維持關閉以保障安全性，且 PTY spawn / launchers 實作嚴謹的參數重複檢測，相容多種作業系統環境與啟動封裝。
 
 ### Added / 新增功能
 - **CLI 啟動權限與略過模式 (CLI Launch Permissions & Bypass Mode)**:
