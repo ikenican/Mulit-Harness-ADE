@@ -54,6 +54,27 @@ export default function App(): JSX.Element {
   const { centerMaximized, terminalOpenSession, settingsModal, sidebarTab } = useWorkbench()
   const { t } = useTranslation()
 
+  // 記錄已造訪過的面板，實現「按需掛載（Mount-On-Demand）+ 狀態保留（Keep-Alive）」
+  // 啟動時不掛載未造訪的次要面板（如 Git、Preview、Memory），大幅縮短首屏載入時間與消除開機子行程搶佔
+  const [visitedSidebarTabs, setVisitedSidebarTabs] = useState<Set<string>>(
+    () => new Set([sidebarTab || 'dashboard'])
+  )
+  const [visitedCenterTabs, setVisitedCenterTabs] = useState<Set<string>>(
+    () => new Set([center || 'editor'])
+  )
+
+  useEffect(() => {
+    if (sidebarTab) {
+      setVisitedSidebarTabs((prev) => (prev.has(sidebarTab) ? prev : new Set(prev).add(sidebarTab)))
+    }
+  }, [sidebarTab])
+
+  useEffect(() => {
+    if (center) {
+      setVisitedCenterTabs((prev) => (prev.has(center) ? prev : new Set(prev).add(center)))
+    }
+  }, [center])
+
   useEffect(() => {
     if (center === 'browser') {
       setBrowserOpened(true)
@@ -259,15 +280,21 @@ export default function App(): JSX.Element {
             </div>
           </div>
           <div className="panel-body">
-            <div hidden={sidebarTab !== 'dashboard'} className="fill">
-              <DashboardPanel />
-            </div>
-            <div hidden={sidebarTab !== 'files'} className="fill">
-              <FileTreePanel />
-            </div>
-            <div hidden={sidebarTab !== 'git'} className="fill">
-              <GitPanel />
-            </div>
+            {visitedSidebarTabs.has('dashboard') && (
+              <div hidden={sidebarTab !== 'dashboard'} className="fill">
+                <DashboardPanel />
+              </div>
+            )}
+            {visitedSidebarTabs.has('files') && (
+              <div hidden={sidebarTab !== 'files'} className="fill">
+                <FileTreePanel />
+              </div>
+            )}
+            {visitedSidebarTabs.has('git') && (
+              <div hidden={sidebarTab !== 'git'} className="fill">
+                <GitPanel />
+              </div>
+            )}
           </div>
         </aside>
 
@@ -289,15 +316,21 @@ export default function App(): JSX.Element {
 
         <main className="col col-center" style={{ gridArea: 'center' }}>
           <div className="panel-body">
-            <div hidden={center !== 'editor'} className="fill">
-              <EditorPanel />
-            </div>
-            <div hidden={center !== 'preview'} className="fill">
-              <PreviewPanel />
-            </div>
-            <div hidden={center !== 'memory'} className="fill">
-              <MemoryPanel />
-            </div>
+            {visitedCenterTabs.has('editor') && (
+              <div hidden={center !== 'editor'} className="fill">
+                <EditorPanel />
+              </div>
+            )}
+            {visitedCenterTabs.has('preview') && (
+              <div hidden={center !== 'preview'} className="fill">
+                <PreviewPanel />
+              </div>
+            )}
+            {visitedCenterTabs.has('memory') && (
+              <div hidden={center !== 'memory'} className="fill">
+                <MemoryPanel />
+              </div>
+            )}
             {browserOpened && (
               <div
                 className="fill"
