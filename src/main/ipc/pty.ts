@@ -56,9 +56,51 @@ function hardKill(p: pty.IPty): void {
   }
 }
 
-import { getCustomCliPath } from './settings'
+import { getCustomCliPath, isCliBypassPermissions } from './settings'
 import { findAgentCli } from '../ext/paths'
 import type { AgentId } from '../../preload/index'
+
+/**
+ * 依 Agent 類別取得 Bypass Mode 所需的命令列參數：
+ * - Claude Code: claude --permission-mode bypassPermissions
+ * - Codex: codex --dangerously-bypass-approvals-and-sandbox
+ * - Antigravity: agy --dangerously-skip-permissions
+ */
+export function getAgentBypassArgs(agent: string): string[] {
+  const a = agent.toLowerCase()
+  if (a === 'claude' || a.includes('claude')) {
+    return ['--permission-mode', 'bypassPermissions']
+  }
+  if (a === 'codex' || a.includes('codex')) {
+    return ['--dangerously-bypass-approvals-and-sandbox']
+  }
+  if (a === 'antigravity' || a === 'agy' || a.includes('agy') || a.includes('antigravity')) {
+    return ['--dangerously-skip-permissions']
+  }
+  return []
+}
+
+export function applyAgentBypassArgs(agent: string, currentArgs: string[]): string[] {
+  const bypassArgs = getAgentBypassArgs(agent)
+  if (bypassArgs.length === 0) return currentArgs
+
+  const result = [...currentArgs]
+  const a = agent.toLowerCase()
+  if (a === 'claude' || a.includes('claude')) {
+    if (!result.includes('--permission-mode')) {
+      result.push(...bypassArgs)
+    }
+  } else if (a === 'codex' || a.includes('codex')) {
+    if (!result.includes('--dangerously-bypass-approvals-and-sandbox')) {
+      result.push(...bypassArgs)
+    }
+  } else if (a === 'antigravity' || a === 'agy' || a.includes('agy') || a.includes('antigravity')) {
+    if (!result.includes('--dangerously-skip-permissions')) {
+      result.push(...bypassArgs)
+    }
+  }
+  return result
+}
 
 /**
  * 邏輯名稱 → 實際執行檔與前置參數。
@@ -139,12 +181,16 @@ export function registerPtyHandlers(): void {
           if (parsed && parsed.launcher) {
             const l = parsed.launcher
             const r = resolveCommand(l.cli)
+            let launcherArgs = [...r.extraArgs, ...(l.args || [])]
+            if (isCliBypassPermissions()) {
+              launcherArgs = applyAgentBypassArgs(l.cli, launcherArgs)
+            }
             launchers.push({
               id: l.id,
               name: l.name,
               cli: l.cli,
               command: r.cmd,
-              args: [...r.extraArgs, ...(l.args || [])],
+              args: launcherArgs,
               env: l.env || {}
             })
           }
@@ -162,6 +208,11 @@ export function registerPtyHandlers(): void {
     let command = resolved.cmd
     let args = [...resolved.extraArgs, ...(opts.args || [])]
     let env = { ...process.env }
+    let targetAgent: AgentId | null = null
+
+    if (opts.command === 'claude' || opts.command === 'antigravity' || opts.command === 'codex') {
+      targetAgent = opts.command as AgentId
+    }
     
     if (opts.launcherId) {
       const agentsDir = path.join(workspace.root, 'agents')
@@ -177,6 +228,9 @@ export function registerPtyHandlers(): void {
               command = r.cmd
               args = [...r.extraArgs, ...(l.args || [])]
               env = { ...env, ...(l.env || {}) }
+              if (l.cli === 'claude' || l.cli === 'antigravity' || l.cli === 'codex') {
+                targetAgent = l.cli as AgentId
+              }
               break
             }
           }
@@ -184,6 +238,22 @@ export function registerPtyHandlers(): void {
       }
     }
     
+    // 若啟用 CLI 略過權限模式 (Bypass Permissions Mode)，依據 Agent 類別自動注入 bypass 參數
+    if (isCliBypassPermissions()) {
+      if (targetAgent) {
+        args = applyAgentBypassArgs(targetAgent, args)
+      } else {
+        const cmdLower = (opts.command || command).toLowerCase()
+        if (cmdLower.includes('claude')) {
+          args = applyAgentBypassArgs('claude', args)
+        } else if (cmdLower.includes('codex')) {
+          args = applyAgentBypassArgs('codex', args)
+        } else if (cmdLower.includes('antigravity') || cmdLower.includes('agy')) {
+          args = applyAgentBypassArgs('antigravity', args)
+        }
+      }
+    }
+
     // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
     // 因此不需要（也不該）把明文寫進任何 agent 設定檔。
     env = { ...env, ...resolveConnectionEnv() }

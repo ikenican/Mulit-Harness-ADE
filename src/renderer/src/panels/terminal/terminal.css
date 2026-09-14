@@ -1109,6 +1109,7 @@
 }
 
 .launchpad-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1826,4 +1827,40 @@
   background: color-mix(in srgb, var(--fg) 6%, transparent);
   padding: 1px 4px;
   border-radius: 4px;
+}
+
+/* ── Launchpad & Popover Bypass Mode Badges ──────────────────────── */
+.launchpad-bypass-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #ea580c 18%, transparent);
+  color: #ea580c;
+  border: 1px solid color-mix(in srgb, #ea580c 35%, transparent);
+  line-height: 1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.term-popover-bypass-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, #ea580c 16%, transparent);
+  color: #ea580c;
+  border: 1px solid color-mix(in srgb, #ea580c 30%, transparent);
+  margin-left: 4px;
 }

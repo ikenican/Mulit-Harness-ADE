@@ -91,7 +91,15 @@ export const translations = {
       closeEsc: 'Close (Esc)',
       docDefaultApp: 'System Default Application',
       validExecutable: 'Valid executable',
-      selectExecutable: 'Select Executable'
+      selectExecutable: 'Select Executable',
+      cliPermissionsSection: 'CLI Launch Permissions & Bypass Mode',
+      cliPermissionsDesc: 'Configure whether AI agents should launch in bypass mode to skip interactive prompts.',
+      cliBypassTitle: 'Bypass Permissions Mode',
+      cliBypassSub: 'Automatically skip interactive approval prompts for commands and tools when launching AI agents',
+      cliBypassWarning: 'Caution: In bypass mode, AI agents execute terminal bash commands, file modifications, and MCP tools directly without waiting for manual confirmation. Use only in trusted workspaces.',
+      cliBypassActiveFlags: 'Active Bypass Launch Flags',
+      cliBypassDisabledNotice: 'Standard Mode active — agents will prompt for confirmation before executing actions.',
+      cliBypassModePill: 'Bypass Mode'
     },
     dashboard: {
       telemetryTitle: 'Agent Telemetry & Usage',
@@ -278,7 +286,15 @@ export const translations = {
       closeEsc: '關閉 (Esc)',
       docDefaultApp: '系統預設應用程式',
       validExecutable: '執行檔有效',
-      selectExecutable: '選擇執行檔'
+      selectExecutable: '選擇執行檔',
+      cliPermissionsSection: 'CLI 啟動權限與略過模式',
+      cliPermissionsDesc: '設定 AI Agent CLI 啟動時是否開啟略過模式以跳過終端互動式審批。',
+      cliBypassTitle: '略過審批權限模式 (Bypass Mode)',
+      cliBypassSub: '啟動 AI Agent CLI 時自動帶入 bypass 參數，略過終端互動式審批確認',
+      cliBypassWarning: '注意事項：啟用略過模式後，AI 代理在執行終端指令、檔案修改與工具呼叫時將直接執行，無需於終端手動確認。請務必在可信工作區中使用。',
+      cliBypassActiveFlags: '略過模式啟用時附帶之參數',
+      cliBypassDisabledNotice: '目前為標準模式：AI 代理執行動作前會在終端提示確認 (y/n)。',
+      cliBypassModePill: 'Bypass 模式'
     },
     dashboard: {
       telemetryTitle: 'Agent 遙測與 Token 統計',

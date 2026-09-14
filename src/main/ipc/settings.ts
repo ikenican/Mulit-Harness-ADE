@@ -72,6 +72,7 @@ export function loadSettings(): WorkbenchSettings {
         cmd: parsed.cliEnabled?.cmd ?? true,
         ...(parsed.cliEnabled || {})
       },
+      cliBypassPermissions: parsed.cliBypassPermissions ?? false,
       docToolPaths,
       autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true,
       language: parsed.language === 'en' || parsed.language === 'zh-TW' ? parsed.language : undefined
@@ -92,6 +93,7 @@ export function loadSettings(): WorkbenchSettings {
         powershell: true,
         cmd: true
       },
+      cliBypassPermissions: false,
       docToolPaths: {
         word: '',
         excel: '',
@@ -157,6 +159,14 @@ export function isCliEnabled(id: string): boolean {
   return s.cliEnabled?.[id] !== false
 }
 
+/**
+ * 判斷是否啟用 CLI 啟動權限略過模式 (Bypass Permissions Mode)
+ */
+export function isCliBypassPermissions(): boolean {
+  const s = loadSettings()
+  return !!s.cliBypassPermissions
+}
+
 export function registerSettingsHandlers(): void {
   ipcMain.handle('settings:get', async (): Promise<WorkbenchSettings> => {
     return loadSettings()
@@ -175,6 +185,10 @@ export function registerSettingsHandlers(): void {
         ...current.cliEnabled,
         ...(patch.cliEnabled || {})
       },
+      cliBypassPermissions:
+        patch.cliBypassPermissions !== undefined
+          ? patch.cliBypassPermissions
+          : (current.cliBypassPermissions ?? false),
       docToolPaths: {
         ...(current.docToolPaths || {}),
         ...(patch.docToolPaths || {})

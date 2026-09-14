@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added / 新增功能
+- **CLI 啟動權限與略過模式 (CLI Launch Permissions & Bypass Mode)**:
+  - 在「設定 ➔ CLI 與 AI 代理」新增專屬控制區塊，配備 Apple HIG 盾牌圖示、開關切換器與警示橫幅。
+  - 支援全域設定持久化（`.workbench/settings.json`，欄位 `cliBypassPermissions`，預設為 `false` 確保安全）。
+  - 啟用時自動向各 AI Agent 注入官方略過審批參數（具備防重複注入機制）：
+    - **Claude Code**: `claude --permission-mode bypassPermissions`
+    - **OpenAI Codex**: `codex --dangerously-bypass-approvals-and-sandbox`
+    - **Google Antigravity**: `agy --dangerously-skip-permissions`
+  - 終端啟動板（Launchpad cards）與「`+`」選單即時呈現橘色 `Bypass` 標籤，採用卡片右上角懸浮標籤佈局，徹底解決文字截斷跑位問題。
+
+---
+
 ## [0.1.2] - 2026-09-14
 
 ### Highlights & Summary / 更新亮點

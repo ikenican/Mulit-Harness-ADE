@@ -13,7 +13,8 @@ import {
   IconFileText,
   IconFolderOpen,
   IconExternalLink,
-  IconCheck
+  IconCheck,
+  IconShield
 } from './Icons'
 import './settingsModal.css'
 import type { WorkbenchSettings, DocToolPaths } from '../../../preload/index'
@@ -150,6 +151,7 @@ export default function SettingsModal({
   const [settings, setSettings] = useState<WorkbenchSettings>({
     cliPaths: { claude: '', antigravity: '', codex: '', powershell: '', cmd: '' },
     cliEnabled: { claude: true, antigravity: true, codex: true, powershell: true, cmd: true },
+    cliBypassPermissions: false,
     docToolPaths: { word: '', excel: '', powerpoint: '', pdf: '' }
   })
   const [detectedPaths, setDetectedPaths] = useState<Record<string, string>>({
@@ -716,6 +718,113 @@ export default function SettingsModal({
               </div>
 
               <div className="macos-settings-body">
+                {/* ── CLI Permissions & Bypass Mode Section ────────── */}
+                <div className="macos-section">
+                  <span className="macos-section-header">{t('settings.cliPermissionsSection')}</span>
+                  <div className="macos-inset-group">
+                    <div className="macos-row">
+                      <div className="macos-row-main">
+                        <div className="macos-row-left">
+                          <div
+                            className="macos-row-badge-icon"
+                            style={{ background: settings.cliBypassPermissions ? '#EA580C' : '#64748B' }}
+                          >
+                            <IconShield size={14} />
+                          </div>
+                          <div className="macos-row-info">
+                            <div className="macos-row-title-row">
+                              <span className="macos-row-title">{t('settings.cliBypassTitle')}</span>
+                              <span
+                                className={`macos-type-pill ${settings.cliBypassPermissions ? 'bypass-active' : ''}`}
+                              >
+                                {settings.cliBypassPermissions ? t('settings.cliBypassModePill') : 'Standard'}
+                              </span>
+                            </div>
+                            <span className="macos-row-sub">{t('settings.cliBypassSub')}</span>
+                          </div>
+                        </div>
+
+                        <div className="macos-row-right">
+                          <label
+                            className="apple-toggle"
+                            title={
+                              settings.cliBypassPermissions
+                                ? 'Disable bypass mode'
+                                : 'Enable bypass mode'
+                            }
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!settings.cliBypassPermissions}
+                              onChange={(e) =>
+                                setSettings((prev) => ({
+                                  ...prev,
+                                  cliBypassPermissions: e.target.checked
+                                }))
+                              }
+                            />
+                            <span className="apple-toggle-slider" />
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Expandable info drawer when bypass mode is active */}
+                      {settings.cliBypassPermissions && (
+                        <div className="macos-bypass-drawer">
+                          <div className="macos-bypass-warning-banner">
+                            <span className="macos-bypass-warning-icon">⚠️</span>
+                            <span className="macos-bypass-warning-text">
+                              {t('settings.cliBypassWarning')}
+                            </span>
+                          </div>
+
+                          <div className="macos-bypass-flags-header">
+                            <span>{t('settings.cliBypassActiveFlags')}</span>
+                          </div>
+
+                          <div className="macos-bypass-cards">
+                            <div className="macos-bypass-agent-card">
+                              <div className="macos-bypass-agent-top">
+                                <span className="macos-bypass-agent-badge" style={{ background: '#E05D26' }}>
+                                  Claude Code
+                                </span>
+                                <span className="macos-bypass-agent-target">claude</span>
+                              </div>
+                              <div className="macos-bypass-code-box">
+                                <code>claude --permission-mode bypassPermissions</code>
+                              </div>
+                            </div>
+
+                            <div className="macos-bypass-agent-card">
+                              <div className="macos-bypass-agent-top">
+                                <span className="macos-bypass-agent-badge" style={{ background: '#10B981' }}>
+                                  Codex CLI
+                                </span>
+                                <span className="macos-bypass-agent-target">codex</span>
+                              </div>
+                              <div className="macos-bypass-code-box">
+                                <code>codex --dangerously-bypass-approvals-and-sandbox</code>
+                              </div>
+                            </div>
+
+                            <div className="macos-bypass-agent-card">
+                              <div className="macos-bypass-agent-top">
+                                <span className="macos-bypass-agent-badge" style={{ background: '#6366F1' }}>
+                                  Antigravity
+                                </span>
+                                <span className="macos-bypass-agent-target">agy</span>
+                              </div>
+                              <div className="macos-bypass-code-box">
+                                <code>agy --dangerously-skip-permissions</code>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="macos-section">
                   <div className="macos-section-header-bar">
                     <span className="macos-section-header">{t('settings.supportedTools')}</span>

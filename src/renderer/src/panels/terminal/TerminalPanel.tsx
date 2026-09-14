@@ -186,6 +186,8 @@ export default function TerminalPanel(): JSX.Element {
     [settings]
   )
 
+  const isBypassActive = !!settings.cliBypassPermissions
+
   const enabledAgents = useMemo(() => {
     return BUILTIN_AGENTS.filter((a) => isCliEnabled(a.id))
   }, [isCliEnabled])
@@ -1068,6 +1070,9 @@ export default function TerminalPanel(): JSX.Element {
                         <div className="term-popover-item-top">
                           <span className="term-popover-name">{agent.at}</span>
                           <span className="term-popover-badge">{agent.badge}</span>
+                          {isBypassActive && (
+                            <span className="term-popover-bypass-pill">Bypass</span>
+                          )}
                         </div>
                         <span className="term-popover-desc">{agent.desc}</span>
                       </div>
@@ -1577,6 +1582,11 @@ export default function TerminalPanel(): JSX.Element {
                       onClick={() => handleNewTerminal('claude')}
                       {...lp.handlers}
                     >
+                      {isBypassActive && (
+                        <span className="launchpad-bypass-badge" title="Bypass mode: --permission-mode bypassPermissions">
+                          Bypass
+                        </span>
+                      )}
                       <div className="launchpad-card-icon">
                         <AgentMark agent="claude" size={28} />
                       </div>
@@ -1596,6 +1606,11 @@ export default function TerminalPanel(): JSX.Element {
                       onClick={() => handleNewTerminal('antigravity')}
                       {...lp.handlers}
                     >
+                      {isBypassActive && (
+                        <span className="launchpad-bypass-badge" title="Bypass mode: --dangerously-skip-permissions">
+                          Bypass
+                        </span>
+                      )}
                       <div className="launchpad-card-icon">
                         <AgentMark agent="antigravity" size={28} />
                       </div>
@@ -1615,6 +1630,11 @@ export default function TerminalPanel(): JSX.Element {
                       onClick={() => handleNewTerminal('codex')}
                       {...lp.handlers}
                     >
+                      {isBypassActive && (
+                        <span className="launchpad-bypass-badge" title="Bypass mode: --dangerously-bypass-approvals-and-sandbox">
+                          Bypass
+                        </span>
+                      )}
                       <div className="launchpad-card-icon">
                         <AgentMark agent="codex" size={28} />
                       </div>

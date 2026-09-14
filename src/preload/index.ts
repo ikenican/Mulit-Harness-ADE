@@ -223,6 +223,7 @@ export interface WorkbenchSettings {
     cmd?: boolean
     [key: string]: boolean | undefined
   }
+  cliBypassPermissions?: boolean
   docToolPaths?: DocToolPaths
   autoOpenAgentModifiedFiles?: boolean
   language?: 'en' | 'zh-TW'
