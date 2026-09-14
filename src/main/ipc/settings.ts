@@ -163,7 +163,8 @@ export function loadSettings(): WorkbenchSettings {
     docToolPaths,
     autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true,
     language: parsed.language === 'en' || parsed.language === 'zh-TW' ? parsed.language : undefined,
-    lastWorkspace: typeof parsed.lastWorkspace === 'string' ? parsed.lastWorkspace : undefined
+    lastWorkspace: typeof parsed.lastWorkspace === 'string' ? parsed.lastWorkspace : undefined,
+    autoCheckUpdates: parsed.autoCheckUpdates ?? true
   }
 }
 

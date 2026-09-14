@@ -9,6 +9,7 @@ import { registerExtHandlers } from './ipc/ext'
 import { registerConnHandlers } from './ipc/conn'
 import { registerSettingsHandlers, getLastWorkspace, isProtectedPath } from './ipc/settings'
 import { registerDashboardHandlers } from './ipc/dashboard'
+import { registerUpdaterHandlers } from './ipc/updater'
 
 function determineInitialWorkspace(): string {
   const last = getLastWorkspace()
@@ -226,6 +227,7 @@ if (!gotTheLock) {
     registerConnHandlers()
     registerSettingsHandlers()
     registerDashboardHandlers()
+    registerUpdaterHandlers()
     registerWindowHandlers()
     createWindow()
 

@@ -14,10 +14,13 @@ import {
   IconFolderOpen,
   IconExternalLink,
   IconCheck,
-  IconShield
+  IconShield,
+  IconInfo,
+  IconDownload,
+  IconSpark
 } from './Icons'
 import './settingsModal.css'
-import type { WorkbenchSettings, DocToolPaths } from '../../../preload/index'
+import type { WorkbenchSettings, DocToolPaths, UpdaterStatus } from '../../../preload/index'
 import type { SettingsTab } from '@/store'
 
 interface SettingsModalProps {
@@ -184,6 +187,8 @@ export default function SettingsModal({
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [updaterStatus, setUpdaterStatus] = useState<UpdaterStatus | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
 
   useEffect(() => {
     if (initialTab) {
@@ -197,6 +202,14 @@ export default function SettingsModal({
     // 載入當前設定
     window.api.settings.get().then((s) => {
       setSettings(s)
+    })
+
+    // 取得當前更新狀態並訂閱即時廣播
+    window.api.updater.getStatus().then((st) => {
+      setUpdaterStatus(st)
+    })
+    const unsubUpdater = window.api.updater.onStatusChange((st) => {
+      setUpdaterStatus(st)
     })
 
     // 偵測已安裝之 Office / PDF 工具
@@ -222,6 +235,10 @@ export default function SettingsModal({
       }
       setDetectedPaths(map)
     })
+
+    return () => {
+      unsubUpdater()
+    }
   }, [isOpen])
 
   // 按 Esc 鍵關閉視窗
@@ -439,6 +456,28 @@ export default function SettingsModal({
     }
   }
 
+  const handleCheckUpdate = async (): Promise<void> => {
+    setCheckingUpdate(true)
+    try {
+      const st = await window.api.updater.check()
+      setUpdaterStatus(st)
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  const handleDownloadUpdate = async (): Promise<void> => {
+    await window.api.updater.download()
+  }
+
+  const handleInstallUpdate = (): void => {
+    window.api.updater.install()
+  }
+
+  const handleOpenReleasePage = (): void => {
+    window.api.updater.openRelease()
+  }
+
   return (
     <div className="apple-modal-backdrop" onClick={onClose}>
       <div className="macos-settings-window" onClick={(e) => e.stopPropagation()}>
@@ -491,6 +530,30 @@ export default function SettingsModal({
                 <IconPuzzle size={14} />
               </div>
               <span className="macos-sidebar-item-text">{t('settings.extensions')}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`macos-sidebar-item ${tab === 'about' ? 'active' : ''}`}
+              onClick={() => setTab('about')}
+            >
+              <div className="macos-icon-squircle" style={{ background: '#0284c7' }}>
+                <IconInfo size={14} />
+              </div>
+              <span className="macos-sidebar-item-text">{t('settings.aboutTab')}</span>
+              {updaterStatus?.updateAvailable && (
+                <span
+                  style={{
+                    marginLeft: 'auto',
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    boxShadow: '0 0 6px #ef4444'
+                  }}
+                  title={t('settings.updateAvailable', { version: updaterStatus.updateInfo?.version || '' })}
+                />
+              )}
             </button>
           </nav>
         </div>
@@ -1154,6 +1217,238 @@ export default function SettingsModal({
             </>
           )}
 
+          {tab === 'about' && (
+            <>
+              <div className="macos-settings-header">
+                <div className="macos-settings-header-top">
+                  <div>
+                    <h2 className="macos-settings-title">{t('settings.aboutTitle')}</h2>
+                    <p className="macos-settings-desc">{t('settings.aboutDesc')}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="macos-close-btn"
+                    onClick={onClose}
+                    title={t('settings.closeEsc')}
+                  >
+                    <IconClose size={12} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="macos-settings-body">
+                {/* App Brand Header Card */}
+                <div className="macos-group-box" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 13,
+                      background: 'linear-gradient(135deg, #0284c7, #6366f1)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#fff',
+                      boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)',
+                      flexShrink: 0
+                    }}
+                  >
+                    <IconTerminalBox size={26} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '18px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                      Agent Workbench
+                    </div>
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>v{updaterStatus?.currentVersion || '0.1.3'}</span>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          background: 'rgba(255, 255, 255, 0.08)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border-subtle)'
+                        }}
+                      >
+                        {!updaterStatus?.isPackaged
+                          ? t('settings.channelDev')
+                          : updaterStatus?.isInstalled
+                          ? t('settings.channelInstalled')
+                          : t('settings.channelPortable')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Update Status Card */}
+                <div className="macos-group-box">
+                  <div className="macos-group-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>{t('settings.aboutTab')}</span>
+                    <button
+                      type="button"
+                      className="macos-btn-secondary"
+                      onClick={handleCheckUpdate}
+                      disabled={checkingUpdate || updaterStatus?.checking || updaterStatus?.isDownloading}
+                      style={{ fontSize: '12px', padding: '4px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <IconSpark size={13} />
+                      {checkingUpdate || updaterStatus?.checking ? t('settings.checkingUpdates') : t('settings.checkForUpdates')}
+                    </button>
+                  </div>
+
+                  <div className="macos-group-content">
+                    {/* Status Feedback */}
+                    {updaterStatus?.updateAvailable ? (
+                      <div
+                        style={{
+                          padding: '14px',
+                          background: 'rgba(59, 130, 246, 0.08)',
+                          border: '1px solid rgba(59, 130, 246, 0.25)',
+                          borderRadius: '8px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                            <span style={{ fontSize: '16px' }}>🚀</span>
+                            <span>{t('settings.updateAvailable', { version: updaterStatus.updateInfo?.version || '' })}</span>
+                          </div>
+                          {updaterStatus.updateInfo?.releaseDate && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                              {new Date(updaterStatus.updateInfo.releaseDate).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Release Notes */}
+                        {updaterStatus.updateInfo?.releaseNotes && (
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              color: 'var(--text-secondary)',
+                              background: 'rgba(0, 0, 0, 0.2)',
+                              padding: '10px',
+                              borderRadius: '6px',
+                              maxHeight: '120px',
+                              overflowY: 'auto',
+                              whiteSpace: 'pre-wrap',
+                              marginBottom: '12px',
+                              lineHeight: 1.5,
+                              border: '1px solid var(--border-subtle)'
+                            }}
+                          >
+                            {updaterStatus.updateInfo.releaseNotes}
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        {updaterStatus.isInstalled ? (
+                          updaterStatus.updateDownloaded ? (
+                            <button
+                              type="button"
+                              className="macos-btn-primary"
+                              onClick={handleInstallUpdate}
+                              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px' }}
+                            >
+                              <span>🚀</span>
+                              {t('settings.restartAndUpdate')}
+                            </button>
+                          ) : updaterStatus.isDownloading ? (
+                            <div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '6px', display: 'flex', justifyContent: 'space-between' }}>
+                                <span>{t('settings.downloadingUpdate', { percent: updaterStatus.downloadProgress?.percent || 0 })}</span>
+                              </div>
+                              <div style={{ height: '6px', background: 'var(--border-subtle)', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div
+                                  style={{
+                                    width: `${updaterStatus.downloadProgress?.percent || 0}%`,
+                                    height: '100%',
+                                    background: '#3b82f6',
+                                    transition: 'width 0.2s ease'
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="macos-btn-primary"
+                              onClick={handleDownloadUpdate}
+                              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                            >
+                              <IconDownload size={14} />
+                              {t('settings.downloadUpdate')}
+                            </button>
+                          )
+                        ) : (
+                          <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                              type="button"
+                              className="macos-btn-primary"
+                              onClick={handleOpenReleasePage}
+                              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                            >
+                              <IconDownload size={14} />
+                              {t('settings.downloadPortablePackage')}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '13px', padding: '6px 0' }}>
+                        <IconCheck size={16} style={{ color: '#22c55e' }} />
+                        <span>{t('settings.upToDate')}</span>
+                      </div>
+                    )}
+
+                    {updaterStatus?.error && (
+                      <div style={{ fontSize: '12px', color: '#ef4444', marginTop: '8px' }}>
+                        ⚠️ {updaterStatus.error}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Auto Check Preference */}
+                <div className="macos-group-box">
+                  <div className="macos-group-content">
+                    <div className="macos-cell-row">
+                      <div className="macos-cell-label">
+                        <span className="macos-cell-title">{t('settings.autoCheckUpdates')}</span>
+                        <span className="macos-cell-desc">{t('settings.autoCheckUpdatesDesc')}</span>
+                      </div>
+                      <div className="macos-cell-control">
+                        <label className="macos-toggle">
+                          <input
+                            type="checkbox"
+                            checked={settings.autoCheckUpdates ?? true}
+                            onChange={(e) =>
+                              setSettings((prev) => ({ ...prev, autoCheckUpdates: e.target.checked }))
+                            }
+                          />
+                          <span className="macos-toggle-slider" />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* GitHub link button */}
+                <div style={{ marginTop: '14px', textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    className="macos-btn-secondary"
+                    onClick={handleOpenReleasePage}
+                    style={{ fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <IconExternalLink size={13} />
+                    {t('settings.openGithubReleases')}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
           {/* macOS Sheet Footer */}
           <div className="macos-settings-footer">
             <span className="macos-footer-hint">
@@ -1163,6 +1458,8 @@ export default function SettingsModal({
                 t('settings.footerCliHint')
               ) : tab === 'doctools' ? (
                 t('settings.footerDocToolsHint')
+              ) : tab === 'about' ? (
+                t('settings.footerAboutHint')
               ) : (
                 t('settings.footerGeneralHint')
               )}
