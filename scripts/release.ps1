@@ -53,6 +53,14 @@ Write-Host "==========================================================" -Foregro
 Write-Host ""
 
 # 0. Check GitHub CLI installation and authentication
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+    if (Test-Path "C:\Program Files\GitHub CLI\gh.exe") {
+        $env:PATH = "C:\Program Files\GitHub CLI;$env:PATH"
+    } elseif (Test-Path "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe") {
+        $env:PATH = "$env:LOCALAPPDATA\Programs\GitHub CLI;$env:PATH"
+    }
+}
+
 Write-Host "Checking GitHub CLI (gh) status..." -ForegroundColor Gray
 try {
     $ghVersion = gh --version 2>&1 | Select-Object -First 1
