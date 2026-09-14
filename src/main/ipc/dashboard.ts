@@ -131,14 +131,78 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
   return { workspace: cleanName || dirName, workspacePath: undefined }
 }
 
+interface CachedSessionEntry {
+  mtime: number
+  session: AgentSessionInfo
+}
+
+interface DashboardCacheStore {
+  version: 1
+  sessions: Record<string, CachedSessionEntry>
+}
+
+let memCache: Map<string, CachedSessionEntry> | null = null
+let cacheDirty = false
+
+export function invalidateDashboardMemoryCache(): void {
+  memCache = null
+}
+
+function cacheFilePath(): string {
+  return join(workspace.root, '.workbench', 'dashboard-cache.json')
+}
+
+function loadDashboardCache(): Map<string, CachedSessionEntry> {
+  if (memCache) return memCache
+  memCache = new Map()
+  try {
+    const p = cacheFilePath()
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8')) as DashboardCacheStore
+      if (data && data.version === 1 && typeof data.sessions === 'object') {
+        for (const [k, v] of Object.entries(data.sessions)) {
+          if (v && typeof v.mtime === 'number' && v.session) {
+            memCache.set(k, v)
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore corrupted cache
+  }
+  return memCache
+}
+
+function saveDashboardCache(): void {
+  if (!cacheDirty || !memCache) return
+  try {
+    const dir = join(workspace.root, '.workbench')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    const sessionsObj: Record<string, CachedSessionEntry> = {}
+    for (const [k, v] of memCache.entries()) {
+      sessionsObj[k] = v
+    }
+    const store: DashboardCacheStore = {
+      version: 1,
+      sessions: sessionsObj
+    }
+    fs.writeFileSync(cacheFilePath(), JSON.stringify(store), 'utf8')
+    cacheDirty = false
+  } catch {
+    // ignore
+  }
+}
+
 /**
- * 讀取 Antigravity 本地會話日誌與真實 Token 概況
+ * 讀取 Antigravity 本地會話日誌與真實 Token 概況（支援 mtime 快速快取）
  */
 function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
   const brainDir = join(H, '.gemini', 'antigravity-ide', 'brain')
   if (!fs.existsSync(brainDir)) return []
 
   const list: AgentSessionInfo[] = []
+  const cache = loadDashboardCache()
+
   try {
     const entries = fs.readdirSync(brainDir, { withFileTypes: true })
     const dirs = entries
@@ -163,42 +227,63 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
 
     for (const d of dirs) {
       const logPath = d.logPath
+      if (!fs.existsSync(logPath)) continue
+
+      let stat: fs.Stats
+      try {
+        stat = fs.statSync(logPath)
+      } catch {
+        continue
+      }
+      const lastTimeMs = stat.mtimeMs
+      const cached = cache.get(logPath)
+
+      // Fast-Stat 命中：未修改的會話完全免讀檔免解析，0.01ms 瞬開
+      if (cached && cached.mtime === lastTimeMs) {
+        const s: AgentSessionInfo = { ...cached.session }
+        const timeSinceLastActive = Date.now() - lastTimeMs
+        s.status =
+          timeSinceLastActive < 90 * 1000
+            ? 'active'
+            : timeSinceLastActive < 15 * 60 * 1000
+            ? 'idle'
+            : 'completed'
+        s.lastActiveTime = new Date(lastTimeMs || Date.now()).toISOString()
+        list.push(s)
+        continue
+      }
+
       let title = 'Antigravity Session'
       let promptTokens = 0
       let toolTokens = 0
       let completionTokens = 0
-      let lastTimeMs = d.mtime
       const { workspace: wsName, workspacePath: wsPath } = extractAntigravityWorkspace(logPath)
 
-      if (fs.existsSync(logPath)) {
-        try {
-          const stat = fs.statSync(logPath)
-          lastTimeMs = stat.mtimeMs
-          const content = fs.readFileSync(logPath, 'utf8')
-          const lines = content.trim().split(/\r?\n/)
-          for (const line of lines) {
-            try {
-              const row = JSON.parse(line)
-              if (row.type === 'USER_INPUT' && row.content) {
-                const match = row.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)
-                if (match) {
-                  title = match[1].trim().split(/\r?\n/)[0].slice(0, 45)
-                }
-                promptTokens += estimateTokens(row.content)
+      try {
+        const content = fs.readFileSync(logPath, 'utf8')
+        const lines = content.trim().split(/\r?\n/)
+        for (const line of lines) {
+          try {
+            const row = JSON.parse(line)
+            if (row.type === 'USER_INPUT' && row.content) {
+              const match = row.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)
+              if (match) {
+                title = match[1].trim().split(/\r?\n/)[0].slice(0, 45)
               }
-              if (row.source === 'MODEL' && row.type === 'PLANNER_RESPONSE') {
-                if (row.thinking) completionTokens += estimateTokens(row.thinking)
-                if (row.content) completionTokens += estimateTokens(row.content)
-              } else if (row.type === 'RUN_COMMAND' || row.type === 'VIEW_FILE' || row.type === 'SYSTEM_MESSAGE') {
-                if (row.content) toolTokens += estimateTokens(row.content)
-              }
-            } catch {
-              // ignore malformed line
+              promptTokens += estimateTokens(row.content)
             }
+            if (row.source === 'MODEL' && row.type === 'PLANNER_RESPONSE') {
+              if (row.thinking) completionTokens += estimateTokens(row.thinking)
+              if (row.content) completionTokens += estimateTokens(row.content)
+            } else if (row.type === 'RUN_COMMAND' || row.type === 'VIEW_FILE' || row.type === 'SYSTEM_MESSAGE') {
+              if (row.content) toolTokens += estimateTokens(row.content)
+            }
+          } catch {
+            // ignore malformed line
           }
-        } catch {
-          // ignore
         }
+      } catch {
+        // ignore
       }
 
       const totalTokens = promptTokens + toolTokens + completionTokens
@@ -215,7 +300,7 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
           ? 'idle'
           : 'completed'
 
-      list.push({
+      const sessionObj: AgentSessionInfo = {
         id: d.name,
         agent: 'antigravity',
         title,
@@ -236,7 +321,11 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
             { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
           ]
         }
-      })
+      }
+
+      cache.set(logPath, { mtime: lastTimeMs, session: sessionObj })
+      cacheDirty = true
+      list.push(sessionObj)
     }
   } catch {
     // ignore
@@ -245,13 +334,15 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
 }
 
 /**
- * 讀取 Claude 本地專案日誌與真實 Token 概況
+ * 讀取 Claude 本地專案日誌與真實 Token 概況（支援 mtime 快速快取）
  */
 function scanClaudeSessions(max = 20): AgentSessionInfo[] {
   const projectsDir = join(H, '.claude', 'projects')
   if (!fs.existsSync(projectsDir)) return []
 
   const list: AgentSessionInfo[] = []
+  const cache = loadDashboardCache()
+
   try {
     const projs = fs.readdirSync(projectsDir, { withFileTypes: true })
       .filter((p) => p.isDirectory())
@@ -275,6 +366,26 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
         .slice(0, max)
 
       for (const f of files) {
+        if (!fs.existsSync(f.path)) continue
+        let stat: fs.Stats
+        try {
+          stat = fs.statSync(f.path)
+        } catch {
+          continue
+        }
+        const mtime = stat.mtimeMs
+        const cached = cache.get(f.path)
+
+        // Fast-Stat 命中：直接複用歷史解析結構
+        if (cached && cached.mtime === mtime) {
+          const s: AgentSessionInfo = { ...cached.session }
+          const timeSinceLastActive = Date.now() - mtime
+          s.status = timeSinceLastActive < 15 * 60 * 1000 ? 'idle' : 'completed'
+          s.lastActiveTime = new Date(mtime).toISOString()
+          list.push(s)
+          continue
+        }
+
         let title = 'Claude Session'
         let promptTokens = 0
         let toolTokens = 0
@@ -335,7 +446,7 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
             ? 'idle'
             : 'completed'
 
-        list.push({
+        const sessionObj: AgentSessionInfo = {
           id: f.name.replace('.jsonl', ''),
           agent: 'claude',
           title,
@@ -356,7 +467,11 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
               { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
             ]
           }
-        })
+        }
+
+        cache.set(f.path, { mtime, session: sessionObj })
+        cacheDirty = true
+        list.push(sessionObj)
       }
     }
   } catch {
@@ -422,7 +537,7 @@ function findCodexRolloutFiles(max: number): { id: string; path: string; mtime: 
 }
 
 /**
- * 讀取 Codex 本地 rollout 紀錄與 Token 概況。
+ * 讀取 Codex 本地 rollout 紀錄與 Token 概況（支援 mtime 快速快取）。
  * Codex 的 token_count 事件是「累計值」（每個 turn 印一次目前為止的總量），
  * 所以取檔案中最後一筆 total_token_usage 即為該 session 的最終總量，不能逐行加總。
  */
@@ -433,8 +548,31 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
   const titleMap = loadCodexTitleMap()
   const files = findCodexRolloutFiles(max)
   const list: AgentSessionInfo[] = []
+  const cache = loadDashboardCache()
 
   for (const f of files) {
+    if (!fs.existsSync(f.path)) continue
+    let stat: fs.Stats
+    try {
+      stat = fs.statSync(f.path)
+    } catch {
+      continue
+    }
+    const mtime = stat.mtimeMs
+    const cached = cache.get(f.path)
+
+    // Fast-Stat 命中：直接複用歷史解析結構
+    if (cached && cached.mtime === mtime) {
+      const s: AgentSessionInfo = { ...cached.session }
+      const indexTitle = titleMap.get(f.id)
+      if (indexTitle) s.title = indexTitle
+      const timeSinceLastActive = Date.now() - mtime
+      s.status = timeSinceLastActive < 15 * 60 * 1000 ? 'idle' : 'completed'
+      s.lastActiveTime = new Date(mtime).toISOString()
+      list.push(s)
+      continue
+    }
+
     const indexTitle = titleMap.get(f.id)
     let title = indexTitle || 'Codex Session'
     let promptTokens = 0
@@ -493,7 +631,7 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
     const compPct = Math.max(0, 100 - promptPct)
     const cachedPct = promptTokens > 0 ? Math.round((cachedTokens / promptTokens) * 100) : 0
 
-    list.push({
+    const sessionObj: AgentSessionInfo = {
       id: f.id,
       agent: 'codex',
       title,
@@ -514,7 +652,11 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
           { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
         ]
       }
-    })
+    }
+
+    cache.set(f.path, { mtime, session: sessionObj })
+    cacheDirty = true
+    list.push(sessionObj)
   }
 
   return list
@@ -555,22 +697,30 @@ function saveDashboardState(state: DashboardState): void {
   }
 }
 
+let activeScanPromise: Promise<DashboardData> | null = null
+
 export function registerDashboardHandlers(): void {
   ipcMain.handle('dashboard:data', async (): Promise<DashboardData> => {
-    const state = loadDashboardState()
-    const deletedSet = new Set(state.deletedIds)
-    const archivedSet = new Set(state.archivedIds)
+    if (activeScanPromise) {
+      return activeScanPromise
+    }
 
-    // 1. 抓取目前活躍終端 PTY 行程
-    const activePty = getActiveSessionMetas()
-    const activePtySessions = activePty.filter((p) => !deletedSet.has(p.id))
+    activeScanPromise = (async () => {
+      try {
+        const state = loadDashboardState()
+        const deletedSet = new Set(state.deletedIds)
+        const archivedSet = new Set(state.archivedIds)
 
-    // 2. 抓取歷史真實會話記錄（依 Settings 啟用狀態過濾）
-    const agySessions = isCliEnabled('antigravity')
-      ? scanAntigravitySessions(20)
-          .filter((s) => !deletedSet.has(s.id))
-          .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
-      : []
+        // 1. 抓取目前活躍終端 PTY 行程
+        const activePty = getActiveSessionMetas()
+        const activePtySessions = activePty.filter((p) => !deletedSet.has(p.id))
+
+        // 2. 抓取歷史真實會話記錄（依 Settings 啟用狀態過濾）
+        const agySessions = isCliEnabled('antigravity')
+          ? scanAntigravitySessions(20)
+              .filter((s) => !deletedSet.has(s.id))
+              .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+          : []
 
     const claudeSessions = isCliEnabled('claude')
       ? scanClaudeSessions(20)
@@ -739,7 +889,14 @@ export function registerDashboardHandlers(): void {
       sessions: allSessions
     }
 
-    return data
+        return data
+      } finally {
+        activeScanPromise = null
+        saveDashboardCache()
+      }
+    })()
+
+    return activeScanPromise
   })
 
   ipcMain.handle('dashboard:archiveSession', async (_e, id: string, archive: boolean): Promise<boolean> => {

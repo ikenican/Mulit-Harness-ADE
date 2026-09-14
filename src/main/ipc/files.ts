@@ -7,6 +7,7 @@ import { spawn } from 'child_process'
 import { workspace } from '../index'
 import type { FsEntry, FileStat, DocToolPaths } from '../../preload'
 import { getCustomDocToolPath } from './settings'
+import { invalidateDashboardMemoryCache } from './dashboard'
 
 const IGNORED = new Set(['.git', 'node_modules', 'out', '.deps'])
 
@@ -263,6 +264,7 @@ export function registerFileHandlers(): void {
 
     if (!result.canceled && result.filePaths.length > 0) {
       workspace.root = result.filePaths[0]
+      invalidateDashboardMemoryCache()
       initWorkspaceWatcher()
       return workspace.root
     }
@@ -274,6 +276,7 @@ export function registerFileHandlers(): void {
   ipcMain.handle('files:setWorkspaceRoot', async (_event, targetPath: string): Promise<boolean> => {
     if (targetPath && existsSync(targetPath)) {
       workspace.root = targetPath
+      invalidateDashboardMemoryCache()
       initWorkspaceWatcher()
       triggerTreeChange()
       return true
