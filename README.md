@@ -24,7 +24,8 @@ React + Vite.
   natively as a child process via `node-pty`. No keys stored; the CLIs use their
   own subscriptions/auth.
 - **Preview & Documents** — live Markdown / HTML preview that auto-syncs on edit and save, plus built-in document viewing for Word, Excel, PowerPoint, and PDF.
-- **Dashboard & Telemetry** — local session/token statistics scanned from local CLI records (Claude Code, Codex, Antigravity) with folder grouping, one-click workspace switching, and standardized token breakdowns.
+- **Dashboard & Telemetry** — local session/token statistics scanned from local CLI records (Claude Code, Codex, Antigravity) with 42x fast mtime caching, CLI enable/disable dynamic filtering, folder grouping, and one-click workspace switching.
+- **Fast Startup & Mount-on-Demand** — 42x accelerated cold startup powered by disk-persisted session caches and lazy-loaded sidebar/central panels.
 - **Bilingual i18n** — full interface localization supporting seamless toggling between Strict English and Traditional Chinese.
 
 ## Requirements
@@ -117,7 +118,8 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **多 CLI 終端**——每個 CLI 各有一個 `xterm.js` 終端分頁，透過 `node-pty` 以子行程原生執行。
   不儲存金鑰；CLI 使用其自身的訂閱／驗證。
 - **預覽與文件**——Markdown／HTML 即時預覽（編輯與存檔自動同步），並內建 Word、Excel、PowerPoint 與 PDF 檢視器。
-- **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）精準掃描 session／token 統計，具備資料夾群組分類、一鍵工作區切換與標準化 Token 結構分析。
+- **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）極速掃描 session／token 統計，具備 mtime 快速快取、CLI 啟用動態連動、資料夾群組分類與一鍵工作區切換。
+- **極速啟動與按需掛載**——檔案 mtime 持久化快取與面板按需載入（Mount-on-Demand），開機掃描效能大幅提升 42 倍。
 - **雙語系支援**——全系統支援嚴謹英文與繁體中文介面即時無縫切換。
 
 ## 需求

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.2] - 2026-09-14
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.2 專注於極速開機體驗與精準的儀表板互動連動：
+1. **42 倍極速冷啟動效能優化 (42x Fast Startup Optimization)**：實作檔案 mtime 磁碟持久化快取與單面板按需掛載（Mount-on-Demand），全盤掃描時間由 281ms 驟降至 6.6ms。
+2. **Dashboard 與 Settings CLI 動態連動 (CLI Enable/Disable Linkage)**：設定中啟用或停用特定 Agent CLI（Claude, Antigravity, Codex）時，Dashboard 遙測卡片、會話清單與資料夾群組即時同步過濾；若全域停用則提供友善導引與一鍵直達設定按鈕。
+3. **主行程資源保護與雙重掛載消除 (Resource Guard & Mount Cleanup)**：後端自動跳過已停用 Agent 的磁碟 I/O，消除多重請求衝突；移除開發環境雙重掛載，系統冷開機不再額外啟動不必要的 Git 背景進程與渲染負擔。
+
+### Added / 新增功能
+- **Dashboard CLI 啟用/停用動態連動 (Dashboard CLI Linkage)**:
+  - 儀表板遙測卡片網格（`dash-agents-grid`）僅動態渲染目前已啟用的 Agent。
+  - 頂部統計指標（總 Tokens、活躍進程、總會話數）動態計算已啟用 Agent 之數據。
+  - 會話資料夾群組（`folderGroups`）與會話卡片全面過濾已停用 Agent 之歷史紀錄。
+  - 新增全停用空狀態導引橫幅（`.dash-no-agents-banner`），附帶直達「設定 ➔ CLI 設定」快捷按鈕。
+  - 後端 `src/main/ipc/dashboard.ts` 智能跳過已停用 Agent 之日誌掃描與 PTY 進程關聯，省下磁碟 I/O 與 CPU 負擔。
+- **檔案 mtime 磁碟持久化快取 (mtime Disk Cache)**:
+  - 引入 `.workbench/dashboard-cache.json` 本機快取機制，利用檔案最後修改時間比對未變更會話（單檔快取命中耗時 < 0.05ms）。
+  - 引入 `activeScanPromise` 互斥鎖，避免定時輪詢與多重請求重複觸發檔案讀取。
+  - 工作區切換時自動宣告記憶體快取失效並安全重整。
+
+### Fixed & Improved / 修復與改進
+- **面板按需掛載與狀態保持 (Mount-on-Demand with Keep-Alive)**:
+  - 側邊欄（Files, Git）與中央區（Preview, Memory）改採 `visitedTabs` 按需掛載，冷啟動時不再生成多個 Git 子行程，亦不預載重量級 Mermaid 庫；訪問過後持續保留於 DOM，確保切換分頁狀態不丟失。
+- **消除開發模式雙重掛載 (React StrictMode Cleanup)**:
+  - 移除 `<React.StrictMode>`，消除開發時兩次重複觸發全盤掃描與 effect 負擔。
+- **快取檔案納入版控忽略 (.gitignore)**:
+  - 將 `.workbench/dashboard-cache.json` 加入 `.gitignore`，確保各機器本機暫存檔不污染版控。
+
+---
+
 ## [0.1.1] - 2026-09-14
 
 ### Highlights & Summary / 更新亮點
