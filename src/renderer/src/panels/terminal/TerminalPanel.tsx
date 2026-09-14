@@ -581,6 +581,9 @@ export default function TerminalPanel(): JSX.Element {
         args = ['--resume', req.id]
       } else if (req.agent === 'antigravity' && req.id) {
         args = ['--conversation', req.id]
+      } else if (req.agent === 'codex' && req.id) {
+        // codex 的 resume 是子命令＋位置參數（`codex resume <id>`），不是 flag
+        args = ['resume', req.id]
       }
 
       const titlePrefix =
@@ -1767,6 +1770,14 @@ function TerminalInstance({
 
     session.term.open(elRef.current)
     session.fitAddon.fit()
+
+    // Antigravity CLI 沒有自己的「Resuming...」提示，resume 後畫面長得跟全新 session
+    // 幾乎一樣（只差在最後停在舊對話的最後一句話），使用者很容易誤以為沒接上舊紀錄。
+    // 這裡純粹在本地終端畫面插入一行提示，不會送進 pty，不影響 CLI 本身的輸入輸出。
+    if (session.launcherKey === 'antigravity' && session.args?.[0] === '--conversation') {
+      session.term.writeln('\x1b[2m▸ Resuming Antigravity session...\x1b[0m')
+      session.term.writeln('')
+    }
 
     const opts: Parameters<typeof window.api.pty.spawn>[0] = {
       cols: session.term.cols,

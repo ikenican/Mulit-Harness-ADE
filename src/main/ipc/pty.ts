@@ -299,12 +299,19 @@ export function registerPtyHandlers(): void {
         cwd: opts.cwd || workspace.root
       })
       
+      // event.sender 是 spawn 當下那個視窗的 webContents。如果之後那個視窗被關掉
+      // （例如把終端彈出成獨立視窗後又關掉它），pty 本身不會跟著結束——它活在
+      // 共用的 ptySessions，繼續吐 data/exit 事件。這時候再對已銷毀的 webContents
+      // 呼叫 .send() 會丟出未捕捉例外，直接讓整個 main process 崩潰。
       ptyProcess.onData((data) => {
+        if (event.sender.isDestroyed()) return
         event.sender.send(`pty:data:${id}`, data)
       })
-      
+
       ptyProcess.onExit(({ exitCode }) => {
-        event.sender.send(`pty:exit:${id}`, exitCode)
+        if (!event.sender.isDestroyed()) {
+          event.sender.send(`pty:exit:${id}`, exitCode)
+        }
         ptySessions.delete(id)
         ptySessionMetas.delete(id)
       })
