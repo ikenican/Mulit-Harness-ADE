@@ -17,3 +17,4 @@ release/
 
 # 本機安裝的外部 skill（各自有 .git 與授權，不併入本專案）
 .agents/skills/
+scratch/

@@ -748,3 +748,121 @@ export function IconShield({ size = 15, className, style }: IconProps): JSX.Elem
     </svg>
   )
 }
+
+export function IconInfo({ size = 15, className, style }: IconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  )
+}
+
+export function IconDownload({ size = 15, className, style }: IconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+export function IconSpark({ size = 15, className, style }: IconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+    >
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  )
+}
+
+export function IconRefresh({ size = 15, className, style }: IconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+    >
+      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-1.19" />
+    </svg>
+  )
+}
+
+export function IconAppLogo({ size = 52, className, style }: IconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 128 128"
+      fill="none"
+      className={className}
+      style={{ filter: 'drop-shadow(0 4px 12px rgba(43, 45, 58, 0.45))', ...style }}
+    >
+      {/* Dark background circle matching desktop app icon */}
+      <circle cx="64" cy="64" r="60" fill="#2c2e3b" />
+      <circle cx="64" cy="64" r="59" stroke="rgba(255, 255, 255, 0.08)" strokeWidth="2" />
+
+      {/* Center nucleus */}
+      <circle cx="64" cy="64" r="7" fill="#a0ecfb" />
+
+      {/* Orbit 1: -30 deg */}
+      <g transform="rotate(-30 64 64)">
+        <ellipse cx="64" cy="64" rx="46" ry="18" stroke="#9feaf9" strokeWidth="3.4" fill="none" />
+        <circle cx="18" cy="64" r="5" fill="#a0ecfb" />
+      </g>
+
+      {/* Orbit 2: +30 deg */}
+      <g transform="rotate(30 64 64)">
+        <ellipse cx="64" cy="64" rx="46" ry="18" stroke="#9feaf9" strokeWidth="3.4" fill="none" />
+        <circle cx="110" cy="64" r="5" fill="#a0ecfb" />
+      </g>
+
+      {/* Orbit 3: 90 deg */}
+      <g transform="rotate(90 64 64)">
+        <ellipse cx="64" cy="64" rx="46" ry="18" stroke="#9feaf9" strokeWidth="3.4" fill="none" />
+        <circle cx="18" cy="64" r="5" fill="#a0ecfb" />
+      </g>
+    </svg>
+  )
+}

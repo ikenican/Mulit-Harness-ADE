@@ -99,7 +99,31 @@ export const translations = {
       cliBypassWarning: 'Caution: In bypass mode, AI agents execute terminal bash commands, file modifications, and MCP tools directly without waiting for manual confirmation. Use only in trusted workspaces.',
       cliBypassActiveFlags: 'Active Bypass Launch Flags',
       cliBypassDisabledNotice: 'Standard Mode active — agents will prompt for confirmation before executing actions.',
-      cliBypassModePill: 'Bypass Mode'
+      cliBypassModePill: 'Bypass Mode',
+      footerCliHint: 'Toggled tools update immediately in Agent Terminal.',
+      footerDocToolsHint: 'External tool paths are saved in user profile (~/AppData) and workspace.',
+      footerGeneralHint: 'Settings are stored in user profile (~/AppData) and synced with workspace.',
+      aboutTab: 'About & Updates',
+      aboutTitle: 'About Agent Workbench',
+      aboutDesc: 'Version info, distribution channel, and auto-update management.',
+      currentVersion: 'Current Version',
+      channel: 'Distribution Channel',
+      channelInstalled: 'Installed (NSIS Setup)',
+      channelPortable: 'Portable / Standalone Directory',
+      channelDev: 'Development Mode',
+      checkForUpdates: 'Check for Updates',
+      checkingUpdates: 'Checking for updates…',
+      upToDate: 'You are on the latest version!',
+      updateAvailable: 'New version available: {version}',
+      releaseNotes: 'Release Notes',
+      downloadUpdate: 'Download Update',
+      downloadingUpdate: 'Downloading update… ({percent}%)',
+      restartAndUpdate: 'Restart & Install Update',
+      downloadPortablePackage: 'Download New Portable Package',
+      autoCheckUpdates: 'Automatically check for updates on startup',
+      autoCheckUpdatesDesc: 'Check GitHub Releases periodically and notify when an update is available',
+      openGithubReleases: 'View GitHub Releases',
+      footerAboutHint: 'Updates are fetched directly from official GitHub Releases.'
     },
     dashboard: {
       telemetryTitle: 'Agent Telemetry & Usage',
@@ -196,6 +220,15 @@ export const translations = {
       splitRows2: 'Split H',
       splitGrid4: 'Grid',
       awaitingApproval: '{count} Awaiting Approval'
+    },
+    browser: {
+      serverNotRunning: 'Local Dev Server Not Running',
+      cannotConnect: 'Cannot Connect to Site',
+      serverNotRunningDesc: 'No active web server detected on {url}. Start your dev server in the terminal (e.g. npm run dev), or select another port above.',
+      cannotConnectDesc: 'Unable to reach {url}. Please check that the URL is correct or verify your network connection.',
+      retry: 'Retry',
+      openExternal: 'Open in External Browser',
+      tryPorts: 'Try common dev ports:'
     }
   },
   'zh-TW': {
@@ -294,7 +327,31 @@ export const translations = {
       cliBypassWarning: '注意事項：啟用略過模式後，AI 代理在執行終端指令、檔案修改與工具呼叫時將直接執行，無需於終端手動確認。請務必在可信工作區中使用。',
       cliBypassActiveFlags: '略過模式啟用時附帶之參數',
       cliBypassDisabledNotice: '目前為標準模式：AI 代理執行動作前會在終端提示確認 (y/n)。',
-      cliBypassModePill: 'Bypass 模式'
+      cliBypassModePill: 'Bypass 模式',
+      footerCliHint: '開關切換會立即於終端啟動板生效。',
+      footerDocToolsHint: '外部工具路徑將儲存於使用者全域設定 (~/AppData) 與工作區。',
+      footerGeneralHint: '設定將儲存於使用者全域設定 (~/AppData) 並同步至工作區。',
+      aboutTab: '關於與更新',
+      aboutTitle: '關於 Agent Workbench',
+      aboutDesc: '版本資訊、發行版本類型與自動更新推送管理。',
+      currentVersion: '當前版本',
+      channel: '版本類型',
+      channelInstalled: '安裝版 (NSIS Setup)',
+      channelPortable: '免安裝綠色版 (Portable / win-unpacked)',
+      channelDev: '開發中環境 (Development)',
+      checkForUpdates: '檢查更新',
+      checkingUpdates: '正在檢查更新…',
+      upToDate: '目前已是最新版本！',
+      updateAvailable: '發現新版本：{version}',
+      releaseNotes: '更新日誌',
+      downloadUpdate: '下載更新',
+      downloadingUpdate: '正在下載更新… ({percent}%)',
+      restartAndUpdate: '立即重啟並安裝更新',
+      downloadPortablePackage: '下載免安裝更新包',
+      autoCheckUpdates: '啟動時自動檢查更新',
+      autoCheckUpdatesDesc: '定期比對 GitHub Releases 並在有新版本時主動提示',
+      openGithubReleases: '前往 GitHub Releases 頁面',
+      footerAboutHint: '更新資訊與安裝檔均直接自 GitHub Releases 官方發布下載。'
     },
     dashboard: {
       telemetryTitle: 'Agent 遙測與 Token 統計',
@@ -391,6 +448,15 @@ export const translations = {
       splitRows2: '水平分割',
       splitGrid4: '四格分割',
       awaitingApproval: '{count} 個等待授權'
+    },
+    browser: {
+      serverNotRunning: '本地開發伺服器未啟動',
+      cannotConnect: '無法連線至此網站',
+      serverNotRunningDesc: '目前在 {url} 尚未偵測到任何運作中的 Web 伺服器。請先在右側終端執行專案啟動指令（如 npm run dev），或是從上方切換其他 Port / 輸入網址。',
+      cannotConnectDesc: '無法連線至 {url}。請確認網址輸入正確，或是檢查網路連線狀態。',
+      retry: '重新載入',
+      openExternal: '在系統瀏覽器開啟',
+      tryPorts: '快速切換常用 Port：'
     }
   }
 } as const

@@ -2,6 +2,12 @@ appId: io.github.zkylek1212-k.agent-workbench
 productName: Agent Workbench
 copyright: MIT
 
+publish:
+  provider: github
+  owner: zkylek1212-k
+  repo: Mulit-Harness-ADE
+  releaseType: release
+
 directories:
   output: release
   buildResources: build

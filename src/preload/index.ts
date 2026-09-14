@@ -68,7 +68,24 @@ const api = {
     set: (patch: Partial<WorkbenchSettings>): Promise<WorkbenchSettings> =>
       ipcRenderer.invoke('settings:set', patch),
     testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
-      ipcRenderer.invoke('settings:testCliPath', path)
+      ipcRenderer.invoke('settings:testCliPath', path),
+    testDocToolPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
+      ipcRenderer.invoke('settings:testDocToolPath', path)
+  },
+  // 自動更新與版本管理 —— main/ipc/updater.ts
+  updater: {
+    getStatus: (): Promise<UpdaterStatus> => ipcRenderer.invoke('updater:getStatus'),
+    check: (): Promise<UpdaterStatus> => ipcRenderer.invoke('updater:check'),
+    download: (): Promise<boolean> => ipcRenderer.invoke('updater:download'),
+    install: (): Promise<void> => ipcRenderer.invoke('updater:install'),
+    openRelease: (url?: string): Promise<void> => ipcRenderer.invoke('updater:openRelease', url),
+    onStatusChange: (cb: (status: UpdaterStatus) => void): (() => void) => {
+      const handler = (_: Electron.IpcRendererEvent, status: UpdaterStatus): void => cb(status)
+      ipcRenderer.on('updater:statusChange', handler)
+      return (): void => {
+        ipcRenderer.removeListener('updater:statusChange', handler)
+      }
+    }
   },
   // 儀表板與使用量統計 —— main/ipc/dashboard.ts
   dashboard: {
@@ -227,6 +244,34 @@ export interface WorkbenchSettings {
   docToolPaths?: DocToolPaths
   autoOpenAgentModifiedFiles?: boolean
   language?: 'en' | 'zh-TW'
+  lastWorkspace?: string
+  autoCheckUpdates?: boolean
+}
+
+export interface UpdateInfo {
+  version: string
+  releaseDate?: string
+  releaseNotes?: string
+  releaseName?: string
+  downloadUrl?: string
+}
+
+export interface UpdaterStatus {
+  currentVersion: string
+  isPackaged: boolean
+  isInstalled: boolean
+  checking: boolean
+  updateAvailable: boolean
+  updateDownloaded: boolean
+  isDownloading: boolean
+  downloadProgress?: {
+    percent: number
+    bytesPerSecond: number
+    transferred: number
+    total: number
+  }
+  updateInfo?: UpdateInfo
+  error?: string
 }
 
 export interface SessionTokenBreakdown {

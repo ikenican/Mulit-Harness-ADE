@@ -5,7 +5,7 @@ import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { getActiveSessionMetas } from './pty'
 import { workspace } from '../index'
-import { isCliEnabled } from './settings'
+import { isCliEnabled, isProtectedPath } from './settings'
 import type { AgentId, DashboardData, AgentSessionInfo } from '../../preload/index'
 
 const H = homedir()
@@ -174,7 +174,7 @@ function loadDashboardCache(): Map<string, CachedSessionEntry> {
 }
 
 function saveDashboardCache(): void {
-  if (!cacheDirty || !memCache) return
+  if (!cacheDirty || !memCache || !workspace.root || isProtectedPath(workspace.root)) return
   try {
     const dir = join(workspace.root, '.workbench')
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
@@ -800,6 +800,7 @@ function loadDashboardState(): DashboardState {
 }
 
 function saveDashboardState(state: DashboardState): void {
+  if (!workspace.root || isProtectedPath(workspace.root)) return
   try {
     const p = stateFilePath()
     fs.mkdirSync(join(workspace.root, '.workbench'), { recursive: true })

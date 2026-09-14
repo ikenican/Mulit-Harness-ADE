@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell, ipcMain } from 'electron'
+import * as fs from 'fs'
 import { join } from 'path'
 import { registerFileHandlers } from './ipc/files'
 import { registerGitHandlers } from './ipc/git'
@@ -6,11 +7,31 @@ import { registerPtyHandlers } from './ipc/pty'
 import { registerNotifyHandlers } from './ipc/notify'
 import { registerExtHandlers } from './ipc/ext'
 import { registerConnHandlers } from './ipc/conn'
-import { registerSettingsHandlers } from './ipc/settings'
+import { registerSettingsHandlers, getLastWorkspace, isProtectedPath } from './ipc/settings'
 import { registerDashboardHandlers } from './ipc/dashboard'
+import { registerUpdaterHandlers } from './ipc/updater'
+
+function determineInitialWorkspace(): string {
+  const last = getLastWorkspace()
+  if (last) return last
+
+  const cwd = process.cwd()
+  if (cwd && !isProtectedPath(cwd) && fs.existsSync(cwd)) {
+    return cwd
+  }
+
+  try {
+    const docs = app.getPath('documents')
+    if (docs && fs.existsSync(docs)) return docs
+    const home = app.getPath('home')
+    if (home && fs.existsSync(home)) return home
+  } catch {}
+
+  return cwd
+}
 
 // 目前工作區根目錄；files handler 會用到，pickWorkspace 可更新。
-export const workspace = { root: process.cwd() }
+export const workspace = { root: determineInitialWorkspace() }
 
 let mainWindow: BrowserWindow | null = null
 let terminalWindow: BrowserWindow | null = null
@@ -206,6 +227,7 @@ if (!gotTheLock) {
     registerConnHandlers()
     registerSettingsHandlers()
     registerDashboardHandlers()
+    registerUpdaterHandlers()
     registerWindowHandlers()
     createWindow()
 
