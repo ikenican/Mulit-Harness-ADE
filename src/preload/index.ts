@@ -68,7 +68,9 @@ const api = {
     set: (patch: Partial<WorkbenchSettings>): Promise<WorkbenchSettings> =>
       ipcRenderer.invoke('settings:set', patch),
     testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
-      ipcRenderer.invoke('settings:testCliPath', path)
+      ipcRenderer.invoke('settings:testCliPath', path),
+    testDocToolPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
+      ipcRenderer.invoke('settings:testDocToolPath', path)
   },
   // 儀表板與使用量統計 —— main/ipc/dashboard.ts
   dashboard: {
@@ -227,6 +229,7 @@ export interface WorkbenchSettings {
   docToolPaths?: DocToolPaths
   autoOpenAgentModifiedFiles?: boolean
   language?: 'en' | 'zh-TW'
+  lastWorkspace?: string
 }
 
 export interface SessionTokenBreakdown {

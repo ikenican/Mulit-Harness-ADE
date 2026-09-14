@@ -5,6 +5,7 @@ import * as os from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { workspace } from '../index'
+import { isProtectedPath } from './settings'
 import { AGENT_PATHS } from '../ext/paths'
 import { buildInventory, buildAgentStatus } from '../ext/inventory'
 import { readManifest, writeManifest, managedKeys, connRefsOf } from '../ext/manifest'
@@ -27,6 +28,7 @@ function getDisabledKeys(): Set<string> {
 }
 
 function saveDisabledKeys(keys: Set<string>): void {
+  if (!workspace.root || isProtectedPath(workspace.root)) return
   try {
     const dir = path.join(workspace.root, '.workbench')
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })

@@ -183,6 +183,7 @@ export default function SettingsModal({
   const [expandedCli, setExpandedCli] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     if (initialTab) {
@@ -379,13 +380,13 @@ export default function SettingsModal({
       [id]: { testing: true }
     }))
 
-    const res = await window.api.settings.testCliPath(target)
+    const res = await window.api.settings.testDocToolPath(target)
     setDocToolTestResults((prev) => ({
       ...prev,
       [id]: {
         testing: false,
         ok: res.ok,
-        version: res.ok ? res.version || 'Ready and valid' : undefined,
+        version: res.ok ? res.version || t('settings.validExecutable') || 'Ready and valid' : undefined,
         error: res.error
       }
     }))
@@ -417,6 +418,7 @@ export default function SettingsModal({
 
   const handleSave = async (): Promise<void> => {
     setSaving(true)
+    setSaveError(null)
     try {
       await window.api.settings.set({
         ...settings,
@@ -428,6 +430,10 @@ export default function SettingsModal({
         setSaveSuccess(false)
         onClose()
       }, 600)
+    } catch (err: unknown) {
+      console.error('Failed to save settings:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      setSaveError(msg)
     } finally {
       setSaving(false)
     }
@@ -1151,11 +1157,15 @@ export default function SettingsModal({
           {/* macOS Sheet Footer */}
           <div className="macos-settings-footer">
             <span className="macos-footer-hint">
-              {tab === 'cli'
-                ? 'Toggled tools update immediately in Agent Terminal.'
-                : tab === 'doctools'
-                ? 'External tool paths are saved in .workbench/settings.json'
-                : 'Settings are stored in .workbench/settings.json'}
+              {saveError ? (
+                <span style={{ color: '#ef4444', fontWeight: 500 }}>⚠️ {saveError}</span>
+              ) : tab === 'cli' ? (
+                t('settings.footerCliHint')
+              ) : tab === 'doctools' ? (
+                t('settings.footerDocToolsHint')
+              ) : (
+                t('settings.footerGeneralHint')
+              )}
             </span>
             <div className="macos-footer-actions">
               <button type="button" className="macos-btn-cancel" onClick={onClose}>

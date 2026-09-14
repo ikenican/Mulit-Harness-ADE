@@ -99,7 +99,10 @@ export const translations = {
       cliBypassWarning: 'Caution: In bypass mode, AI agents execute terminal bash commands, file modifications, and MCP tools directly without waiting for manual confirmation. Use only in trusted workspaces.',
       cliBypassActiveFlags: 'Active Bypass Launch Flags',
       cliBypassDisabledNotice: 'Standard Mode active — agents will prompt for confirmation before executing actions.',
-      cliBypassModePill: 'Bypass Mode'
+      cliBypassModePill: 'Bypass Mode',
+      footerCliHint: 'Toggled tools update immediately in Agent Terminal.',
+      footerDocToolsHint: 'External tool paths are saved in user profile (~/AppData) and workspace.',
+      footerGeneralHint: 'Settings are stored in user profile (~/AppData) and synced with workspace.'
     },
     dashboard: {
       telemetryTitle: 'Agent Telemetry & Usage',
@@ -294,7 +297,10 @@ export const translations = {
       cliBypassWarning: '注意事項：啟用略過模式後，AI 代理在執行終端指令、檔案修改與工具呼叫時將直接執行，無需於終端手動確認。請務必在可信工作區中使用。',
       cliBypassActiveFlags: '略過模式啟用時附帶之參數',
       cliBypassDisabledNotice: '目前為標準模式：AI 代理執行動作前會在終端提示確認 (y/n)。',
-      cliBypassModePill: 'Bypass 模式'
+      cliBypassModePill: 'Bypass 模式',
+      footerCliHint: '開關切換會立即於終端啟動板生效。',
+      footerDocToolsHint: '外部工具路徑將儲存於使用者全域設定 (~/AppData) 與工作區。',
+      footerGeneralHint: '設定將儲存於使用者全域設定 (~/AppData) 並同步至工作區。'
     },
     dashboard: {
       telemetryTitle: 'Agent 遙測與 Token 統計',
