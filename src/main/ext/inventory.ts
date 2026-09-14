@@ -274,9 +274,118 @@ function scanAntigravity(): Found[] {
   return out
 }
 
+/**
+ * 從 TOML 原始文字中擷取指定前綴的表格（如 `mcp_servers` 或 `plugins`），
+ * 回傳 { 表格名稱 → 表格內的原始行陣列 }。
+ * 只做掃描顯示用途的輕量擷取，不是完整 TOML 解析器：
+ * 遇到巢狀子表格（如 `[mcp_servers.x.env]`）視同表格結束，不誤併內容。
+ */
+function extractTomlTables(raw: string, prefix: string): Map<string, string[]> {
+  const tables = new Map<string, string[]>()
+  const headerRe = new RegExp(`^\\[${prefix}\\.(?:"([^"]+)"|([A-Za-z0-9_-]+))\\]\\s*$`)
+  let current: string | null = null
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    const m = line.match(headerRe)
+    if (m) {
+      current = m[1] ?? m[2]
+      tables.set(current, [])
+      continue
+    }
+    if (/^\[.*\]\s*$/.test(line)) {
+      current = null
+      continue
+    }
+    if (current) tables.get(current)!.push(line)
+  }
+  return tables
+}
+
+function tomlString(lines: string[], key: string): string | undefined {
+  const re = new RegExp(`^${key}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`)
+  for (const l of lines) {
+    const m = l.match(re)
+    if (m) return m[1] ?? m[2]
+  }
+  return undefined
+}
+
+function tomlBool(lines: string[], key: string): boolean | undefined {
+  const re = new RegExp(`^${key}\\s*=\\s*(true|false)`)
+  for (const l of lines) {
+    const m = l.match(re)
+    if (m) return m[1] === 'true'
+  }
+  return undefined
+}
+
+function scanCodex(): Found[] {
+  const P = AGENT_PATHS.codex
+  const out: Found[] = []
+
+  // 1. Skills：~/.codex/skills/<n>/SKILL.md（跳過 .system 等內建套件目錄）
+  if (P.skillsDir && fs.existsSync(P.skillsDir)) {
+    for (const d of listDirs(P.skillsDir)) {
+      if (d.startsWith('.')) continue
+      const md = join(P.skillsDir, d, 'SKILL.md')
+      if (!fs.existsSync(md)) continue
+      const fm = parseSkillMd(md)
+      out.push({
+        kind: 'skill',
+        id: norm(fm.name || d),
+        name: fm.name || d,
+        description: fm.description,
+        version: fm.version,
+        agent: 'codex',
+        state: 'installed',
+        detail: md
+      })
+    }
+  }
+
+  // 2. config.toml：[mcp_servers.*] 與 [plugins."*@*"]
+  let raw = ''
+  try {
+    raw = fs.readFileSync(P.mcpConfig!, 'utf8')
+  } catch {
+    raw = ''
+  }
+
+  if (raw) {
+    for (const [name, lines] of extractTomlTables(raw, 'mcp_servers')) {
+      out.push({
+        kind: 'mcp',
+        id: norm(name),
+        name,
+        description: tomlString(lines, 'command'),
+        agent: 'codex',
+        state: 'installed',
+        detail: 'config.toml'
+      })
+    }
+
+    for (const [key, lines] of extractTomlTables(raw, 'plugins')) {
+      if (tomlBool(lines, 'enabled') === false) continue
+      const pluginName = key.includes('@') ? key.split('@')[0] : key
+      const marketplace = key.includes('@') ? key.split('@')[1] : ''
+      out.push({
+        kind: 'plugin',
+        id: norm(pluginName),
+        name: pluginName,
+        description: marketplace ? `marketplace: ${marketplace}` : undefined,
+        agent: 'codex',
+        state: 'installed',
+        detail: 'config.toml'
+      })
+    }
+  }
+
+  return out
+}
+
 // ── 對外：合併成跨 agent 的統一清單 ──────────────────────────────
 export function buildInventory(workspaceRoot: string, managedIds: Set<string>): ExtItem[] {
-  const found = [...scanClaude(workspaceRoot), ...scanAntigravity()]
+  const found = [...scanClaude(workspaceRoot), ...scanAntigravity(), ...scanCodex()]
 
   const byKey = new Map<string, ExtItem>()
   for (const f of found) {
@@ -301,7 +410,7 @@ export function buildInventory(workspaceRoot: string, managedIds: Set<string>): 
     }
   }
 
-  // 補齊沒掃到的 agent：Codex 一律 pending，其餘為 missing
+  // 補齊沒掃到的 agent：該 agent 支援此擴充類型但目前沒裝 → missing
   for (const item of byKey.values()) {
     for (const a of AGENTS) {
       if (item.agents.some((x) => x.agent === a)) continue

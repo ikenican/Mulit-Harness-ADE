@@ -277,6 +277,161 @@ function scanClaudeSessions(max = 10): AgentSessionInfo[] {
   return list
 }
 
+/**
+ * 讀取 Codex 的 session_index.jsonl，取得每個 session id 對應的最新自動標題。
+ * 該檔為 append-only，同一 id 會有多筆（標題隨對話推進而更新），取最後一筆即最新。
+ */
+function loadCodexTitleMap(): Map<string, string> {
+  const map = new Map<string, string>()
+  const indexPath = join(H, '.codex', 'session_index.jsonl')
+  try {
+    const content = fs.readFileSync(indexPath, 'utf8')
+    for (const line of content.trim().split(/\r?\n/)) {
+      try {
+        const row = JSON.parse(line)
+        if (row.id && row.thread_name) map.set(row.id, row.thread_name)
+      } catch {
+        // ignore malformed line
+      }
+    }
+  } catch {
+    // session_index.jsonl 可能不存在
+  }
+  return map
+}
+
+/** 遞迴找出 ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl，依檔名萃取 session id */
+function findCodexRolloutFiles(max: number): { id: string; path: string; mtime: number }[] {
+  const sessionsDir = join(H, '.codex', 'sessions')
+  const out: { id: string; path: string; mtime: number }[] = []
+  const idRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/
+
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 4) return
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) {
+        walk(p, depth + 1)
+      } else if (e.isFile() && e.name.startsWith('rollout-') && e.name.endsWith('.jsonl')) {
+        const m = e.name.match(idRe)
+        if (!m) continue
+        try {
+          out.push({ id: m[1], path: p, mtime: fs.statSync(p).mtimeMs })
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+  walk(sessionsDir, 0)
+  return out.sort((a, b) => b.mtime - a.mtime).slice(0, max)
+}
+
+/**
+ * 讀取 Codex 本地 rollout 紀錄與 Token 概況。
+ * Codex 的 token_count 事件是「累計值」（每個 turn 印一次目前為止的總量），
+ * 所以取檔案中最後一筆 total_token_usage 即為該 session 的最終總量，不能逐行加總。
+ */
+function scanCodexSessions(max = 10): AgentSessionInfo[] {
+  const sessionsDir = join(H, '.codex', 'sessions')
+  if (!fs.existsSync(sessionsDir)) return []
+
+  const titleMap = loadCodexTitleMap()
+  const files = findCodexRolloutFiles(max)
+  const list: AgentSessionInfo[] = []
+
+  for (const f of files) {
+    const indexTitle = titleMap.get(f.id)
+    let title = indexTitle || 'Codex Session'
+    let promptTokens = 0
+    let cachedTokens = 0
+    let completionTokens = 0
+    let model = 'Codex CLI'
+    let wsName = workspace.root ? basename(workspace.root) : 'Workspace'
+    let wsPath = workspace.root || ''
+
+    try {
+      const content = fs.readFileSync(f.path, 'utf8')
+      const lines = content.trim().split(/\r?\n/)
+
+      for (const line of lines) {
+        try {
+          const row = JSON.parse(line)
+          if (row.type === 'session_meta' && row.payload?.cwd) {
+            wsPath = row.payload.cwd
+            wsName = basename(wsPath) || wsName
+          }
+          if (!indexTitle && row.type === 'response_item' && row.payload?.role === 'user') {
+            const parts = row.payload.content
+            const found = Array.isArray(parts)
+              ? parts.find(
+                  (c: { type?: string; text?: string }) =>
+                    c?.type === 'input_text' && c.text && !c.text.trimStart().startsWith('<')
+                )
+              : undefined
+            if (found?.text) title = found.text.trim().split(/\r?\n/)[0].slice(0, 40)
+          }
+          const usage = row.payload?.info?.total_token_usage
+          if (usage) {
+            cachedTokens = usage.cached_input_tokens || 0
+            if (usage.input_tokens || usage.output_tokens) {
+              promptTokens = usage.input_tokens || 0
+              completionTokens = usage.output_tokens || 0
+            } else if (usage.total_tokens) {
+              // 某些 resumed/壓縮過的 session，input/output 明細會歸零但 total_tokens
+              // 仍保留真實累計值——此時把它算進 prompt，避免整個 session 顯示成 0 token。
+              promptTokens = usage.total_tokens
+              completionTokens = 0
+            }
+          }
+          const provModel = row.payload?.base_instructions?.provenance?.model
+          if (provModel) model = provModel
+        } catch {
+          // ignore malformed line
+        }
+      }
+    } catch {
+      // ignore unreadable rollout file
+    }
+
+    const totalTokens = promptTokens + completionTokens
+    const promptPct = totalTokens > 0 ? Math.round((promptTokens / totalTokens) * 100) : 85
+    const compPct = Math.max(0, 100 - promptPct)
+    const cachedPct = promptTokens > 0 ? Math.round((cachedTokens / promptTokens) * 100) : 0
+
+    list.push({
+      id: f.id,
+      agent: 'codex',
+      title,
+      status: 'completed',
+      startTime: new Date(f.mtime - 300000).toISOString(),
+      lastActiveTime: new Date(f.mtime).toISOString(),
+      totalTokens,
+      model,
+      workspace: wsName,
+      workspacePath: wsPath,
+      tokenBreakdown: {
+        promptTokens,
+        toolReadTokens: 0,
+        completionTokens,
+        details: [
+          { category: '上下文與提示詞', tokens: promptTokens, percentage: promptPct },
+          { category: '其中快取命中', tokens: cachedTokens, percentage: cachedPct },
+          { category: '推論與回覆生成', tokens: completionTokens, percentage: compPct }
+        ]
+      }
+    })
+  }
+
+  return list
+}
+
 interface DashboardState {
   archivedIds: string[]
   deletedIds: string[]
@@ -332,6 +487,10 @@ export function registerDashboardHandlers(): void {
       .filter((s) => !deletedSet.has(s.id))
       .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
 
+    const codexSessions = scanCodexSessions(10)
+      .filter((s) => !deletedSet.has(s.id))
+      .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
+
     // 3. 智慧關聯活躍進程與真實 Session，避免產生重複且孤立的 "Terminal: ... (PID)" 假卡片
     const claimedPtyIds = new Set<string>()
 
@@ -363,6 +522,21 @@ export function registerDashboardHandlers(): void {
         target.status = 'active'
         target.lastActiveTime = new Date().toISOString()
         claimedPtyIds.add(activeClaudePty.id)
+      }
+    }
+
+    // 關聯 Codex 活躍行程
+    const activeCodexPty = activePtySessions.find((p) => {
+      const cmd = (p.command || '').toLowerCase()
+      const lid = (p.launcherId || '').toLowerCase()
+      return cmd.includes('codex') || lid.includes('codex')
+    })
+    if (activeCodexPty && codexSessions.length > 0) {
+      const target = codexSessions.find((s) => !s.isArchived) || codexSessions[0]
+      if (target) {
+        target.status = 'active'
+        target.lastActiveTime = new Date().toISOString()
+        claimedPtyIds.add(activeCodexPty.id)
       }
     }
 
@@ -404,7 +578,7 @@ export function registerDashboardHandlers(): void {
       })
 
     // 5. 合併清單：活躍的優先排在最前，其餘依最後活躍時間排序
-    const allSessions = [...standaloneSessions, ...agySessions, ...claudeSessions].sort((a, b) => {
+    const allSessions = [...standaloneSessions, ...agySessions, ...claudeSessions, ...codexSessions].sort((a, b) => {
       if (a.status === 'active' && b.status !== 'active') return -1
       if (a.status !== 'active' && b.status === 'active') return 1
       return new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime()
