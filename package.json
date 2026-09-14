@@ -1,7 +1,7 @@
 {
   "name": "agent-workbench",
-  "version": "0.1.0",
-  "description": "輕量 Agent-Native Workbench — Monaco + 多 CLI 終端殼 + ShareProjectMem",
+  "version": "0.1.1",
+  "description": "輕量 Agent-Native Workbench — Monaco 編輯器、多 CLI 終端殼、Git 視覺化、Codex/Claude 遙測統計與 Shared Project Memory",
   "main": "./out/main/index.js",
   "author": "zkylek1212-k",
   "license": "MIT",
