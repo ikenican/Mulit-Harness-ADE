@@ -122,6 +122,14 @@ export default function DashboardPanel(): JSX.Element {
     return () => clearInterval(interval)
   }, [loadData])
 
+  // 終端開／關 Agent 分頁時立刻重抓，不必等下一次輪詢或重開 App。
+  // 新會話的 .jsonl 是 CLI 起來後才寫出來的，所以隔幾秒再補抓一次。
+  useEffect(() => {
+    loadData(true)
+    const t = setTimeout(() => loadData(true), 3000)
+    return () => clearTimeout(t)
+  }, [liveAgentSessionIds, loadData])
+
   const isAgentEnabled = useCallback(
     (agentId: AgentId) => cliEnabled[agentId] !== false,
     [cliEnabled]

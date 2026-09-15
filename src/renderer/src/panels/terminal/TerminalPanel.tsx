@@ -49,6 +49,13 @@ interface TerminalSession {
   needsApproval: boolean
   associatedSessionId?: string
   cwd?: string
+  /**
+   * 是否已經 spawn 過 pty 並掛上輸入／輸出 handler。
+   * 這個旗標必須放在 session 物件上，不能放元件的 ref：TermInstance 一旦 remount
+   * （版面／停靠／分割變動）ref 會歸零，就會對同一個 term 再 spawn 一次、再掛一組
+   * onData——之後每敲一個字會送進兩個 pty、兩邊都回顯，畫面上就是每個字重複兩次。
+   */
+  bootstrapped?: boolean
 }
 
 export interface AgentDefinition {
@@ -566,19 +573,12 @@ export default function TerminalPanel(): JSX.Element {
         return matchedPty.id
       }
 
-      // 2. 若為 active session 且有該 Agent 正在執行中的 session
-      if (req.status === 'active') {
-        const runningAgent = sessionsRef.current.find(
-          (s) => s.launcherKey === req.agent && !s.isExited
-        )
-        if (runningAgent) {
-          selectSession(runningAgent.id)
-          setTimeout(() => runningAgent.term.focus(), 60)
-          return runningAgent.id
-        }
-      }
+      // 這裡刻意沒有「status==='active' 就切到該 Agent 任一執行中分頁」的後備：
+      // 那個比對只看 agent 種類、不看 session，結果是終端已經開著 Claude 時，
+      // 點 Dashboard 上另一支 Claude 會話只會跳回既有分頁，永遠開不了第二支。
+      // 真正同一支會話的情況上面第 1 步（id / ptyId / associatedSessionId）已經涵蓋。
 
-      // 3. 若為歷史 session 或尚無終端，新開該 Agent CLI 並傳入 resume / conversation 參數
+      // 2. 歷史 session 或尚無對應分頁：新開該 Agent CLI 並傳入 resume / conversation 參數
       let args: string[] | undefined
       if (req.agent === 'claude' && req.id) {
         args = ['--resume', req.id]
@@ -748,11 +748,15 @@ export default function TerminalPanel(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalDispatch, enabledShells, enabledAgents])
 
-  // 把「還活著的 Agent 會話」回報給 store：Dashboard 靠這個標 active。
-  // 分頁存在且沒 exit＝這個會話正在跑，比 main 端比對 PTY meta / jsonl mtime 可靠。
+  // 把「還活著的 Agent 分頁」回報給 store。Dashboard 有兩個用途：
+  //   1. 帶 associatedSessionId 的（從卡片開的）→ 對應卡片標成 active。
+  //   2. 從終端直接開的 CLI 沒有會話 id，這裡用分頁自身的 id 當佔位——它比對不到任何卡片，
+  //      但會讓這個陣列改變，Dashboard 據此立刻重抓，新會話才不用等到下次重開 App 才出現。
   useEffect(() => {
     setLiveAgentSessionIds(
-      sessions.filter((s) => !s.isExited && s.associatedSessionId).map((s) => s.associatedSessionId as string)
+      sessions
+        .filter((s) => !s.isExited && (s.associatedSessionId || AGENT_IDS.includes(s.launcherKey)))
+        .map((s) => s.associatedSessionId || s.id)
     )
   }, [sessions])
 
@@ -1776,11 +1780,31 @@ function TerminalInstance({
   isVisibleRef.current = isVisible
 
   useEffect(() => {
-    if (!elRef.current || mounted.current) return
+    if (!elRef.current) return
     mounted.current = true
 
+    // remount 時 term 要重新掛進新的 DOM 節點，但底下的 spawn 只能做一次。
     session.term.open(elRef.current)
     session.fitAddon.fit()
+
+    const ro = new ResizeObserver(() => {
+      try {
+        session.fitAddon.fit()
+        const pid = ptyIdRef.current || session.ptyId
+        if (pid) {
+          window.api.pty.resize(pid, session.term.cols, session.term.rows)
+        }
+      } catch {
+        /* 尺寸為 0 時 fit 會丟例外，忽略 */
+      }
+    })
+    ro.observe(elRef.current)
+
+    if (session.bootstrapped) {
+      ptyIdRef.current = session.ptyId || null
+      return () => ro.disconnect()
+    }
+    session.bootstrapped = true
 
     // Antigravity CLI 沒有自己的「Resuming...」提示，resume 後畫面長得跟全新 session
     // 幾乎一樣（只差在最後停在舊對話的最後一句話），使用者很容易誤以為沒接上舊紀錄。
@@ -1854,18 +1878,7 @@ function TerminalInstance({
         session.term.write(`\r\n\x1b[31mFailed to start: ${msg}\x1b[0m\r\n`)
       })
 
-    const ro = new ResizeObserver(() => {
-      try {
-        session.fitAddon.fit()
-        if (ptyIdRef.current) {
-          window.api.pty.resize(ptyIdRef.current, session.term.cols, session.term.rows)
-        }
-      } catch {
-        /* 尺寸為 0 時 fit 會丟例外，忽略 */
-      }
-    })
-    ro.observe(elRef.current)
-    session.disposables.push(() => ro.disconnect())
+    return () => ro.disconnect()
   }, [])
 
   // 從隱藏變回顯示時（display:none 期間尺寸為 0），重新 fit 一次
@@ -1874,8 +1887,9 @@ function TerminalInstance({
     setTimeout(() => {
       try {
         session.fitAddon.fit()
-        if (ptyIdRef.current) {
-          window.api.pty.resize(ptyIdRef.current, session.term.cols, session.term.rows)
+        const pid = ptyIdRef.current || session.ptyId
+        if (pid) {
+          window.api.pty.resize(pid, session.term.cols, session.term.rows)
         }
         if (isActive) session.term.focus()
       } catch {
