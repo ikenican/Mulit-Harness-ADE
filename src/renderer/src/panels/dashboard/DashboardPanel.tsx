@@ -79,7 +79,7 @@ export default function DashboardPanel(): JSX.Element {
     }
   })
 
-  const { workspaceRoot, settingsTick } = useWorkbench()
+  const { workspaceRoot, settingsTick, liveAgentSessionIds } = useWorkbench()
   const { t } = useTranslation()
   const [cliEnabled, setCliEnabled] = useState<Record<string, boolean | undefined>>({
     claude: true,
@@ -168,7 +168,12 @@ export default function DashboardPanel(): JSX.Element {
     0
   )
 
-  const allSessions = (data?.sessions || []).filter((s) => isAgentEnabled(s.agent))
+  // 終端裡開著的會話一律視為 active：分頁還活著就是活的。
+  // main 端靠 PTY meta ＋ jsonl mtime 推斷會漏（resume 後卡片瞬間跳回 completed），
+  // 而 renderer 手上就有事實，直接蓋掉。
+  const allSessions = (data?.sessions || [])
+    .filter((s) => isAgentEnabled(s.agent))
+    .map((s) => (liveAgentSessionIds.includes(s.id) ? { ...s, status: 'active' as const } : s))
   const activeSessionsCount = allSessions.filter((s) => s.status === 'active').length
 
   const archivedSessions = allSessions.filter((s) => s.isArchived)

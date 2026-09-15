@@ -227,7 +227,9 @@ export function registerPtyHandlers(): void {
               const l = parsed.launcher
               const r = resolveCommand(l.cli)
               command = r.cmd
-              args = [...r.extraArgs, ...(l.args || [])]
+              // opts.args 要留著：resume 用的 --resume/--conversation 是從這裡進來的，
+              // 覆蓋掉的話自訂 launcher 開的會話永遠是全新對話。
+              args = [...r.extraArgs, ...(l.args || []), ...(opts.args || [])]
               env = { ...env, ...(l.env || {}) }
               if (l.cli === 'claude' || l.cli === 'antigravity' || l.cli === 'codex') {
                 targetAgent = l.cli as AgentId

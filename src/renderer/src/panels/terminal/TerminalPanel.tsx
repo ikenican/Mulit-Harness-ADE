@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
-import { useWorkbench, getDraggedSession } from '@/store'
+import { useWorkbench, getDraggedSession, setLiveAgentSessionIds } from '@/store'
 import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
 import { looksLikeApprovalPrompt } from './approvalDetect'
@@ -747,6 +747,14 @@ export default function TerminalPanel(): JSX.Element {
     sendToSession(id, terminalDispatch.text)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalDispatch, enabledShells, enabledAgents])
+
+  // 把「還活著的 Agent 會話」回報給 store：Dashboard 靠這個標 active。
+  // 分頁存在且沒 exit＝這個會話正在跑，比 main 端比對 PTY meta / jsonl mtime 可靠。
+  useEffect(() => {
+    setLiveAgentSessionIds(
+      sessions.filter((s) => !s.isExited && s.associatedSessionId).map((s) => s.associatedSessionId as string)
+    )
+  }, [sessions])
 
   const lastOpenSessionNonce = useRef(0)
 

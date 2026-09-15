@@ -71,6 +71,12 @@ export interface WorkbenchState {
   fileReloadTick: Record<string, number>
   /** 編輯器即時內容草稿（供 PreviewPanel 等即時自動更新 Markdown/HTML 預覽，無需手動按 Refresh） */
   editorDraft: { path: string; text: string; version: number } | null
+  /**
+   * 目前終端裡活著的 Agent 會話 id（TerminalPanel 的 associatedSessionId）。
+   * Dashboard 用它判斷 active：分頁開著就是活的，這是 renderer 手上的事實，
+   * 不必繞去 main 比對 PTY meta / jsonl mtime 再猜一次。
+   */
+  liveAgentSessionIds: string[]
 }
 
 function initialTheme(): Theme {
@@ -136,7 +142,8 @@ let state: WorkbenchState = {
   fileTreeTick: 0,
   agentModifiedFiles: new Set<string>(),
   fileReloadTick: {},
-  editorDraft: null
+  editorDraft: null,
+  liveAgentSessionIds: []
 }
 applyTheme(state.theme)
 
@@ -410,6 +417,13 @@ export function openTerminalSession(req: {
       nonce: (state.terminalOpenSession?.nonce ?? 0) + 1
     }
   })
+}
+
+/** TerminalPanel 回報目前活著（未 exit）的 Agent 會話 id，供 Dashboard 標記 active。 */
+export function setLiveAgentSessionIds(ids: string[]): void {
+  const prev = state.liveAgentSessionIds
+  if (prev.length === ids.length && ids.every((x, i) => prev[i] === x)) return
+  set({ liveAgentSessionIds: ids })
 }
 
 export function setTheme(theme: Theme): void {
