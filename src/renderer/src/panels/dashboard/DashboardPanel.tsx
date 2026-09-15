@@ -317,6 +317,37 @@ export default function DashboardPanel(): JSX.Element {
     [displayedSessions, folderGroups]
   )
 
+  const handleSessionOpenCli = useCallback(
+    (session: AgentSessionInfo) => {
+      // 樂觀更新：點選後立即將本卡片狀態設為 active，提供零延遲之即時視覺反饋
+      setData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          sessions: prev.sessions.map((s) =>
+            s.id === session.id
+              ? { ...s, status: 'active', lastActiveTime: new Date().toISOString() }
+              : s
+          )
+        }
+      })
+
+      openTerminalSession({
+        id: session.id,
+        agent: session.agent,
+        title: session.title,
+        status: session.status,
+        workspacePath: session.workspacePath,
+        ensureRightDock: true
+      })
+
+      // 快速重新整理同步後端真實 PTY 進程
+      setTimeout(() => loadData(true), 600)
+      setTimeout(() => loadData(true), 2500)
+    },
+    [loadData]
+  )
+
   const toggleFolderCollapse = (key: string): void => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev)
@@ -703,6 +734,7 @@ export default function DashboardPanel(): JSX.Element {
                           onArchive={(e) => handleArchive(session.id, !session.isArchived, e)}
                           onDelete={(e) => handleDeletePrompt(session, e)}
                           onReorder={handleReorderSession}
+                          onOpenCli={handleSessionOpenCli}
                         />
                       ))}
                     </div>
@@ -776,7 +808,8 @@ function SessionCard({
   onArchive,
   onDelete,
   groupKey,
-  onReorder
+  onReorder,
+  onOpenCli
 }: {
   session: AgentSessionInfo
   isExpanded: boolean
@@ -790,6 +823,7 @@ function SessionCard({
     position: 'before' | 'after' | 'inside',
     targetGroupKey: string
   ) => void
+  onOpenCli?: (session: AgentSessionInfo) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const cfg = AGENT_CONFIG[session.agent]
@@ -824,14 +858,18 @@ function SessionCard({
 
   const handleOpenCli = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    openTerminalSession({
-      id: session.id,
-      agent: session.agent,
-      title: session.title,
-      status: session.status,
-      workspacePath: session.workspacePath,
-      ensureRightDock: true
-    })
+    if (onOpenCli) {
+      onOpenCli(session)
+    } else {
+      openTerminalSession({
+        id: session.id,
+        agent: session.agent,
+        title: session.title,
+        status: session.status,
+        workspacePath: session.workspacePath,
+        ensureRightDock: true
+      })
+    }
   }
 
   const handleWorkspaceClick = async (e: React.MouseEvent): Promise<void> => {

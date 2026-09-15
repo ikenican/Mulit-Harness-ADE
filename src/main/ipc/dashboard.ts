@@ -27,7 +27,13 @@ function isSameWorkspace(wsPath1?: string, wsName1?: string, wsPath2?: string, w
   const norm1 = normalizePath(wsPath1)
   const norm2 = normalizePath(wsPath2)
   if (norm1 && norm2) {
-    if (norm1 === norm2 || norm1.endsWith('/' + norm2) || norm2.endsWith('/' + norm1)) {
+    if (
+      norm1 === norm2 ||
+      norm1.endsWith('/' + norm2) ||
+      norm2.endsWith('/' + norm1) ||
+      norm1.startsWith(norm2 + '/') ||
+      norm2.startsWith(norm1 + '/')
+    ) {
       return true
     }
   }
@@ -574,27 +580,11 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
   const cache = loadDashboardCache()
 
   try {
+    // 全部專案目錄都掃：目錄 mtime 在 Windows 不隨檔案 append 更新，任何以目錄時間
+    // 排序取前 N 的做法都會漏掉正在活躍的會話（每個目錄仍只取最新 max 支，檔案量級 ~100）。
     const projs = fs.readdirSync(projectsDir, { withFileTypes: true })
       .filter((p) => p.isDirectory())
-      .map((p) => {
-        const fp = join(projectsDir, p.name)
-        let mtime = 0
-        try {
-          mtime = fs.statSync(fp).mtimeMs
-          // Windows 目錄 mtime 不會隨內部既有檔案 append 更新，因此檢查前幾支檔案
-          const subFiles = fs.readdirSync(fp).filter((f) => f.endsWith('.jsonl'))
-          for (const sf of subFiles.slice(0, 10)) {
-            const sm = fs.statSync(join(fp, sf)).mtimeMs
-            if (sm > mtime) mtime = sm
-          }
-        } catch {
-          mtime = 0
-        }
-        return { name: p.name, path: fp, mtime }
-      })
-      .sort((a, b) => b.mtime - a.mtime)
-      // 掃描最近活躍的各專案目錄（擴大至 20 個專案，確保當前與近期工作區均納入）
-      .slice(0, 20)
+      .map((p) => ({ name: p.name, path: join(projectsDir, p.name) }))
 
     for (const td of projs) {
       const fullPath = td.path
@@ -633,9 +623,9 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
           }
           const timeSinceLastActive = Date.now() - mtime
           s.status =
-            timeSinceLastActive < 2 * 60 * 1000
+            timeSinceLastActive < 5 * 60 * 1000
               ? 'active'
-              : timeSinceLastActive < 15 * 60 * 1000
+              : timeSinceLastActive < 30 * 60 * 1000
               ? 'idle'
               : 'completed'
           s.lastActiveTime = new Date(mtime).toISOString()
@@ -699,9 +689,9 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
 
         const timeSinceLastActive = Date.now() - f.mtime
         const status: 'active' | 'idle' | 'completed' =
-          timeSinceLastActive < 2 * 60 * 1000
+          timeSinceLastActive < 5 * 60 * 1000
             ? 'active'
-            : timeSinceLastActive < 15 * 60 * 1000
+            : timeSinceLastActive < 30 * 60 * 1000
             ? 'idle'
             : 'completed'
 
@@ -1049,8 +1039,12 @@ export function registerDashboardHandlers(): void {
       // 優先 1：若 PTY 帶有明確關聯的 sessionId 或從啟動參數提取到 session ID
       let matched = effectiveSessionId ? candidates.find((s) => s.id === effectiveSessionId && !matchedSet.has(s.id)) : undefined
 
+      // 帶有明確 sessionId 的 PTY（由 Dashboard 點卡片開啟）只認那一支會話；
+      // 找不到就讓它成為獨立卡片，不可退回下列模糊比對去點亮別人的卡片。
+      const allowFuzzyMatch = !effectiveSessionId
+
       // 優先 2：同工作區且在 PTY 啟動前不久或之後活躍之 Session
-      if (!matched) {
+      if (!matched && allowFuzzyMatch) {
         matched = candidates.find(
           (s) =>
             !s.isArchived &&
@@ -1061,7 +1055,7 @@ export function registerDashboardHandlers(): void {
       }
 
       // 優先 3：同工作區目錄中最新活躍之 Session（只要 PTY 正在該工作區運行對應 Agent，該工作區最新會話即為目前活躍之會話）
-      if (!matched) {
+      if (!matched && allowFuzzyMatch) {
         const sameWsCandidates = candidates
           .filter(
             (s) =>
@@ -1073,6 +1067,23 @@ export function registerDashboardHandlers(): void {
 
         if (sameWsCandidates.length > 0) {
           matched = sameWsCandidates[0]
+        }
+      }
+
+      // 優先 4：若 PTY 正在運行但工作區未直接命中（例如使用者在終端內手動 cd 切換、深層子專案或暫時路徑）：
+      // 自動關聯至該 Agent 近期（30 分鐘內）最新活躍之真實會話
+      if (!matched && allowFuzzyMatch) {
+        const recentGlobalCandidates = candidates
+          .filter(
+            (s) =>
+              !s.isArchived &&
+              !matchedSet.has(s.id) &&
+              Date.now() - new Date(s.lastActiveTime).getTime() < 30 * 60 * 1000
+          )
+          .sort((a, b) => new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime())
+
+        if (recentGlobalCandidates.length > 0) {
+          matched = recentGlobalCandidates[0]
         }
       }
 
