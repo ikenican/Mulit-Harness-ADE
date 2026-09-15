@@ -4,7 +4,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
-import { useWorkbench, getDraggedSession } from '@/store'
+import { useWorkbench, getDraggedSession, setLiveAgentSessionIds } from '@/store'
 import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
 import { looksLikeApprovalPrompt } from './approvalDetect'
@@ -48,6 +48,7 @@ interface TerminalSession {
   isExited: boolean
   needsApproval: boolean
   associatedSessionId?: string
+  cwd?: string
 }
 
 export interface AgentDefinition {
@@ -504,7 +505,8 @@ export default function TerminalPanel(): JSX.Element {
       launcherOverride?: string,
       args?: string[],
       titleOverride?: string,
-      associatedSessionId?: string
+      associatedSessionId?: string,
+      cwd?: string
     ): string => {
       let key = launcherOverride || selectedLauncher
       if (!key || (DIRECT_IDS.includes(key) && !isCliEnabled(key))) {
@@ -540,7 +542,8 @@ export default function TerminalPanel(): JSX.Element {
           disposables: [],
           isExited: false,
           needsApproval: false,
-          associatedSessionId
+          associatedSessionId,
+          cwd
         }
       ])
       setMru((prev) => [sessionId, ...prev])
@@ -552,7 +555,7 @@ export default function TerminalPanel(): JSX.Element {
 
   /** 開啟或切換至特定 session 的 CLI 終端（點選或拖曳時共用） */
   const openOrResumeSession = useCallback(
-    (req: { id?: string; agent: string; title?: string; status?: string }) => {
+    (req: { id?: string; agent: string; title?: string; status?: string; workspacePath?: string }) => {
       // 1. 若現有終端 session 中有匹配者（ptyId、session id 或 associatedSessionId 匹配）
       const matchedPty = sessionsRef.current.find(
         (s) => req.id && (s.id === req.id || s.ptyId === req.id || s.associatedSessionId === req.id)
@@ -594,7 +597,7 @@ export default function TerminalPanel(): JSX.Element {
           : `@${req.agent}`
       const title = req.title ? `${titlePrefix}: ${req.title.slice(0, 18)}` : titlePrefix
 
-      const newId = handleNewTerminal(req.agent, args, title, req.id)
+      const newId = handleNewTerminal(req.agent, args, title, req.id, req.workspacePath)
       selectSession(newId)
       return newId
     },
@@ -744,6 +747,14 @@ export default function TerminalPanel(): JSX.Element {
     sendToSession(id, terminalDispatch.text)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalDispatch, enabledShells, enabledAgents])
+
+  // 把「還活著的 Agent 會話」回報給 store：Dashboard 靠這個標 active。
+  // 分頁存在且沒 exit＝這個會話正在跑，比 main 端比對 PTY meta / jsonl mtime 可靠。
+  useEffect(() => {
+    setLiveAgentSessionIds(
+      sessions.filter((s) => !s.isExited && s.associatedSessionId).map((s) => s.associatedSessionId as string)
+    )
+  }, [sessions])
 
   const lastOpenSessionNonce = useRef(0)
 
@@ -1783,6 +1794,7 @@ function TerminalInstance({
       cols: session.term.cols,
       rows: session.term.rows,
       args: session.args,
+      cwd: session.cwd,
       sessionId: session.associatedSessionId
     }
     if (DIRECT_IDS.includes(launcherKey)) {

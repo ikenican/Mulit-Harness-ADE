@@ -27,14 +27,23 @@ function isSameWorkspace(wsPath1?: string, wsName1?: string, wsPath2?: string, w
   const norm1 = normalizePath(wsPath1)
   const norm2 = normalizePath(wsPath2)
   if (norm1 && norm2) {
-    if (norm1 === norm2 || norm1.endsWith('/' + norm2) || norm2.endsWith('/' + norm1)) {
+    if (
+      norm1 === norm2 ||
+      norm1.endsWith('/' + norm2) ||
+      norm2.endsWith('/' + norm1) ||
+      norm1.startsWith(norm2 + '/') ||
+      norm2.startsWith(norm1 + '/')
+    ) {
       return true
     }
   }
   const n1 = (wsName1 || (wsPath1 ? basename(wsPath1) : '')).trim().toLowerCase()
   const n2 = (wsName2 || (wsPath2 ? basename(wsPath2) : '')).trim().toLowerCase()
-  if (n1 && n2 && n1 === n2) {
-    return true
+  if (n1 && n2) {
+    if (n1 === n2) return true
+    const clean1 = n1.replace(/[-_\s]+/g, ' ')
+    const clean2 = n2.replace(/[-_\s]+/g, ' ')
+    if (clean1 === clean2) return true
   }
   return false
 }
@@ -141,6 +150,13 @@ function extractAntigravityWorkspace(logPath: string): { workspace: string; work
 }
 
 /**
+ * 將目錄名稱轉換為 Claude 編碼格式，用於反解比對
+ */
+function normalizeForClaude(str: string): string {
+  return str.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+/**
  * 從 Claude 專案日誌或目錄名稱中萃取工作區名稱與真實路徑
  */
 function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace: string; workspacePath?: string } {
@@ -151,63 +167,82 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
     }
   }
 
-  // 若目錄名稱包含當前 workspace.root 的名稱
+  // 若目錄名稱包含當前 workspace.root 的名稱（含正規化比對）
   if (workspace.root) {
     const wsBase = basename(workspace.root).toLowerCase()
-    if (dirName.toLowerCase().includes(wsBase)) {
+    const normWsBase = normalizeForClaude(wsBase).toLowerCase()
+    if (dirName.toLowerCase().includes(wsBase) || dirName.toLowerCase().includes(normWsBase)) {
       return { workspace: basename(workspace.root), workspacePath: workspace.root }
     }
   }
 
   // Claude 專案目錄格式如：D--Cloud-OneDrive-AI-workspace-...
-  // 嘗試反解目錄名為真實磁碟路徑（安全解碼，不盲目將連字號轉為空白）
+  // 嘗試反解目錄名為真實磁碟路徑
   if (dirName.match(/^[A-Za-z]--/)) {
-    const drive = dirName.charAt(0) + ':\\'
-    const rest = dirName.slice(3)
+    const drive = dirName.charAt(0).toUpperCase() + ':\\'
+    let rest = dirName.slice(3)
 
-    // 策略 1：'--' 代表目錄分隔符，完整保留原字元
-    const pathDirect = drive + rest.split('--').join('\\')
+    // 策略 1：從磁碟機根目錄遍歷對應子目錄層級（支援連字號、空格、Junction / Symlink）
+    let currentPath = drive
+    while (rest.length > 0) {
+      let entries: fs.Dirent[]
+      try {
+        entries = fs.readdirSync(currentPath, { withFileTypes: true })
+          .filter((e) => e.isDirectory() || e.isSymbolicLink())
+      } catch {
+        break
+      }
+
+      entries.sort((a, b) => b.name.length - a.name.length)
+
+      let matchedEntry: string | null = null
+      let matchedLen = 0
+
+      for (const entry of entries) {
+        const norm = normalizeForClaude(entry.name)
+        if (rest.toLowerCase() === norm.toLowerCase()) {
+          matchedEntry = entry.name
+          matchedLen = norm.length
+          break
+        }
+        if (rest.toLowerCase().startsWith(norm.toLowerCase() + '-')) {
+          matchedEntry = entry.name
+          matchedLen = norm.length + 1
+          break
+        }
+      }
+
+      if (matchedEntry) {
+        currentPath = join(currentPath, matchedEntry)
+        rest = rest.slice(matchedLen)
+      } else {
+        break
+      }
+    }
+
+    if (rest.length === 0 && fs.existsSync(currentPath)) {
+      return { workspace: basename(currentPath) || currentPath, workspacePath: currentPath }
+    }
+    if (currentPath !== drive && fs.existsSync(currentPath)) {
+      return { workspace: basename(currentPath) || currentPath, workspacePath: currentPath }
+    }
+
+    // 策略 2：'--' 代表目錄分隔符，完整保留原字元
+    const pathDirect = drive + dirName.slice(3).split('--').join('\\')
     if (fs.existsSync(pathDirect)) {
       return { workspace: basename(pathDirect) || pathDirect, workspacePath: pathDirect }
     }
 
-    // 策略 2：'---' 常代表 ' - '（如 Claude Agent - Personal）
-    const pathWithDashSpace = drive + rest.replace(/---/g, ' - ').split('--').join('\\')
+    // 策略 3：'---' 常代表 ' - '
+    const pathWithDashSpace = drive + dirName.slice(3).replace(/---/g, ' - ').split('--').join('\\')
     if (fs.existsSync(pathWithDashSpace)) {
       return { workspace: basename(pathWithDashSpace) || pathWithDashSpace, workspacePath: pathWithDashSpace }
-    }
-
-    // 策略 3：分段驗證真實磁碟目錄（相容含有空白與連字號的多種組合）
-    const segments = rest.split('--')
-    let built = drive
-    let valid = true
-    for (const seg of segments) {
-      const c1 = join(built, seg)
-      if (fs.existsSync(c1)) {
-        built = c1
-        continue
-      }
-      const c2 = join(built, seg.replace(/---/g, ' - '))
-      if (fs.existsSync(c2)) {
-        built = c2
-        continue
-      }
-      const c3 = join(built, seg.replace(/-/g, ' '))
-      if (fs.existsSync(c3)) {
-        built = c3
-        continue
-      }
-      valid = false
-      break
-    }
-    if (valid && fs.existsSync(built)) {
-      return { workspace: basename(built) || built, workspacePath: built }
     }
   }
 
   const parts = dirName.split('--')
   const lastPart = parts[parts.length - 1] || dirName
-  const cleanName = lastPart.replace(/^.*?-([A-Za-z0-9_\-\s]+)$/, '$1') || lastPart
+  const cleanName = lastPart.replace(/^.*?-([A-Za-z0-9_\-\s]+)$/, '$1').replace(/-/g, ' ') || lastPart
 
   return { workspace: cleanName || dirName, workspacePath: undefined }
 }
@@ -545,27 +580,11 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
   const cache = loadDashboardCache()
 
   try {
+    // 全部專案目錄都掃：目錄 mtime 在 Windows 不隨檔案 append 更新，任何以目錄時間
+    // 排序取前 N 的做法都會漏掉正在活躍的會話（每個目錄仍只取最新 max 支，檔案量級 ~100）。
     const projs = fs.readdirSync(projectsDir, { withFileTypes: true })
       .filter((p) => p.isDirectory())
-      .map((p) => {
-        const fp = join(projectsDir, p.name)
-        let mtime = 0
-        try {
-          mtime = fs.statSync(fp).mtimeMs
-          // Windows 目錄 mtime 不會隨內部既有檔案 append 更新，因此檢查前幾支檔案
-          const subFiles = fs.readdirSync(fp).filter((f) => f.endsWith('.jsonl'))
-          for (const sf of subFiles.slice(0, 10)) {
-            const sm = fs.statSync(join(fp, sf)).mtimeMs
-            if (sm > mtime) mtime = sm
-          }
-        } catch {
-          mtime = 0
-        }
-        return { name: p.name, path: fp, mtime }
-      })
-      .sort((a, b) => b.mtime - a.mtime)
-      // 掃描最近活躍的各專案目錄（擴大至 20 個專案，確保當前與近期工作區均納入）
-      .slice(0, 20)
+      .map((p) => ({ name: p.name, path: join(projectsDir, p.name) }))
 
     for (const td of projs) {
       const fullPath = td.path
@@ -592,11 +611,21 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
         // Fast-Stat 命中：直接複用歷史解析結構
         if (cached && cached.mtime === mtime) {
           const s: AgentSessionInfo = { ...cached.session }
+          if (!s.workspacePath || !fs.existsSync(s.workspacePath)) {
+            const { workspace: wsName, workspacePath: wsPath } = extractClaudeWorkspace(td.name, s.workspacePath)
+            if (wsPath) {
+              s.workspacePath = wsPath
+              s.workspace = wsName
+              cached.session.workspacePath = wsPath
+              cached.session.workspace = wsName
+              cacheDirty = true
+            }
+          }
           const timeSinceLastActive = Date.now() - mtime
           s.status =
-            timeSinceLastActive < 2 * 60 * 1000
+            timeSinceLastActive < 5 * 60 * 1000
               ? 'active'
-              : timeSinceLastActive < 15 * 60 * 1000
+              : timeSinceLastActive < 30 * 60 * 1000
               ? 'idle'
               : 'completed'
           s.lastActiveTime = new Date(mtime).toISOString()
@@ -660,9 +689,9 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
 
         const timeSinceLastActive = Date.now() - f.mtime
         const status: 'active' | 'idle' | 'completed' =
-          timeSinceLastActive < 2 * 60 * 1000
+          timeSinceLastActive < 5 * 60 * 1000
             ? 'active'
-            : timeSinceLastActive < 15 * 60 * 1000
+            : timeSinceLastActive < 30 * 60 * 1000
             ? 'idle'
             : 'completed'
 
@@ -946,8 +975,7 @@ export function registerDashboardHandlers(): void {
         const archivedSet = new Set(state.archivedIds)
 
         // 1. 抓取目前活躍終端 PTY 行程
-        const activePty = getActiveSessionMetas()
-        const activePtySessions = activePty.filter((p) => !deletedSet.has(p.id))
+        const activePtySessions = getActiveSessionMetas()
 
         // 2. 抓取歷史真實會話記錄（依 Settings 啟用狀態過濾）
         const agySessions = isCliEnabled('antigravity')
@@ -994,11 +1022,29 @@ export function registerDashboardHandlers(): void {
           : codexSessions
       const targetCwd = p.cwd || workspace.root
 
-      // 優先 1：若 PTY 帶有明確關聯的 sessionId（例如點擊 resume 或 handoff）
-      let matched = p.sessionId ? candidates.find((s) => s.id === p.sessionId && !matchedSet.has(s.id)) : undefined
+      // 提取有效關聯 Session ID（優先取 sessionId，若無則從命令參數中解析）
+      let effectiveSessionId = p.sessionId
+      if (!effectiveSessionId && p.args) {
+        const rIdx = p.args.findIndex((a) => a === '--resume' || a === '-r' || a === '--conversation')
+        if (rIdx !== -1 && p.args[rIdx + 1] && !p.args[rIdx + 1].startsWith('-')) {
+          effectiveSessionId = p.args[rIdx + 1]
+        } else {
+          const resumeCmdIdx = p.args.findIndex((a) => a === 'resume')
+          if (resumeCmdIdx !== -1 && p.args[resumeCmdIdx + 1] && !p.args[resumeCmdIdx + 1].startsWith('-')) {
+            effectiveSessionId = p.args[resumeCmdIdx + 1]
+          }
+        }
+      }
+
+      // 優先 1：若 PTY 帶有明確關聯的 sessionId 或從啟動參數提取到 session ID
+      let matched = effectiveSessionId ? candidates.find((s) => s.id === effectiveSessionId && !matchedSet.has(s.id)) : undefined
+
+      // 帶有明確 sessionId 的 PTY（由 Dashboard 點卡片開啟）只認那一支會話；
+      // 找不到就讓它成為獨立卡片，不可退回下列模糊比對去點亮別人的卡片。
+      const allowFuzzyMatch = !effectiveSessionId
 
       // 優先 2：同工作區且在 PTY 啟動前不久或之後活躍之 Session
-      if (!matched) {
+      if (!matched && allowFuzzyMatch) {
         matched = candidates.find(
           (s) =>
             !s.isArchived &&
@@ -1008,22 +1054,44 @@ export function registerDashboardHandlers(): void {
         )
       }
 
-      // 優先 3：同工作區目錄中近期活躍之 Session（限定 30 分鐘內，避免將好幾天前已關閉的歷史會話誤標為 active）
-      if (!matched) {
-        matched = candidates.find(
-          (s) =>
-            !s.isArchived &&
-            !matchedSet.has(s.id) &&
-            isSameWorkspace(s.workspacePath, s.workspace, targetCwd) &&
-            Date.now() - new Date(s.lastActiveTime).getTime() < 30 * 60 * 1000
-        )
+      // 優先 3：同工作區目錄中最新活躍之 Session（只要 PTY 正在該工作區運行對應 Agent，該工作區最新會話即為目前活躍之會話）
+      if (!matched && allowFuzzyMatch) {
+        const sameWsCandidates = candidates
+          .filter(
+            (s) =>
+              !s.isArchived &&
+              !matchedSet.has(s.id) &&
+              isSameWorkspace(s.workspacePath, s.workspace, targetCwd)
+          )
+          .sort((a, b) => new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime())
+
+        if (sameWsCandidates.length > 0) {
+          matched = sameWsCandidates[0]
+        }
+      }
+
+      // 優先 4：若 PTY 正在運行但工作區未直接命中（例如使用者在終端內手動 cd 切換、深層子專案或暫時路徑）：
+      // 自動關聯至該 Agent 近期（30 分鐘內）最新活躍之真實會話
+      if (!matched && allowFuzzyMatch) {
+        const recentGlobalCandidates = candidates
+          .filter(
+            (s) =>
+              !s.isArchived &&
+              !matchedSet.has(s.id) &&
+              Date.now() - new Date(s.lastActiveTime).getTime() < 30 * 60 * 1000
+          )
+          .sort((a, b) => new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime())
+
+        if (recentGlobalCandidates.length > 0) {
+          matched = recentGlobalCandidates[0]
+        }
       }
 
       if (matched) {
         matchedSet.add(matched.id)
         matched.status = 'active'
         matched.lastActiveTime = new Date().toISOString()
-      } else {
+      } else if (!deletedSet.has(p.id)) {
         const currentName = targetCwd ? basename(targetCwd) : 'Workspace'
         standaloneSessions.push({
           id: p.id,

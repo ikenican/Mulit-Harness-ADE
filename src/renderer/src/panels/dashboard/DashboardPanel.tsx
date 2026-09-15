@@ -79,7 +79,7 @@ export default function DashboardPanel(): JSX.Element {
     }
   })
 
-  const { workspaceRoot, settingsTick } = useWorkbench()
+  const { workspaceRoot, settingsTick, liveAgentSessionIds } = useWorkbench()
   const { t } = useTranslation()
   const [cliEnabled, setCliEnabled] = useState<Record<string, boolean | undefined>>({
     claude: true,
@@ -168,7 +168,12 @@ export default function DashboardPanel(): JSX.Element {
     0
   )
 
-  const allSessions = (data?.sessions || []).filter((s) => isAgentEnabled(s.agent))
+  // 終端裡開著的會話一律視為 active：分頁還活著就是活的。
+  // main 端靠 PTY meta ＋ jsonl mtime 推斷會漏（resume 後卡片瞬間跳回 completed），
+  // 而 renderer 手上就有事實，直接蓋掉。
+  const allSessions = (data?.sessions || [])
+    .filter((s) => isAgentEnabled(s.agent))
+    .map((s) => (liveAgentSessionIds.includes(s.id) ? { ...s, status: 'active' as const } : s))
   const activeSessionsCount = allSessions.filter((s) => s.status === 'active').length
 
   const archivedSessions = allSessions.filter((s) => s.isArchived)
@@ -315,6 +320,37 @@ export default function DashboardPanel(): JSX.Element {
       })
     },
     [displayedSessions, folderGroups]
+  )
+
+  const handleSessionOpenCli = useCallback(
+    (session: AgentSessionInfo) => {
+      // 樂觀更新：點選後立即將本卡片狀態設為 active，提供零延遲之即時視覺反饋
+      setData((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          sessions: prev.sessions.map((s) =>
+            s.id === session.id
+              ? { ...s, status: 'active', lastActiveTime: new Date().toISOString() }
+              : s
+          )
+        }
+      })
+
+      openTerminalSession({
+        id: session.id,
+        agent: session.agent,
+        title: session.title,
+        status: session.status,
+        workspacePath: session.workspacePath,
+        ensureRightDock: true
+      })
+
+      // 快速重新整理同步後端真實 PTY 進程
+      setTimeout(() => loadData(true), 600)
+      setTimeout(() => loadData(true), 2500)
+    },
+    [loadData]
   )
 
   const toggleFolderCollapse = (key: string): void => {
@@ -703,6 +739,7 @@ export default function DashboardPanel(): JSX.Element {
                           onArchive={(e) => handleArchive(session.id, !session.isArchived, e)}
                           onDelete={(e) => handleDeletePrompt(session, e)}
                           onReorder={handleReorderSession}
+                          onOpenCli={handleSessionOpenCli}
                         />
                       ))}
                     </div>
@@ -776,7 +813,8 @@ function SessionCard({
   onArchive,
   onDelete,
   groupKey,
-  onReorder
+  onReorder,
+  onOpenCli
 }: {
   session: AgentSessionInfo
   isExpanded: boolean
@@ -790,6 +828,7 @@ function SessionCard({
     position: 'before' | 'after' | 'inside',
     targetGroupKey: string
   ) => void
+  onOpenCli?: (session: AgentSessionInfo) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const cfg = AGENT_CONFIG[session.agent]
@@ -824,13 +863,18 @@ function SessionCard({
 
   const handleOpenCli = (e: React.MouseEvent): void => {
     e.stopPropagation()
-    openTerminalSession({
-      id: session.id,
-      agent: session.agent,
-      title: session.title,
-      status: session.status,
-      ensureRightDock: true
-    })
+    if (onOpenCli) {
+      onOpenCli(session)
+    } else {
+      openTerminalSession({
+        id: session.id,
+        agent: session.agent,
+        title: session.title,
+        status: session.status,
+        workspacePath: session.workspacePath,
+        ensureRightDock: true
+      })
+    }
   }
 
   const handleWorkspaceClick = async (e: React.MouseEvent): Promise<void> => {
