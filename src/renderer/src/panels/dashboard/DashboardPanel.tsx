@@ -79,7 +79,7 @@ export default function DashboardPanel(): JSX.Element {
     }
   })
 
-  const { workspaceRoot, settingsTick, liveAgentSessionIds } = useWorkbench()
+  const { workspaceRoot, settingsTick, liveAgentSessionIds, closedAgentSessions } = useWorkbench()
   const { t } = useTranslation()
   const [cliEnabled, setCliEnabled] = useState<Record<string, boolean | undefined>>({
     claude: true,
@@ -121,6 +121,14 @@ export default function DashboardPanel(): JSX.Element {
     const interval = setInterval(() => loadData(true), 5000)
     return () => clearInterval(interval)
   }, [loadData])
+
+  // 終端開／關 Agent 分頁時立刻重抓，不必等下一次輪詢或重開 App。
+  // 新會話的 .jsonl 是 CLI 起來後才寫出來的，所以隔幾秒再補抓一次。
+  useEffect(() => {
+    loadData(true)
+    const t = setTimeout(() => loadData(true), 3000)
+    return () => clearTimeout(t)
+  }, [liveAgentSessionIds, loadData])
 
   const isAgentEnabled = useCallback(
     (agentId: AgentId) => cliEnabled[agentId] !== false,
@@ -168,12 +176,26 @@ export default function DashboardPanel(): JSX.Element {
     0
   )
 
-  // 終端裡開著的會話一律視為 active：分頁還活著就是活的。
-  // main 端靠 PTY meta ＋ jsonl mtime 推斷會漏（resume 後卡片瞬間跳回 completed），
-  // 而 renderer 手上就有事實，直接蓋掉。
+  // 用 renderer 手上的事實修正 main 端的推斷（main 只能靠 PTY meta ＋ 日誌 mtime 猜）：
+  //   1. 終端分頁還活著 → 一定是 active（修掉 resume 後瞬間跳回 completed）。
+  //   2. 分頁是在這裡被關掉的、而且關掉之後檔案沒再被寫過 → 壓成 idle
+  //      （修掉關掉後因為 mtime 還很新而卡在 active 好幾分鐘）。
+  //      關閉後檔案又有寫入，代表 App 外面有人在跑它，就尊重 main 的判斷。
   const allSessions = (data?.sessions || [])
     .filter((s) => isAgentEnabled(s.agent))
-    .map((s) => (liveAgentSessionIds.includes(s.id) ? { ...s, status: 'active' as const } : s))
+    .map((s) => {
+      if (liveAgentSessionIds.includes(s.id)) return { ...s, status: 'active' as const }
+      const closedAt = closedAgentSessions[s.id]
+      if (
+        s.status === 'active' &&
+        closedAt &&
+        // 5 秒寬限：CLI 收工時常會再補寫最後一筆
+        new Date(s.lastActiveTime).getTime() <= closedAt + 5000
+      ) {
+        return { ...s, status: 'idle' as const }
+      }
+      return s
+    })
   const activeSessionsCount = allSessions.filter((s) => s.status === 'active').length
 
   const archivedSessions = allSessions.filter((s) => s.isArchived)

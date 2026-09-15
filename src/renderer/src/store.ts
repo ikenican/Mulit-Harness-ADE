@@ -77,6 +77,15 @@ export interface WorkbenchState {
    * 不必繞去 main 比對 PTY meta / jsonl mtime 再猜一次。
    */
   liveAgentSessionIds: string[]
+  /**
+   * 在這個 App 裡被關掉的 Agent 會話 → 關閉當下的時間戳。
+   *
+   * main 端用日誌 mtime 推狀態（幾分鐘內寫過就算 active），這對「在 App 外面自己跑的 CLI」
+   * 是必要的，但會讓剛從終端關掉的會話卡在 active 好幾分鐘。這裡記下關閉時間，
+   * 讓 Dashboard 把那種誤判壓成 idle。若之後檔案又被寫入（lastActiveTime 晚於關閉時間），
+   * 代表外面真的有人在跑它，標記自動失效。
+   */
+  closedAgentSessions: Record<string, number>
 }
 
 function initialTheme(): Theme {
@@ -143,7 +152,8 @@ let state: WorkbenchState = {
   agentModifiedFiles: new Set<string>(),
   fileReloadTick: {},
   editorDraft: null,
-  liveAgentSessionIds: []
+  liveAgentSessionIds: [],
+  closedAgentSessions: {}
 }
 applyTheme(state.theme)
 
@@ -423,7 +433,14 @@ export function openTerminalSession(req: {
 export function setLiveAgentSessionIds(ids: string[]): void {
   const prev = state.liveAgentSessionIds
   if (prev.length === ids.length && ids.every((x, i) => prev[i] === x)) return
-  set({ liveAgentSessionIds: ids })
+  // 從清單消失＝分頁被關掉，記下時間；重新開起來就把標記清掉。
+  const now = Date.now()
+  const closed = { ...state.closedAgentSessions }
+  for (const id of prev) {
+    if (!ids.includes(id)) closed[id] = now
+  }
+  for (const id of ids) delete closed[id]
+  set({ liveAgentSessionIds: ids, closedAgentSessions: closed })
 }
 
 export function setTheme(theme: Theme): void {
