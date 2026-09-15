@@ -185,6 +185,11 @@ foreach ($f in $uploadFiles) {
 
 # Determine release notes
 $releaseNotes = $Notes
+if ($Notes -and (Test-Path $Notes -ErrorAction SilentlyContinue)) {
+    try {
+        $releaseNotes = Get-Content -Raw $Notes
+    } catch {}
+}
 if (-not $releaseNotes) {
     try {
         $recentCommits = git log -n 5 --oneline 2>&1
