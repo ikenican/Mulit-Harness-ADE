@@ -182,7 +182,7 @@ function formatUpdaterError(msg: string): string {
     return updaterStatus
   })
 
-  ipcMain.handle('updater:check', async (): Promise<UpdaterStatus> => {
+  const performCheck = async (): Promise<UpdaterStatus> => {
     updaterStatus.checking = true
     updaterStatus.error = undefined
     updaterStatus.isInstalled = isInstalledApp()
@@ -233,7 +233,9 @@ function formatUpdaterError(msg: string): string {
       broadcastStatus()
       return updaterStatus
     }
-  })
+  }
+
+  ipcMain.handle('updater:check', performCheck)
 
   ipcMain.handle('updater:download', async (): Promise<boolean> => {
     if (!updaterStatus.isInstalled) {
@@ -269,10 +271,12 @@ function formatUpdaterError(msg: string): string {
     await shell.openExternal(url)
   })
 
-  // 應用程式啟動 5 秒後自動靜默檢查一次更新
+  // 應用程式啟動 5 秒後自動靜默檢查一次更新。
+  // 不可用 ipcMain.emit('updater:check')：emit 只觸發 ipcMain.on 的 listener，
+  // 碰不到 ipcMain.handle 註冊的 invoke handler，等於整段開機自動檢查從未執行過。
   setTimeout(() => {
     if (app.isPackaged) {
-      ipcMain.emit('updater:check')
+      performCheck().catch((e) => console.warn('[Updater] startup check failed:', e))
     }
   }, 5000)
 }
