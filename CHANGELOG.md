@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.6] - 2026-09-15
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.6 帶來 Dashboard 會話卡片原生拖曳排序與跨資料夾歸類（Issue #7，方案 A），以及精準的活躍會話偵測與專案路徑反解（Issue #8）：
+1. **Dashboard 會話卡片原生拖曳重排與跨資料夾移動 (Issue #7)**：卡片支援在群組內依游標中線上下插入重排，亦可直接拖曳至各資料夾容器進行跨專案歸類。排序與分類變更支援 `localStorage` 本地持久化，放回原生目錄時自動清理覆寫。右側終端面版拖曳 Handoff 與點選繼續執行完整保留。
+2. **活躍 Agent 會話偵測與專案目錄路徑反解 (Issue #8)**：
+   - 擴充 Antigravity 系統提示緩衝區至 512KB + 尾部 64KB，比對當前工作區路徑，徹底解決路徑被巨大 prompt 裁切而歸類至 "Antigravity Workspace" 的問題。
+   - 修復 Claude 專案路徑盲目將連字號替換為空格的 Bug，保留如 `IDE-remade-3` 等真實目錄結構，並結合子檔案 mtime 穿透 Windows 目錄快取限制。
+   - 補齊 Claude 與 Codex 掃描器的 `< 2m` 活躍狀態計算。
+   - 新增 SQLite 二進位反解，自動提取 Antigravity CLI 會話之真實專案路徑與工作區名稱。
+3. **終端已開啟會話防重複啟動**：點擊已在右側終端運行的會話卡片時直接切換並聚焦既有終端 Tab，不再反覆生成重複進程。
+
+### Added / 新增功能
+- **Dashboard 原生拖曳排序與放置 (`DashboardPanel.tsx` & `dashboard.css`)**:
+  - HTML5 原生拖曳資料傳輸 (`application/x-dashboard-session-id`)。
+  - 卡片上下邊界發光指示條（`.drag-over-top` / `.drag-over-bottom`）。
+  - 資料夾群組容器放置高亮（`.dash-folder-group.drag-over-folder`）。
+  - `localStorage` 持久化儲存（`dashboard-order` 與 `dashboard-folder-overrides`）。
+- **Antigravity CLI 資料庫專案反解 (`dashboard.ts`)**:
+  - `extractWorkspaceFromBlob()` 精準解析 `~/.gemini/antigravity-cli/conversations/` 下 SQLite blob 之工作區目錄與路徑。
+
+### Fixed / 修復問題
+- **會話目錄歸屬與狀態識別修復 (`dashboard.ts`)**:
+  - 修正 Antigravity 巨大系統提示截斷導致路徑遺失問題。
+  - 修正 Claude 專案目錄連字號破壞與 Windows 目錄 mtime 滯後問題。
+  - 補齊 Claude / Codex 活躍（active）狀態判斷邏輯。
+  - PTY 優先度 3 同工作區匹配加入 30 分鐘時間窗口，避免好幾天前歷史會話誤標活躍。
+- **終端會話聚焦重複開啟修復 (`TerminalPanel.tsx`)**:
+  - 比對 `associatedSessionId`，點選既有會話卡片時直接 focus 既有終端 tab。
+
+---
+
 ## [0.1.5] - 2026-09-14
 
 ### Highlights & Summary / 更新亮點

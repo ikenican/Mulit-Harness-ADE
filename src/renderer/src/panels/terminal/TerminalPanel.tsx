@@ -553,9 +553,9 @@ export default function TerminalPanel(): JSX.Element {
   /** 開啟或切換至特定 session 的 CLI 終端（點選或拖曳時共用） */
   const openOrResumeSession = useCallback(
     (req: { id?: string; agent: string; title?: string; status?: string }) => {
-      // 1. 若現有終端 session 中有匹配者（ptyId 或 session id 匹配）
+      // 1. 若現有終端 session 中有匹配者（ptyId、session id 或 associatedSessionId 匹配）
       const matchedPty = sessionsRef.current.find(
-        (s) => req.id && (s.id === req.id || s.ptyId === req.id)
+        (s) => req.id && (s.id === req.id || s.ptyId === req.id || s.associatedSessionId === req.id)
       )
       if (matchedPty) {
         selectSession(matchedPty.id)

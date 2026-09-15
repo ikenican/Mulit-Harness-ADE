@@ -59,6 +59,25 @@ export default function DashboardPanel(): JSX.Element {
   const [lastRefreshed, setLastRefreshed] = useState<string>('')
   const [sessionToDelete, setSessionToDelete] = useState<AgentSessionInfo | null>(null)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+  const [dragOverFolderKey, setDragOverFolderKey] = useState<string | null>(null)
+
+  // 自訂會話排序（各分組 key 對應之 session ID 陣列）與自訂分組覆寫，支援本地持久化
+  const [customOrder, setCustomOrder] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('agent-workbench:dashboard-order')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+  const [folderOverrides, setFolderOverrides] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('agent-workbench:dashboard-folder-overrides')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
 
   const { workspaceRoot, settingsTick } = useWorkbench()
   const { t } = useTranslation()
@@ -160,7 +179,7 @@ export default function DashboardPanel(): JSX.Element {
       ? baseSessions
       : baseSessions.filter((s) => s.agent === selectedAgent)
 
-  // 依執行資料夾歸類 Session
+  // 依執行資料夾歸類 Session（整合自訂拖曳排序與自訂分組覆寫）
   const folderGroups = useMemo<SessionFolderGroup[]>(() => {
     const map = new Map<string, SessionFolderGroup>()
     const normRoot = workspaceRoot ? workspaceRoot.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
@@ -171,15 +190,16 @@ export default function DashboardPanel(): JSX.Element {
       const normPath = rawPath ? rawPath.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
       const wsName = session.workspace?.trim() || (rawPath ? rawPath.split(/[\\/]/).filter(Boolean).pop() || '' : 'Other')
 
-      const isCurrentWs = Boolean(
-        (normRoot && normPath && (normPath === normRoot || normRoot.endsWith(normPath))) ||
-        (currentName && wsName && wsName.toLowerCase() === currentName)
-      )
-
-      const groupKey = normPath || wsName.toLowerCase()
+      // 若有手動自訂分組，套用自訂分組 key，否則以原始工作區路徑或名稱為 key
+      const overrideKey = folderOverrides[session.id]
+      const groupKey = overrideKey || normPath || wsName.toLowerCase()
 
       let grp = map.get(groupKey)
       if (!grp) {
+        const isCurrentWs = Boolean(
+          (normRoot && (groupKey === normRoot || normRoot.endsWith(groupKey))) ||
+          (currentName && (groupKey === currentName || wsName.toLowerCase() === currentName))
+        )
         grp = {
           key: groupKey,
           name: isCurrentWs && workspaceRoot ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || wsName : wsName,
@@ -190,14 +210,33 @@ export default function DashboardPanel(): JSX.Element {
           activeCount: 0
         }
         map.set(groupKey, grp)
-      } else if (isCurrentWs && !grp.isCurrentWorkspace) {
-        grp.isCurrentWorkspace = true
+      } else if (!grp.isCurrentWorkspace) {
+        const isCurrentWs = Boolean(
+          (normRoot && (groupKey === normRoot || normRoot.endsWith(groupKey))) ||
+          (currentName && (groupKey === currentName || wsName.toLowerCase() === currentName))
+        )
+        if (isCurrentWs) grp.isCurrentWorkspace = true
       }
 
       grp.sessions.push(session)
       grp.totalTokens += session.totalTokens || 0
       if (session.status === 'active') {
         grp.activeCount += 1
+      }
+    }
+
+    // 依自訂手動排序對各群組內的 sessions 進行排定
+    for (const grp of map.values()) {
+      const order = customOrder[grp.key]
+      if (order && order.length > 0) {
+        grp.sessions.sort((a, b) => {
+          const idxA = order.indexOf(a.id)
+          const idxB = order.indexOf(b.id)
+          if (idxA !== -1 && idxB !== -1) return idxA - idxB
+          if (idxA !== -1) return -1
+          if (idxB !== -1) return 1
+          return (new Date(b.lastActiveTime).getTime() || 0) - (new Date(a.lastActiveTime).getTime() || 0)
+        })
       }
     }
 
@@ -214,7 +253,69 @@ export default function DashboardPanel(): JSX.Element {
     })
 
     return list
-  }, [displayedSessions, workspaceRoot])
+  }, [displayedSessions, workspaceRoot, customOrder, folderOverrides])
+
+  // 處理在 Dashboard 視窗內拖曳卡片重新排序與跨群組移動
+  const handleReorderSession = useCallback(
+    (
+      draggedId: string,
+      targetId: string | null,
+      position: 'before' | 'after' | 'inside',
+      targetGroupKey: string
+    ) => {
+      const draggedSession = displayedSessions.find((s) => s.id === draggedId)
+      const rawPath = draggedSession?.workspacePath?.trim() || ''
+      const normPath = rawPath ? rawPath.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
+      const wsName = draggedSession?.workspace?.trim() || (rawPath ? rawPath.split(/[\\/]/).filter(Boolean).pop() || '' : 'Other')
+      const naturalKey = normPath || wsName.toLowerCase()
+
+      // 1. 若拖曳跨資料夾，更新分組覆寫（若放回原自然分組則清除覆寫）
+      setFolderOverrides((prev) => {
+        const next = { ...prev }
+        if (targetGroupKey === naturalKey) {
+          delete next[draggedId]
+        } else {
+          next[draggedId] = targetGroupKey
+        }
+        try {
+          localStorage.setItem('agent-workbench:dashboard-folder-overrides', JSON.stringify(next))
+        } catch {}
+        return next
+      })
+
+      // 2. 更新目標分組中的排序清單
+      setCustomOrder((prev) => {
+        const next: Record<string, string[]> = {}
+        for (const [k, arr] of Object.entries(prev)) {
+          next[k] = arr.filter((id) => id !== draggedId)
+        }
+
+        const currentGroupSessions =
+          folderGroups.find((g) => g.key === targetGroupKey)?.sessions.map((s) => s.id) || []
+        const existingOrder = next[targetGroupKey] || [...currentGroupSessions]
+        const targetList = existingOrder.filter((id) => id !== draggedId)
+
+        if (!targetId || position === 'inside') {
+          targetList.push(draggedId)
+        } else {
+          const targetIdx = targetList.indexOf(targetId)
+          if (targetIdx === -1) {
+            targetList.push(draggedId)
+          } else {
+            const insertIdx = position === 'before' ? targetIdx : targetIdx + 1
+            targetList.splice(insertIdx, 0, draggedId)
+          }
+        }
+
+        next[targetGroupKey] = targetList
+        try {
+          localStorage.setItem('agent-workbench:dashboard-order', JSON.stringify(next))
+        } catch {}
+        return next
+      })
+    },
+    [displayedSessions, folderGroups]
+  )
 
   const toggleFolderCollapse = (key: string): void => {
     setCollapsedFolders((prev) => {
@@ -494,7 +595,32 @@ export default function DashboardPanel(): JSX.Element {
               return (
                 <div
                   key={group.key}
-                  className={`dash-folder-group ${group.isCurrentWorkspace ? 'is-current' : ''}`}
+                  className={`dash-folder-group ${group.isCurrentWorkspace ? 'is-current' : ''} ${dragOverFolderKey === group.key ? 'drag-over-folder' : ''}`}
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes('application/x-dashboard-session-id')) {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      if (dragOverFolderKey !== group.key) {
+                        setDragOverFolderKey(group.key)
+                      }
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      if (dragOverFolderKey === group.key) {
+                        setDragOverFolderKey(null)
+                      }
+                    }
+                  }}
+                  onDrop={(e) => {
+                    const draggedId = e.dataTransfer.getData('application/x-dashboard-session-id')
+                    if (draggedId) {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setDragOverFolderKey(null)
+                      handleReorderSession(draggedId, null, 'inside', group.key)
+                    }
+                  }}
                 >
                   <div
                     className={`dash-folder-header ${isCollapsed ? 'collapsed' : 'expanded'}`}
@@ -571,10 +697,12 @@ export default function DashboardPanel(): JSX.Element {
                         <SessionCard
                           key={session.id}
                           session={session}
+                          groupKey={group.key}
                           isExpanded={expandedSessionId === session.id}
                           onToggle={() => toggleExpand(session.id)}
-                          onArchive={(e) => handleArchive(session.id, !!session.isArchived, e)}
+                          onArchive={(e) => handleArchive(session.id, !session.isArchived, e)}
                           onDelete={(e) => handleDeletePrompt(session, e)}
+                          onReorder={handleReorderSession}
                         />
                       ))}
                     </div>
@@ -646,13 +774,22 @@ function SessionCard({
   isExpanded,
   onToggle,
   onArchive,
-  onDelete
+  onDelete,
+  groupKey,
+  onReorder
 }: {
   session: AgentSessionInfo
   isExpanded: boolean
   onToggle: () => void
   onArchive: (e: React.MouseEvent) => void
   onDelete: (e: React.MouseEvent) => void
+  groupKey: string
+  onReorder: (
+    draggedId: string,
+    targetId: string | null,
+    position: 'before' | 'after' | 'inside',
+    targetGroupKey: string
+  ) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const cfg = AGENT_CONFIG[session.agent]
@@ -683,6 +820,7 @@ function SessionCard({
   })
 
   const [isDragging, setIsDragging] = useState(false)
+  const [dropIndicator, setDropIndicator] = useState<'top' | 'bottom' | null>(null)
 
   const handleOpenCli = (e: React.MouseEvent): void => {
     e.stopPropagation()
@@ -720,25 +858,65 @@ function SessionCard({
     }
     setDraggedSession(sessionData)
     e.dataTransfer.setData('application/x-agent-session', JSON.stringify(sessionData))
+    e.dataTransfer.setData('application/x-dashboard-session-id', session.id)
+    e.dataTransfer.setData('application/x-dashboard-group-key', groupKey)
     e.dataTransfer.setData('text/plain', `[Session: @${session.agent}] ${session.title}`)
     e.dataTransfer.effectAllowed = 'copyMove'
   }
 
   const handleDragEnd = (): void => {
     setIsDragging(false)
+    setDropIndicator(null)
     setDraggedSession(null)
+  }
+
+  const handleCardDragOver = (e: React.DragEvent<HTMLDivElement>): void => {
+    if (isDragging) return
+    if (e.dataTransfer.types.includes('application/x-dashboard-session-id')) {
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move'
+      const rect = e.currentTarget.getBoundingClientRect()
+      const midY = rect.top + rect.height / 2
+      const pos: 'top' | 'bottom' = e.clientY < midY ? 'top' : 'bottom'
+      if (dropIndicator !== pos) {
+        setDropIndicator(pos)
+      }
+    }
+  }
+
+  const handleCardDragLeave = (e: React.DragEvent<HTMLDivElement>): void => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDropIndicator(null)
+    }
+  }
+
+  const handleCardDrop = (e: React.DragEvent<HTMLDivElement>): void => {
+    const draggedId = e.dataTransfer.getData('application/x-dashboard-session-id')
+    if (draggedId) {
+      e.preventDefault()
+      e.stopPropagation()
+      const pos = dropIndicator === 'top' ? 'before' : 'after'
+      setDropIndicator(null)
+      if (draggedId !== session.id) {
+        onReorder(draggedId, session.id, pos, groupKey)
+      }
+    }
   }
 
   return (
     <div
-      className={`dash-session-card status-${session.status} ${isDragging ? 'dragging' : ''}`}
+      className={`dash-session-card status-${session.status} ${isDragging ? 'dragging' : ''} ${dropIndicator === 'top' ? 'drag-over-top' : ''} ${dropIndicator === 'bottom' ? 'drag-over-bottom' : ''}`}
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      title="Click to open CLI, or drag to right terminal to open / handoff"
+      onDragOver={handleCardDragOver}
+      onDragLeave={handleCardDragLeave}
+      onDrop={handleCardDrop}
+      title="Click to open CLI, drag to reorder/move folder, or drag to terminal to handoff"
     >
       <div className="dash-session-row">
-        <div className="dash-drag-grip" title="Drag to Terminal to open or handoff">
+        <div className="dash-drag-grip" title="Drag to reorder, move to another folder, or drag to terminal">
           <IconGripVertical size={13} />
         </div>
 
