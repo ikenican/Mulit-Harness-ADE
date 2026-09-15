@@ -184,19 +184,20 @@ foreach ($f in $uploadFiles) {
 }
 
 # Determine release notes
-$releaseNotes = $Notes
+$tempNotesFile = Join-Path $env:TEMP "agent_workbench_release_notes_$tagName.md"
 if ($Notes -and (Test-Path $Notes -ErrorAction SilentlyContinue)) {
-    try {
-        $releaseNotes = Get-Content -Raw $Notes
-    } catch {}
-}
-if (-not $releaseNotes) {
-    try {
-        $recentCommits = git log -n 5 --oneline 2>&1
-        $releaseNotes = "### Changes in $tagName`n`n" + ($recentCommits -join "`n")
-    } catch {
-        $releaseNotes = "Release $tagName of Agent Workbench."
+    $tempNotesFile = (Resolve-Path $Notes).Path
+} else {
+    $releaseNotes = $Notes
+    if (-not $releaseNotes) {
+        try {
+            $recentCommits = git log -n 5 --oneline 2>&1
+            $releaseNotes = "### Changes in $tagName`n`n" + ($recentCommits -join "`n")
+        } catch {
+            $releaseNotes = "Release $tagName of Agent Workbench."
+        }
     }
+    [System.IO.File]::WriteAllText($tempNotesFile, $releaseNotes, [System.Text.Encoding]::UTF8)
 }
 
 # Check if release tag already exists on GitHub
@@ -224,7 +225,7 @@ if ($releaseExists) {
     $createArgs = @(
         "release", "create", $tagName,
         "--title", $releaseTitle,
-        "--notes", $releaseNotes
+        "--notes-file", $tempNotesFile
     )
     if ($Draft) {
         $createArgs += "--draft"
