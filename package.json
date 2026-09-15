@@ -1,6 +1,6 @@
 {
   "name": "agent-workbench",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Cross-agent developer workbench for Claude Code, Antigravity, and Codex",
   "main": "./out/main/index.js",
   "author": "zkylek1212-k",
