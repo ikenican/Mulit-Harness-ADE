@@ -25,6 +25,7 @@ export interface TerminalOpenSessionRequest {
   agent: AgentId
   title?: string
   status?: string
+  workspacePath?: string
   ensureRightDock?: boolean
   nonce: number
 }
@@ -396,6 +397,7 @@ export function openTerminalSession(req: {
   agent: AgentId
   title?: string
   status?: string
+  workspacePath?: string
   ensureRightDock?: boolean
 }): void {
   if (state.centerMaximized) {

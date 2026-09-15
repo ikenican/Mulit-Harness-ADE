@@ -829,6 +829,7 @@ function SessionCard({
       agent: session.agent,
       title: session.title,
       status: session.status,
+      workspacePath: session.workspacePath,
       ensureRightDock: true
     })
   }

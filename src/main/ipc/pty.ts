@@ -19,6 +19,7 @@ export interface ActiveSessionMeta {
   pid: number
   sessionId?: string
   cwd?: string
+  args?: string[]
 }
 const ptySessionMetas = new Map<string, ActiveSessionMeta>()
 
@@ -280,11 +281,12 @@ export function registerPtyHandlers(): void {
     const rows = opts.rows || 24
     
     try {
+      const spawnCwd = opts.cwd && fs.existsSync(opts.cwd) ? opts.cwd : workspace.root
       const ptyProcess = pty.spawn(command, args, {
         name: 'xterm-color',
         cols,
         rows,
-        cwd: workspace.root,
+        cwd: spawnCwd,
         env: env as Record<string, string>
       })
       
@@ -296,7 +298,8 @@ export function registerPtyHandlers(): void {
         startTime: Date.now(),
         pid: ptyProcess.pid,
         sessionId: opts.sessionId,
-        cwd: opts.cwd || workspace.root
+        cwd: spawnCwd,
+        args
       })
       
       // event.sender 是 spawn 當下那個視窗的 webContents。如果之後那個視窗被關掉
