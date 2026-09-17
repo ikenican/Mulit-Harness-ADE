@@ -108,35 +108,66 @@ export function findCli(cmd: string): string | null {
 
   // Windows 平台候選目錄搜尋（解決 Electron GUI 進程環境 PATH 可能未更新的問題）
   if (isWin) {
+    const localAppData = process.env['LOCALAPPDATA'] || join(H, 'AppData', 'Local')
+    const appData = process.env['APPDATA'] || join(H, 'AppData', 'Roaming')
+    const nvmSymlink = process.env['NVM_SYMLINK']
+
     const candidates: string[] = [
-      join(H, 'AppData', 'Roaming', 'npm', `${cmd}.cmd`),
-      join(H, 'AppData', 'Roaming', 'npm', `${cmd}.exe`),
-      join(H, 'AppData', 'Roaming', 'npm', `${cmd}.ps1`),
-      join(H, 'AppData', 'Local', cmd, 'bin', `${cmd}.exe`),
-      join(H, 'AppData', 'Local', 'Programs', cmd, `${cmd}.exe`),
+      // npm global
+      join(appData, 'npm', `${cmd}.cmd`),
+      join(appData, 'npm', `${cmd}.exe`),
+      join(appData, 'npm', `${cmd}.ps1`),
+      // pnpm global
+      join(localAppData, 'pnpm', `${cmd}.cmd`),
+      join(localAppData, 'pnpm', `${cmd}.exe`),
+      join(localAppData, 'pnpm', `${cmd}.ps1`),
+      // scoop shims
+      join(H, 'scoop', 'shims', `${cmd}.exe`),
+      join(H, 'scoop', 'shims', `${cmd}.cmd`),
+      join(H, 'scoop', 'shims', `${cmd}.ps1`),
+      // yarn & winget
+      join(localAppData, 'Yarn', 'bin', `${cmd}.cmd`),
+      join(localAppData, 'Microsoft', 'WinGet', 'Links', `${cmd}.exe`),
+      // Standard local bin & programs
+      join(localAppData, cmd, 'bin', `${cmd}.exe`),
+      join(localAppData, 'Programs', cmd, `${cmd}.exe`),
       join(H, '.local', 'bin', `${cmd}.exe`),
-      join(H, '.local', 'bin', `${cmd}.cmd`)
+      join(H, '.local', 'bin', `${cmd}.cmd`),
+      // System-wide nodejs
+      'C:\\Program Files\\nodejs\\' + `${cmd}.cmd`,
+      'C:\\Program Files\\nodejs\\' + `${cmd}.exe`,
+      'C:\\Program Files (x86)\\nodejs\\' + `${cmd}.cmd`,
+      'C:\\Program Files (x86)\\nodejs\\' + `${cmd}.exe`
     ]
+
+    if (nvmSymlink) {
+      candidates.unshift(
+        join(nvmSymlink, `${cmd}.cmd`),
+        join(nvmSymlink, `${cmd}.exe`)
+      )
+    }
+
     if (cmd === 'agy' || cmd === 'antigravity') {
       candidates.unshift(
-        join(H, 'AppData', 'Local', 'agy', 'bin', 'agy.exe'),
-        join(H, 'AppData', 'Roaming', 'npm', 'agy.cmd'),
+        join(localAppData, 'agy', 'bin', 'agy.exe'),
+        join(appData, 'npm', 'agy.cmd'),
         join(H, '.gemini', 'antigravity-cli', 'bin', 'agy.exe')
       )
     }
     if (cmd === 'claude') {
       candidates.unshift(
-        join(H, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-        join(H, 'AppData', 'Local', 'Programs', 'Claude', 'claude.exe')
+        join(appData, 'npm', 'claude.cmd'),
+        join(localAppData, 'Programs', 'Claude', 'claude.exe')
       )
     }
     if (cmd === 'codex') {
       candidates.unshift(
-        join(H, 'AppData', 'Roaming', 'npm', 'codex.cmd')
+        join(appData, 'npm', 'codex.cmd'),
+        join(localAppData, 'pnpm', 'codex.cmd')
       )
     }
     for (const c of candidates) {
-      if (existsSync(c)) return c
+      if (c && existsSync(c)) return c
     }
   }
 

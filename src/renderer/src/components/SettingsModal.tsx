@@ -208,6 +208,8 @@ export default function SettingsModal({
     pdf: { testing: false }
   })
   const [expandedCli, setExpandedCli] = useState<Record<string, boolean>>({})
+  const [detectingCli, setDetectingCli] = useState<Record<string, boolean>>({})
+  const [detectFeedback, setDetectFeedback] = useState<Record<string, { type: 'ok' | 'fail'; msg: string }>>({})
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -289,6 +291,11 @@ export default function SettingsModal({
       ...prev,
       [id]: { testing: false }
     }))
+    setDetectFeedback((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }
 
   const handleToggleCli = (id: string, enabled: boolean): void => {
@@ -305,23 +312,93 @@ export default function SettingsModal({
     setExpandedCli((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
-  const handleUseDetected = (id: string): void => {
-    const detected = detectedPaths[id]
-    if (detected) {
-      handlePathChange(id, detected)
+  const handleBrowseCli = async (id: string, name: string): Promise<void> => {
+    const picked = await window.api.files.pickExecutable(`Select ${name} Executable`)
+    if (picked) {
+      handlePathChange(id, picked)
     }
   }
 
-  const handleDetectAll = (): void => {
-    setSettings((prev) => {
-      const nextPaths = { ...prev.cliPaths }
-      for (const cfg of cliConfigs) {
-        if (detectedPaths[cfg.id]) {
-          nextPaths[cfg.id] = detectedPaths[cfg.id]
-        }
-      }
-      return { ...prev, cliPaths: nextPaths }
+  const handleDetectCli = async (id: string): Promise<void> => {
+    setDetectingCli((prev) => ({ ...prev, [id]: true }))
+    setDetectFeedback((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
     })
+
+    try {
+      const agents = await window.api.ext.agents()
+      const map: Record<string, string> = {
+        claude: '',
+        antigravity: '',
+        codex: '',
+        powershell: '',
+        cmd: ''
+      }
+      for (const a of agents) {
+        if (a.cliPath) map[a.agent] = a.cliPath
+      }
+      if (typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')) {
+        map.powershell = 'powershell.exe'
+        map.cmd = 'cmd.exe'
+      }
+      setDetectedPaths(map)
+
+      const found = map[id]
+      if (found) {
+        handlePathChange(id, found)
+        setDetectFeedback((prev) => ({
+          ...prev,
+          [id]: { type: 'ok', msg: `${t('settings.detected')}: ${found}` }
+        }))
+      } else {
+        setDetectFeedback((prev) => ({
+          ...prev,
+          [id]: { type: 'fail', msg: t('settings.cliNotDetectedNotice') }
+        }))
+      }
+    } catch {
+      setDetectFeedback((prev) => ({
+        ...prev,
+        [id]: { type: 'fail', msg: t('settings.cliNotDetectedNotice') }
+      }))
+    } finally {
+      setDetectingCli((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  const handleDetectAll = async (): Promise<void> => {
+    try {
+      const agents = await window.api.ext.agents()
+      const map: Record<string, string> = {
+        claude: '',
+        antigravity: '',
+        codex: '',
+        powershell: '',
+        cmd: ''
+      }
+      for (const a of agents) {
+        if (a.cliPath) map[a.agent] = a.cliPath
+      }
+      if (typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')) {
+        map.powershell = 'powershell.exe'
+        map.cmd = 'cmd.exe'
+      }
+      setDetectedPaths(map)
+
+      setSettings((prev) => {
+        const nextPaths = { ...prev.cliPaths }
+        for (const cfg of cliConfigs) {
+          if (map[cfg.id]) {
+            nextPaths[cfg.id] = map[cfg.id]
+          }
+        }
+        return { ...prev, cliPaths: nextPaths }
+      })
+    } catch (e) {
+      console.error('Failed to auto-detect all CLIs:', e)
+    }
   }
 
   const handleResetToAuto = (): void => {
@@ -1017,30 +1094,50 @@ export default function SettingsModal({
                                   disabled={!isEnabled}
                                   onChange={(e) => handlePathChange(cfg.id, e.target.value)}
                                 />
-                                {detected && detected !== currentVal && isEnabled && (
-                                  <button
-                                    type="button"
-                                    className="macos-btn-secondary"
-                                    onClick={() => handleUseDetected(cfg.id)}
-                                    title={`Use detected path: ${detected}`}
-                                  >
-                                    Use Detected
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  className="macos-btn-secondary"
+                                  onClick={() => handleBrowseCli(cfg.id, cfg.name)}
+                                  disabled={!isEnabled}
+                                  title={t('settings.browse')}
+                                >
+                                  <IconFolderOpen size={13} />
+                                  <span>{t('settings.browse')}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="macos-btn-secondary"
+                                  onClick={() => handleDetectCli(cfg.id)}
+                                  disabled={!isEnabled || detectingCli[cfg.id]}
+                                  title={t('settings.detect')}
+                                >
+                                  {detectingCli[cfg.id] ? t('settings.detecting') : t('settings.detect')}
+                                </button>
                                 <button
                                   type="button"
                                   className="macos-btn-secondary"
                                   onClick={() => handleTestPath(cfg.id)}
                                   disabled={!isEnabled || test.testing}
+                                  title={t('settings.test')}
                                 >
-                                  {test.testing ? 'Testing…' : 'Test'}
+                                  {test.testing ? t('settings.testing') : t('settings.test')}
                                 </button>
                               </div>
+
+                              {detectFeedback[cfg.id] && (
+                                <div className={`macos-test-result ${detectFeedback[cfg.id].type === 'ok' ? 'ok' : 'fail'}`}>
+                                  {detectFeedback[cfg.id].type === 'ok' ? (
+                                    <span>✓ {detectFeedback[cfg.id].msg}</span>
+                                  ) : (
+                                    <span>✕ {detectFeedback[cfg.id].msg}</span>
+                                  )}
+                                </div>
+                              )}
 
                               {test.ok !== undefined && (
                                 <div className={`macos-test-result ${test.ok ? 'ok' : 'fail'}`}>
                                   {test.ok ? (
-                                    <span>✓ Valid executable: <strong>{test.version || 'OK'}</strong></span>
+                                    <span>✓ {t('settings.validExecutable')}: <strong>{test.version || 'OK'}</strong></span>
                                   ) : (
                                     <span>✕ Error: <span className="macos-error-tag">{test.error || 'Failed to execute'}</span></span>
                                   )}
