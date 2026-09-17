@@ -313,31 +313,40 @@ function saveDashboardCache(): void {
  * 讀取 Antigravity 本地會話日誌與真實 Token 概況（支援 mtime 快速快取）
  */
 function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
-  const brainDir = join(H, '.gemini', 'antigravity-ide', 'brain')
-  if (!fs.existsSync(brainDir)) return []
+  const brainDirs = [
+    join(H, '.gemini', 'antigravity-ide', 'brain'),
+    join(H, '.gemini', 'antigravity-cli', 'brain')
+  ].filter((p) => fs.existsSync(p))
+  if (brainDirs.length === 0) return []
 
   const list: AgentSessionInfo[] = []
   const cache = loadDashboardCache()
 
   try {
-    const entries = fs.readdirSync(brainDir, { withFileTypes: true })
-    const dirs = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'tempmediaStorage')
-      .map((e) => {
-        const p = join(brainDir, e.name)
-        const logPath = join(p, '.system_generated', 'logs', 'transcript.jsonl')
-        let mtime = 0
-        try {
-          if (fs.existsSync(logPath)) {
-            mtime = fs.statSync(logPath).mtimeMs
-          } else {
-            mtime = fs.statSync(p).mtimeMs
+    const allDirs: { name: string; path: string; logPath: string; mtime: number }[] = []
+    for (const brainDir of brainDirs) {
+      const entries = fs.readdirSync(brainDir, { withFileTypes: true })
+      const dirs = entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'tempmediaStorage')
+        .map((e) => {
+          const p = join(brainDir, e.name)
+          const logPath = join(p, '.system_generated', 'logs', 'transcript.jsonl')
+          let mtime = 0
+          try {
+            if (fs.existsSync(logPath)) {
+              mtime = fs.statSync(logPath).mtimeMs
+            } else {
+              mtime = fs.statSync(p).mtimeMs
+            }
+          } catch {
+            mtime = 0
           }
-        } catch {
-          mtime = 0
-        }
-        return { name: e.name, path: p, logPath, mtime }
-      })
+          return { name: e.name, path: p, logPath, mtime }
+        })
+      allDirs.push(...dirs)
+    }
+
+    const dirs = allDirs
       .sort((a, b) => b.mtime - a.mtime)
       .slice(0, max)
 
@@ -504,6 +513,11 @@ function scanAntigravityCliConversations(max = 20): AgentSessionInfo[] {
         let mtime = 0
         try {
           mtime = fs.statSync(p).mtimeMs
+          const wal = `${p}-wal`
+          if (fs.existsSync(wal)) {
+            const walMtime = fs.statSync(wal).mtimeMs
+            if (walMtime > mtime) mtime = walMtime
+          }
         } catch {
           mtime = 0
         }
@@ -963,12 +977,14 @@ function saveDashboardState(state: DashboardState): void {
 let activeScanPromise: Promise<DashboardData> | null = null
 
 export function registerDashboardHandlers(): void {
-  ipcMain.handle('dashboard:data', async (): Promise<DashboardData> => {
-    if (activeScanPromise) {
+  ipcMain.handle('dashboard:data', async (_e, force?: boolean): Promise<DashboardData> => {
+    if (force) {
+      invalidateDashboardMemoryCache()
+    } else if (activeScanPromise) {
       return activeScanPromise
     }
 
-    activeScanPromise = (async () => {
+    const runScan = async (): Promise<DashboardData> => {
       try {
         const state = loadDashboardState()
         const deletedSet = new Set(state.deletedIds)
@@ -1197,9 +1213,11 @@ export function registerDashboardHandlers(): void {
         activeScanPromise = null
         saveDashboardCache()
       }
-    })()
+    }
 
-    return activeScanPromise
+    const p = runScan()
+    activeScanPromise = p
+    return p
   })
 
   ipcMain.handle('dashboard:archiveSession', async (_e, id: string, archive: boolean): Promise<boolean> => {
@@ -1213,12 +1231,39 @@ export function registerDashboardHandlers(): void {
     return true
   })
 
+  ipcMain.handle('dashboard:archiveSessions', async (_e, ids: string[], archive: boolean): Promise<boolean> => {
+    const state = loadDashboardState()
+    const idSet = new Set(ids)
+    if (archive) {
+      for (const id of ids) {
+        if (!state.archivedIds.includes(id)) state.archivedIds.push(id)
+      }
+    } else {
+      state.archivedIds = state.archivedIds.filter((x) => !idSet.has(x))
+    }
+    saveDashboardState(state)
+    return true
+  })
+
   ipcMain.handle('dashboard:deleteSession', async (_e, id: string): Promise<boolean> => {
     const state = loadDashboardState()
     if (!state.deletedIds.includes(id)) {
       state.deletedIds.push(id)
     }
     state.archivedIds = state.archivedIds.filter((x) => x !== id)
+    saveDashboardState(state)
+    return true
+  })
+
+  ipcMain.handle('dashboard:deleteSessions', async (_e, ids: string[]): Promise<boolean> => {
+    const state = loadDashboardState()
+    const idSet = new Set(ids)
+    for (const id of ids) {
+      if (!state.deletedIds.includes(id)) {
+        state.deletedIds.push(id)
+      }
+    }
+    state.archivedIds = state.archivedIds.filter((x) => !idSet.has(x))
     saveDashboardState(state)
     return true
   })

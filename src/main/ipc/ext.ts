@@ -4,7 +4,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { workspace } from '../index'
+import { workspace, getWorkspaceForEvent } from '../index'
 import { isProtectedPath } from './settings'
 import { AGENT_PATHS } from '../ext/paths'
 import { buildInventory, buildAgentStatus } from '../ext/inventory'
@@ -14,9 +14,10 @@ import type { AgentStatus, ExtItem, ExtManifest, FileChange } from '../../preloa
 
 const execFileAsync = promisify(execFile)
 
-function getDisabledKeys(): Set<string> {
+function getDisabledKeys(wsPath?: string): Set<string> {
+  const ws = wsPath || workspace.root
   try {
-    const file = path.join(workspace.root, '.workbench', 'customized-state.json')
+    const file = path.join(ws, '.workbench', 'customized-state.json')
     if (fs.existsSync(file)) {
       const data = JSON.parse(fs.readFileSync(file, 'utf8'))
       return new Set(data.disabled || [])
@@ -27,10 +28,11 @@ function getDisabledKeys(): Set<string> {
   return new Set()
 }
 
-function saveDisabledKeys(keys: Set<string>): void {
-  if (!workspace.root || isProtectedPath(workspace.root)) return
+function saveDisabledKeys(keys: Set<string>, wsPath?: string): void {
+  const ws = wsPath || workspace.root
+  if (!ws || isProtectedPath(ws)) return
   try {
-    const dir = path.join(workspace.root, '.workbench')
+    const dir = path.join(ws, '.workbench')
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, 'customized-state.json')
     fs.writeFileSync(file, JSON.stringify({ disabled: Array.from(keys) }, null, 2), 'utf8')
@@ -40,9 +42,9 @@ function saveDisabledKeys(keys: Set<string>): void {
 }
 
 export function registerExtHandlers(): void {
-  const inventory = (): ExtItem[] => {
-    const m = readManifest(workspace.root)
-    const items = buildInventory(workspace.root, managedKeys(m))
+  const inventory = (ws: string): ExtItem[] => {
+    const m = readManifest(ws)
+    const items = buildInventory(ws, managedKeys(m))
     // 把 manifest 宣告、但尚未在任何 agent 裝起來的項目也列出來（狀態才完整）
     const seen = new Set(items.map((i) => `${i.kind}:${i.id}`))
     for (const mc of m.mcp) {
@@ -67,7 +69,7 @@ export function registerExtHandlers(): void {
       })
     }
     // 補上憑證需求標記與啟用狀態
-    const disabled = getDisabledKeys()
+    const disabled = getDisabledKeys(ws)
     for (const it of items) {
       if (it.kind === 'mcp') {
         const decl = m.mcp.find((x) => x.id.toLowerCase() === it.id)
@@ -78,17 +80,21 @@ export function registerExtHandlers(): void {
     return items
   }
 
-  ipcMain.handle('ext:inventory', async (): Promise<ExtItem[]> => inventory())
+  ipcMain.handle('ext:inventory', async (event): Promise<ExtItem[]> => {
+    const ws = getWorkspaceForEvent(event)
+    return inventory(ws)
+  })
 
-  ipcMain.handle('ext:toggleItem', async (_e, kind: string, id: string, enabled: boolean): Promise<boolean> => {
-    const disabled = getDisabledKeys()
+  ipcMain.handle('ext:toggleItem', async (event, kind: string, id: string, enabled: boolean): Promise<boolean> => {
+    const ws = getWorkspaceForEvent(event)
+    const disabled = getDisabledKeys(ws)
     const key = `${kind}:${id.toLowerCase()}`
     if (enabled) {
       disabled.delete(key)
     } else {
       disabled.add(key)
     }
-    saveDisabledKeys(disabled)
+    saveDisabledKeys(disabled, ws)
 
     // 若為 Claude plugin，嘗試同步寫入 ~/.claude/settings.json
     if (kind === 'plugin') {
@@ -108,27 +114,34 @@ export function registerExtHandlers(): void {
     return true
   })
 
-  ipcMain.handle('ext:agents', async (): Promise<AgentStatus[]> =>
-    buildAgentStatus(workspace.root, inventory())
-  )
-
-  ipcMain.handle('ext:manifest', async (): Promise<ExtManifest> => readManifest(workspace.root))
-
-  ipcMain.handle('ext:saveManifest', async (_e, m: ExtManifest): Promise<void> => {
-    writeManifest(workspace.root, m)
+  ipcMain.handle('ext:agents', async (event): Promise<AgentStatus[]> => {
+    const ws = getWorkspaceForEvent(event)
+    return buildAgentStatus(ws, inventory(ws))
   })
 
-  ipcMain.handle('ext:planSync', async (): Promise<FileChange[]> =>
-    planSync(workspace.root, readManifest(workspace.root))
-  )
+  ipcMain.handle('ext:manifest', async (event): Promise<ExtManifest> => {
+    const ws = getWorkspaceForEvent(event)
+    return readManifest(ws)
+  })
 
-  ipcMain.handle('ext:applySync', async (): Promise<{ written: string[] }> => {
-    const changes = planSync(workspace.root, readManifest(workspace.root))
+  ipcMain.handle('ext:saveManifest', async (event, m: ExtManifest): Promise<void> => {
+    const ws = getWorkspaceForEvent(event)
+    writeManifest(ws, m)
+  })
+
+  ipcMain.handle('ext:planSync', async (event): Promise<FileChange[]> => {
+    const ws = getWorkspaceForEvent(event)
+    return planSync(ws, readManifest(ws))
+  })
+
+  ipcMain.handle('ext:applySync', async (event): Promise<{ written: string[] }> => {
+    const ws = getWorkspaceForEvent(event)
+    const changes = planSync(ws, readManifest(ws))
     return { written: applySync(changes) }
   })
 
   // 把目前工作區加進 Antigravity 的信任清單（不靜默執行，由使用者按鈕觸發）
-  ipcMain.handle('ext:trustWorkspace', async (): Promise<boolean> => {
+  ipcMain.handle('ext:trustWorkspace', async (event): Promise<boolean> => {
     const p = AGENT_PATHS.antigravity.trustSettings
     if (!p) return false
     let doc: { trustedWorkspaces?: string[] } = {}
@@ -139,7 +152,7 @@ export function registerExtHandlers(): void {
       /* 檔不存在就建新的 */
     }
     const list = doc.trustedWorkspaces || []
-    const ws = workspace.root
+    const ws = getWorkspaceForEvent(event)
     if (!list.some((t) => t.replace(/\\/g, '/').toLowerCase() === ws.replace(/\\/g, '/').toLowerCase())) {
       list.push(ws)
     }

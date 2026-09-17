@@ -219,6 +219,13 @@ export default function TerminalPanel(): JSX.Element {
   const [dispatchAttachContext, setDispatchAttachContext] = useState<boolean>(false)
   const dispatchInputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Terminal right-click context menu state
+  const [termContextMenu, setTermContextMenu] = useState<{
+    x: number
+    y: number
+    sessionId: string
+  } | null>(null)
+
   // Add terminal popover state (+ button)
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const [addMenuPos, setAddMenuPos] = useState<{ top: number; left: number } | null>(null)
@@ -530,6 +537,43 @@ export default function TerminalPanel(): JSX.Element {
       const fitAddon = new FitAddon()
       term.loadAddon(fitAddon)
 
+      term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+        // 1. IME 組字保護：如果使用者正在組字（如注音、拼音、倉頡等），完全放行給瀏覽器/IME，切勿攔截
+        if (e.isComposing) {
+          return true
+        }
+
+        // 2. Ctrl+C (Windows/Linux) 或 Cmd+C (macOS)：
+        // 若終端有選取文字，執行複製到剪貼簿並阻止發送 SIGINT (\x03) 給 pty，避免中斷終端執行
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !e.shiftKey && !e.altKey) {
+          if (term.hasSelection()) {
+            if (e.type === 'keydown') {
+              const sel = term.getSelection()
+              if (sel) {
+                navigator.clipboard.writeText(sel).catch(() => {})
+              }
+            }
+            return false
+          }
+          return true
+        }
+
+        // 3. Ctrl+V (Windows/Linux) 或 Cmd+V (macOS)：
+        // 由 keydown 讀取剪貼簿並透過 term.paste 送出，阻止預設行為以避免某些環境同時觸發 \x16 與 paste 產生雙重貼上
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !e.shiftKey && !e.altKey) {
+          if (e.type === 'keydown') {
+            navigator.clipboard.readText().then((text) => {
+              if (text) {
+                term.paste(text)
+              }
+            }).catch(() => {})
+          }
+          return false
+        }
+
+        return true
+      })
+
       const agentDef = BUILTIN_AGENTS.find((a) => a.id === key)
       const shellDef = BUILTIN_SHELLS.find((s) => s.id === key)
       const title =
@@ -779,8 +823,8 @@ export default function TerminalPanel(): JSX.Element {
     setActiveSessionId(targetId)
   }
 
-  const closeTerminal = (id: string, e: React.MouseEvent): void => {
-    e.stopPropagation()
+  const closeTerminal = (id: string, e?: React.MouseEvent): void => {
+    e?.stopPropagation()
     setMru((prev) => prev.filter((x) => x !== id))
     setSessions((prev) => {
       const idx = prev.findIndex((s) => s.id === id)
@@ -1739,6 +1783,7 @@ export default function TerminalPanel(): JSX.Element {
             isActive={s.id === activeSessionId}
             multi={paneCount > 1}
             onFocusPane={() => selectSession(s.id)}
+            onContextMenu={(x, y) => setTermContextMenu({ x, y, sessionId: s.id })}
             launcherKey={s.launcherKey}
             setSessions={setSessions}
           />
@@ -1746,6 +1791,95 @@ export default function TerminalPanel(): JSX.Element {
       </div>
       {renderSplitDropdown()}
       {renderHandoffModal()}
+
+      {/* Terminal Right-Click Context Menu */}
+      {termContextMenu && (() => {
+        const targetSession = sessions.find((s) => s.id === termContextMenu.sessionId)
+        if (!targetSession) return null
+        const hasSel = targetSession.term.hasSelection()
+        return (
+          <>
+            <div
+              className="dash-context-menu-backdrop"
+              onClick={() => setTermContextMenu(null)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setTermContextMenu(null)
+              }}
+            />
+            <div
+              className="dash-context-menu"
+              style={{
+                top: Math.min(termContextMenu.y, window.innerHeight - 170),
+                left: Math.min(termContextMenu.x, window.innerWidth - 180)
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="dash-context-item"
+                disabled={!hasSel}
+                style={{ opacity: hasSel ? 1 : 0.45, cursor: hasSel ? 'pointer' : 'default' }}
+                onClick={() => {
+                  setTermContextMenu(null)
+                  const sel = targetSession.term.getSelection()
+                  if (sel) {
+                    navigator.clipboard.writeText(sel).catch(() => {})
+                  }
+                }}
+              >
+                <span>{t('terminal.copy')}</span>
+                <span style={{ marginLeft: 'auto', fontSize: '10.5px', color: 'var(--fg-dim)', fontFamily: 'var(--mono)' }}>Ctrl+C</span>
+              </button>
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={() => {
+                  setTermContextMenu(null)
+                  navigator.clipboard.readText().then((text) => {
+                    if (text) targetSession.term.paste(text)
+                  }).catch(() => {})
+                }}
+              >
+                <span>{t('terminal.paste')}</span>
+                <span style={{ marginLeft: 'auto', fontSize: '10.5px', color: 'var(--fg-dim)', fontFamily: 'var(--mono)' }}>Ctrl+V</span>
+              </button>
+              <div className="dash-context-divider" />
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={() => {
+                  setTermContextMenu(null)
+                  targetSession.term.selectAll()
+                }}
+              >
+                <span>{t('terminal.selectAll')}</span>
+              </button>
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={() => {
+                  setTermContextMenu(null)
+                  targetSession.term.clear()
+                }}
+              >
+                <span>{t('terminal.clearBuffer')}</span>
+              </button>
+              <div className="dash-context-divider" />
+              <button
+                type="button"
+                className="dash-context-item is-destructive"
+                onClick={(e) => {
+                  setTermContextMenu(null)
+                  closeTerminal(targetSession.id, e)
+                }}
+              >
+                <span>{t('terminal.killSession')}</span>
+              </button>
+            </div>
+          </>
+        )
+      })()}
     </div>
   )
 }
@@ -1756,6 +1890,7 @@ function TerminalInstance({
   isActive,
   multi,
   onFocusPane,
+  onContextMenu,
   launcherKey,
   setSessions
 }: {
@@ -1766,6 +1901,7 @@ function TerminalInstance({
   isActive: boolean
   multi: boolean
   onFocusPane: () => void
+  onContextMenu: (x: number, y: number) => void
   launcherKey: string
   setSessions: React.Dispatch<React.SetStateAction<TerminalSession[]>>
 }): JSX.Element {
@@ -1787,6 +1923,16 @@ function TerminalInstance({
     session.term.open(elRef.current)
     session.fitAddon.fit()
 
+    // 杜絕手掌誤觸觸控板產生的中鍵（Button 1）貼上：以 capture 階段攔截，防止 xterm 接收 auxclick
+    const targetEl = elRef.current
+    const handleAuxClick = (e: MouseEvent): void => {
+      if (e.button === 1) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    targetEl.addEventListener('auxclick', handleAuxClick, true)
+
     const ro = new ResizeObserver(() => {
       try {
         session.fitAddon.fit()
@@ -1802,7 +1948,10 @@ function TerminalInstance({
 
     if (session.bootstrapped) {
       ptyIdRef.current = session.ptyId || null
-      return () => ro.disconnect()
+      return () => {
+        ro.disconnect()
+        targetEl.removeEventListener('auxclick', handleAuxClick, true)
+      }
     }
     session.bootstrapped = true
 
@@ -1878,7 +2027,10 @@ function TerminalInstance({
         session.term.write(`\r\n\x1b[31mFailed to start: ${msg}\x1b[0m\r\n`)
       })
 
-    return () => ro.disconnect()
+    return () => {
+      ro.disconnect()
+      targetEl.removeEventListener('auxclick', handleAuxClick, true)
+    }
   }, [])
 
   // 從隱藏變回顯示時（display:none 期間尺寸為 0），重新 fit 一次
@@ -1905,6 +2057,17 @@ function TerminalInstance({
       onMouseDown={() => {
         if (multi) onFocusPane()
         session.term.focus()
+      }}
+      onAuxClick={(e) => {
+        if (e.button === 1) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onContextMenu(e.clientX, e.clientY)
       }}
     />
   )

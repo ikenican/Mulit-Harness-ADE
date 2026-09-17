@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import simpleGit from 'simple-git'
 import path from 'path'
 import fs from 'fs/promises'
-import { workspace } from '../index'
+import { workspace, getWorkspaceForEvent } from '../index'
 import type {
   GitStatus,
   GitCommit,
@@ -12,12 +12,12 @@ import type {
 } from '../../preload/index'
 
 export function registerGitHandlers(): void {
-  const getGit = () => simpleGit(workspace.root)
+  const getGit = (event?: Electron.IpcMainInvokeEvent) => simpleGit(getWorkspaceForEvent(event))
 
   // git:status -> GitStatus
-  ipcMain.handle('git:status', async (): Promise<GitStatus> => {
+  ipcMain.handle('git:status', async (event): Promise<GitStatus> => {
     try {
-      const git = getGit()
+      const git = getGit(event)
       const isRepo = await git.checkIsRepo()
       if (!isRepo) {
         return { isRepo: false, current: '', staged: [], unstaged: [], untracked: [] }
@@ -47,9 +47,9 @@ export function registerGitHandlers(): void {
   })
 
   // git:log (limit=50) -> GitCommit[]
-  ipcMain.handle('git:log', async (_event, limit?: number): Promise<GitCommit[]> => {
+  ipcMain.handle('git:log', async (event, limit?: number): Promise<GitCommit[]> => {
     try {
-      const git = getGit()
+      const git = getGit(event)
       const isRepo = await git.checkIsRepo()
       if (!isRepo) return []
 
@@ -74,9 +74,9 @@ export function registerGitHandlers(): void {
   })
 
   // git:graph (limit=60) -> GitGraphNode[]
-  ipcMain.handle('git:graph', async (_event, limit?: number) => {
+  ipcMain.handle('git:graph', async (event, limit?: number) => {
     try {
-      const git = getGit()
+      const git = getGit(event)
       const isRepo = await git.checkIsRepo()
       if (!isRepo) return []
 
@@ -117,17 +117,18 @@ export function registerGitHandlers(): void {
   // git:diff (path) -> { head: string; work: string }
   ipcMain.handle(
     'git:diff',
-    async (_event, filePath: string): Promise<{ head: string; work: string }> => {
+    async (event, filePath: string): Promise<{ head: string; work: string }> => {
       try {
-        const git = getGit()
+        const ws = getWorkspaceForEvent(event)
+        const git = getGit(event)
         let relPath = path.isAbsolute(filePath)
-          ? path.relative(workspace.root, filePath)
+          ? path.relative(ws, filePath)
           : filePath
         relPath = relPath.replace(/\\/g, '/')
 
         const absPath = path.isAbsolute(filePath)
           ? filePath
-          : path.resolve(workspace.root, filePath)
+          : path.resolve(ws, filePath)
 
         let head = ''
         try {
@@ -152,11 +153,12 @@ export function registerGitHandlers(): void {
   )
 
   // git:stage (path) -> git.add(path)
-  ipcMain.handle('git:stage', async (_event, filePath: string): Promise<void> => {
+  ipcMain.handle('git:stage', async (event, filePath: string): Promise<void> => {
     try {
-      const git = getGit()
+      const ws = getWorkspaceForEvent(event)
+      const git = getGit(event)
       const relPath = path.isAbsolute(filePath)
-        ? path.relative(workspace.root, filePath)
+        ? path.relative(ws, filePath)
         : filePath
       await git.add(relPath.replace(/\\/g, '/'))
     } catch (err: unknown) {
@@ -166,11 +168,12 @@ export function registerGitHandlers(): void {
   })
 
   // git:unstage (path) -> git.reset(['--', path])
-  ipcMain.handle('git:unstage', async (_event, filePath: string): Promise<void> => {
+  ipcMain.handle('git:unstage', async (event, filePath: string): Promise<void> => {
     try {
-      const git = getGit()
+      const ws = getWorkspaceForEvent(event)
+      const git = getGit(event)
       const relPath = path.isAbsolute(filePath)
-        ? path.relative(workspace.root, filePath)
+        ? path.relative(ws, filePath)
         : filePath
       await git.reset(['--', relPath.replace(/\\/g, '/')])
     } catch (err: unknown) {
@@ -180,11 +183,12 @@ export function registerGitHandlers(): void {
   })
 
   // git:restore (path) -> git.checkout(['--', path])
-  ipcMain.handle('git:restore', async (_event, filePath: string): Promise<void> => {
+  ipcMain.handle('git:restore', async (event, filePath: string): Promise<void> => {
     try {
-      const git = getGit()
+      const ws = getWorkspaceForEvent(event)
+      const git = getGit(event)
       const relPath = path.isAbsolute(filePath)
-        ? path.relative(workspace.root, filePath)
+        ? path.relative(ws, filePath)
         : filePath
       await git.checkout(['--', relPath.replace(/\\/g, '/')])
     } catch (err: unknown) {
@@ -194,12 +198,12 @@ export function registerGitHandlers(): void {
   })
 
   // git:commit (message) -> git.commit(message)
-  ipcMain.handle('git:commit', async (_event, message: string): Promise<void> => {
+  ipcMain.handle('git:commit', async (event, message: string): Promise<void> => {
     try {
       if (!message || !message.trim()) {
         throw new Error('Commit message cannot be empty')
       }
-      const git = getGit()
+      const git = getGit(event)
       await git.commit(message)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -208,9 +212,9 @@ export function registerGitHandlers(): void {
   })
 
   // git:branches () -> git.branchLocal() returning { current, all }
-  ipcMain.handle('git:branches', async (): Promise<{ current: string; all: string[] }> => {
+  ipcMain.handle('git:branches', async (event): Promise<{ current: string; all: string[] }> => {
     try {
-      const git = getGit()
+      const git = getGit(event)
       const res = await git.branchLocal()
       return {
         current: res.current || '',
@@ -223,9 +227,9 @@ export function registerGitHandlers(): void {
   })
 
   // git:checkout (branch) -> git.checkout(branch)
-  ipcMain.handle('git:checkout', async (_event, branch: string): Promise<void> => {
+  ipcMain.handle('git:checkout', async (event, branch: string): Promise<void> => {
     try {
-      const git = getGit()
+      const git = getGit(event)
       await git.checkout(branch)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -234,9 +238,9 @@ export function registerGitHandlers(): void {
   })
 
   // git:commitDetails (hash) -> GitCommitDetail
-  ipcMain.handle('git:commitDetails', async (_event, hash: string): Promise<GitCommitDetail> => {
+  ipcMain.handle('git:commitDetails', async (event, hash: string): Promise<GitCommitDetail> => {
     try {
-      const git = getGit()
+      const git = getGit(event)
       const raw = await git.raw([
         'show',
         '--name-status',
@@ -288,15 +292,16 @@ export function registerGitHandlers(): void {
   ipcMain.handle(
     'git:commitFileDiff',
     async (
-      _event,
+      event,
       hash: string,
       filePath: string,
       parentHash?: string
     ): Promise<{ original: string; modified: string }> => {
       try {
-        const git = getGit()
+        const ws = getWorkspaceForEvent(event)
+        const git = getGit(event)
         let relPath = path.isAbsolute(filePath)
-          ? path.relative(workspace.root, filePath)
+          ? path.relative(ws, filePath)
           : filePath
         relPath = relPath.replace(/\\/g, '/')
 

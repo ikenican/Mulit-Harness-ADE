@@ -89,11 +89,15 @@ const api = {
   },
   // 儀表板與使用量統計 —— main/ipc/dashboard.ts
   dashboard: {
-    data: (): Promise<DashboardData> => ipcRenderer.invoke('dashboard:data'),
+    data: (force?: boolean): Promise<DashboardData> => ipcRenderer.invoke('dashboard:data', force),
     archiveSession: (sessionId: string, archive: boolean): Promise<boolean> =>
       ipcRenderer.invoke('dashboard:archiveSession', sessionId, archive),
+    archiveSessions: (sessionIds: string[], archive: boolean): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:archiveSessions', sessionIds, archive),
     deleteSession: (sessionId: string): Promise<boolean> =>
-      ipcRenderer.invoke('dashboard:deleteSession', sessionId)
+      ipcRenderer.invoke('dashboard:deleteSession', sessionId),
+    deleteSessions: (sessionIds: string[]): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:deleteSessions', sessionIds)
   },
   // Git —— main/ipc/git.ts
   git: {
@@ -146,6 +150,8 @@ const api = {
   window: {
     detachTerminal: (): Promise<boolean> => ipcRenderer.invoke('window:openTerminalWindow'),
     attachTerminal: (): Promise<boolean> => ipcRenderer.invoke('window:closeTerminalWindow'),
+    openProjectWindow: (workspacePath?: string): Promise<boolean> =>
+      ipcRenderer.invoke('window:openProjectWindow', workspacePath),
     setTitleBarTheme: (theme: 'light' | 'dark'): Promise<boolean> =>
       ipcRenderer.invoke('window:setTitleBarTheme', theme),
     onTerminalAttached: (cb: () => void): (() => void) => {

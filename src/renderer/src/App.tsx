@@ -19,7 +19,7 @@ import {
   IconMinimize,
   IconClose
 } from '@/components/Icons'
-import { toggleCenterMaximized, useWorkbench, openSettings, closeSettings, setSidebarTab } from '@/store'
+import { toggleCenterMaximized, useWorkbench, openSettings, closeSettings, setSidebarTab, setWorkspaceRoot } from '@/store'
 import { useTranslation } from '@/i18n'
 import {
   clamp,
@@ -53,6 +53,30 @@ export default function App(): JSX.Element {
   const [browserOpened, setBrowserOpened] = useState(false)
   const { centerMaximized, terminalOpenSession, settingsModal, sidebarTab } = useWorkbench()
   const { t } = useTranslation()
+
+  // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search)
+    const wsParam = urlParams.get('workspace')
+    if (wsParam) {
+      setWorkspaceRoot(wsParam)
+      setSidebarTab('files')
+    }
+  }, [])
+
+  // 全域快捷鍵：Ctrl+Shift+N (Cmd+Shift+N) 開啟新專案視窗（如同 VS Code）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'N' || e.key === 'n')) {
+        e.preventDefault()
+        if (window.api?.window?.openProjectWindow) {
+          window.api.window.openProjectWindow()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   // 記錄已造訪過的面板，實現「按需掛載（Mount-On-Demand）+ 狀態保留（Keep-Alive）」
   // 啟動時不掛載未造訪的次要面板（如 Git、Preview、Memory），大幅縮短首屏載入時間與消除開機子行程搶佔

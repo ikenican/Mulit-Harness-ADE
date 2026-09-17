@@ -6,7 +6,7 @@ import type {
   AgentUsageSummary
 } from '../../../../preload/index'
 import AgentMark from '@/components/AgentMark'
-import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical } from '@/components/Icons'
+import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical, IconWindowNew } from '@/components/Icons'
 import AppleAlertDialog from '@/components/AppleAlertDialog'
 import { openTerminalSession, setDraggedSession, useWorkbench, switchWorkspace, setSidebarTab, openSettings } from '@/store'
 import { useTranslation } from '@/i18n'
@@ -60,6 +60,32 @@ export default function DashboardPanel(): JSX.Element {
   const [sessionToDelete, setSessionToDelete] = useState<AgentSessionInfo | null>(null)
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [dragOverFolderKey, setDragOverFolderKey] = useState<string | null>(null)
+  const [folderOrder, setFolderOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('agent-workbench:dashboard-folder-order')
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const [draggedFolderKey, setDraggedFolderKey] = useState<string | null>(null)
+  const [dragOverFolderTarget, setDragOverFolderTarget] = useState<{
+    key: string
+    pos: 'top' | 'bottom'
+  } | null>(null)
+  const [folderContextMenu, setFolderContextMenu] = useState<{
+    key: string
+    name: string
+    path?: string
+    sessions: AgentSessionInfo[]
+    x: number
+    y: number
+  } | null>(null)
+  const [folderToDelete, setFolderToDelete] = useState<{
+    key: string
+    name: string
+    sessions: AgentSessionInfo[]
+  } | null>(null)
 
   // 自訂會話排序（各分組 key 對應之 session ID 陣列）與自訂分組覆寫，支援本地持久化
   const [customOrder, setCustomOrder] = useState<Record<string, string[]>>(() => {
@@ -87,10 +113,22 @@ export default function DashboardPanel(): JSX.Element {
     codex: true
   })
 
-  const loadData = useCallback(async (silent = false) => {
+  // 關閉右鍵選單
+  useEffect(() => {
+    if (!folderContextMenu) return
+    const closeMenu = (): void => setFolderContextMenu(null)
+    window.addEventListener('mousedown', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.removeEventListener('mousedown', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [folderContextMenu])
+
+  const loadData = useCallback(async (silent = false, force = false) => {
     if (!silent) setLoading(true)
     try {
-      const res = await window.api.dashboard.data()
+      const res = await window.api.dashboard.data(force)
       setData(res)
       setLastRefreshed(new Date().toLocaleTimeString())
     } catch (e) {
@@ -268,8 +306,15 @@ export default function DashboardPanel(): JSX.Element {
     }
 
     const list = Array.from(map.values())
-    // 排序：當前工作區置頂，其次為含有活躍 Session 者，最後依各組中最新 session 排序
+    // 排序：若有手動自訂資料夾順序則優先套用，其餘則當前工作區置頂，其次為含有活躍 Session 者，最後依各組中最新 session 排序
     list.sort((a, b) => {
+      if (folderOrder.length > 0) {
+        const idxA = folderOrder.indexOf(a.key)
+        const idxB = folderOrder.indexOf(b.key)
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB
+        if (idxA !== -1) return -1
+        if (idxB !== -1) return 1
+      }
       if (a.isCurrentWorkspace && !b.isCurrentWorkspace) return -1
       if (!a.isCurrentWorkspace && b.isCurrentWorkspace) return 1
       if (a.activeCount > 0 && b.activeCount === 0) return -1
@@ -280,7 +325,34 @@ export default function DashboardPanel(): JSX.Element {
     })
 
     return list
-  }, [displayedSessions, workspaceRoot, customOrder, folderOverrides])
+  }, [displayedSessions, workspaceRoot, customOrder, folderOverrides, folderOrder])
+
+  // 處理在 Dashboard 視窗內拖曳資料夾重新排序
+  const handleReorderFolder = useCallback(
+    (sourceKey: string, targetKey: string, pos: 'top' | 'bottom') => {
+      if (sourceKey === targetKey) return
+      setFolderOrder((prev) => {
+        const currentKeys = folderGroups.map((g) => g.key)
+        const baseOrder = prev.length > 0 ? [...prev] : [...currentKeys]
+        for (const k of currentKeys) {
+          if (!baseOrder.includes(k)) baseOrder.push(k)
+        }
+        const filtered = baseOrder.filter((k) => k !== sourceKey)
+        const targetIdx = filtered.indexOf(targetKey)
+        if (targetIdx === -1) {
+          filtered.push(sourceKey)
+        } else {
+          const insertIdx = pos === 'top' ? targetIdx : targetIdx + 1
+          filtered.splice(insertIdx, 0, sourceKey)
+        }
+        try {
+          localStorage.setItem('agent-workbench:dashboard-folder-order', JSON.stringify(filtered))
+        } catch {}
+        return filtered
+      })
+    },
+    [folderGroups]
+  )
 
   // 處理在 Dashboard 視窗內拖曳卡片重新排序與跨群組移動
   const handleReorderSession = useCallback(
@@ -405,7 +477,7 @@ export default function DashboardPanel(): JSX.Element {
             {lastRefreshed ? t('dashboard.updatedAt', { time: lastRefreshed }) : t('dashboard.analyzingSessions')}
           </span>
         </div>
-        <button className="dash-refresh-btn" onClick={() => loadData(false)} disabled={loading} title={t('dashboard.refreshTooltip')}>
+        <button className="dash-refresh-btn" onClick={() => loadData(false, true)} disabled={loading} title={t('dashboard.refreshTooltip')}>
           <span className={loading ? 'dash-spinning' : ''}>↻</span>
         </button>
       </div>
@@ -650,12 +722,27 @@ export default function DashboardPanel(): JSX.Element {
           <div className="dash-session-list">
             {folderGroups.map((group) => {
               const isCollapsed = collapsedFolders.has(group.key)
+              const isDraggingThis = draggedFolderKey === group.key
+              const dropIndicator = dragOverFolderTarget?.key === group.key ? dragOverFolderTarget.pos : null
               return (
                 <div
                   key={group.key}
-                  className={`dash-folder-group ${group.isCurrentWorkspace ? 'is-current' : ''} ${dragOverFolderKey === group.key ? 'drag-over-folder' : ''}`}
+                  className={`dash-folder-group ${group.isCurrentWorkspace ? 'is-current' : ''} ${
+                    isDraggingThis ? 'is-dragging' : ''
+                  } ${dropIndicator ? `drag-over-folder-${dropIndicator}` : ''} ${
+                    dragOverFolderKey === group.key ? 'drag-over-folder' : ''
+                  }`}
                   onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes('application/x-dashboard-session-id')) {
+                    if (e.dataTransfer.types.includes('application/x-dashboard-folder-key')) {
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                      const rect = e.currentTarget.getBoundingClientRect()
+                      const midY = rect.top + rect.height / 2
+                      const pos: 'top' | 'bottom' = e.clientY < midY ? 'top' : 'bottom'
+                      if (dragOverFolderTarget?.key !== group.key || dragOverFolderTarget?.pos !== pos) {
+                        setDragOverFolderTarget({ key: group.key, pos })
+                      }
+                    } else if (e.dataTransfer.types.includes('application/x-dashboard-session-id')) {
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'move'
                       if (dragOverFolderKey !== group.key) {
@@ -665,29 +752,75 @@ export default function DashboardPanel(): JSX.Element {
                   }}
                   onDragLeave={(e) => {
                     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      if (dragOverFolderTarget?.key === group.key) {
+                        setDragOverFolderTarget(null)
+                      }
                       if (dragOverFolderKey === group.key) {
                         setDragOverFolderKey(null)
                       }
                     }
                   }}
                   onDrop={(e) => {
-                    const draggedId = e.dataTransfer.getData('application/x-dashboard-session-id')
-                    if (draggedId) {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setDragOverFolderKey(null)
-                      handleReorderSession(draggedId, null, 'inside', group.key)
+                    if (e.dataTransfer.types.includes('application/x-dashboard-folder-key')) {
+                      const srcKey = e.dataTransfer.getData('application/x-dashboard-folder-key')
+                      if (srcKey) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const pos = dragOverFolderTarget?.pos || 'bottom'
+                        setDragOverFolderTarget(null)
+                        setDraggedFolderKey(null)
+                        handleReorderFolder(srcKey, group.key, pos)
+                      }
+                    } else {
+                      const draggedId = e.dataTransfer.getData('application/x-dashboard-session-id')
+                      if (draggedId) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setDragOverFolderKey(null)
+                        handleReorderSession(draggedId, null, 'inside', group.key)
+                      }
                     }
                   }}
                 >
                   <div
                     className={`dash-folder-header ${isCollapsed ? 'collapsed' : 'expanded'}`}
                     onClick={() => toggleFolderCollapse(group.key)}
-                    title={`Click to ${isCollapsed ? 'expand' : 'collapse'} sessions in ${group.name}${group.path ? ` (${group.path})` : ''}`}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setFolderContextMenu({
+                        key: group.key,
+                        name: group.name,
+                        path: group.path,
+                        sessions: group.sessions,
+                        x: e.clientX,
+                        y: e.clientY
+                      })
+                    }}
+                    title={`Click to ${isCollapsed ? 'expand' : 'collapse'} sessions in ${group.name}${group.path ? ` (${group.path})` : ''} • Right-click for options`}
                   >
-                    {/* Top Row: Chevron, Folder Icon, Name, and Total Tokens */}
+                    {/* Top Row: Grip, Chevron, Folder Icon, Name, and Total Tokens */}
                     <div className="dash-folder-top">
                       <div className="dash-folder-title-left">
+                        {/* Drag grip for folder reordering */}
+                        <span
+                          className="dash-folder-drag-handle"
+                          draggable={true}
+                          onDragStart={(e) => {
+                            e.stopPropagation()
+                            e.dataTransfer.setData('application/x-dashboard-folder-key', group.key)
+                            e.dataTransfer.effectAllowed = 'move'
+                            setDraggedFolderKey(group.key)
+                          }}
+                          onDragEnd={() => {
+                            setDraggedFolderKey(null)
+                            setDragOverFolderTarget(null)
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          title="Drag to reorder folder"
+                        >
+                          <IconGripVertical size={13} />
+                        </span>
                         <span className={`dash-folder-chevron ${isCollapsed ? '' : 'expanded'}`}>
                           <svg
                             width="12"
@@ -729,22 +862,38 @@ export default function DashboardPanel(): JSX.Element {
                           {group.sessions.length} {group.sessions.length === 1 ? t('dashboard.sessionSingular') : t('dashboard.sessionPlural')}
                         </span>
                       </div>
-                      {group.path && !group.isCurrentWorkspace && (
-                        <button
-                          type="button"
-                          className="dash-folder-switch-btn"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            if (group.path) {
-                              switchWorkspace(group.path)
-                            } else {
-                              setSidebarTab('files')
-                            }
-                          }}
-                          title={`${t('dashboard.switchFolder')}: ${group.path}`}
-                        >
-                          <span>{t('dashboard.switchFolder')} ➔</span>
-                        </button>
+                      {group.path && (
+                        <div className="dash-folder-actions" onClick={(e) => e.stopPropagation()}>
+                          {!group.isCurrentWorkspace && (
+                            <button
+                              type="button"
+                              className="dash-folder-switch-btn"
+                              onClick={() => {
+                                if (group.path) {
+                                  switchWorkspace(group.path)
+                                } else {
+                                  setSidebarTab('files')
+                                }
+                              }}
+                              title={`${t('dashboard.switchFolder')}: ${group.path}`}
+                            >
+                              <span>{t('dashboard.switchFolder')} ➔</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="dash-folder-open-window-btn"
+                            onClick={() => {
+                              if (group.path && window.api?.window?.openProjectWindow) {
+                                window.api.window.openProjectWindow(group.path)
+                              }
+                            }}
+                            title={`${t('dashboard.openFolderInNewWindow')}: ${group.path}`}
+                          >
+                            <IconWindowNew size={11} />
+                            <span>{t('dashboard.openProjectWindow')}</span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -824,6 +973,96 @@ export default function DashboardPanel(): JSX.Element {
         onConfirm={handleConfirmDelete}
         onClose={() => setSessionToDelete(null)}
       />
+
+      {/* Folder Batch Delete Confirmation Dialog */}
+      <AppleAlertDialog
+        isOpen={Boolean(folderToDelete)}
+        title={t('dashboard.deleteFolderDialogTitle', { name: folderToDelete?.name || '' })}
+        description={t('dashboard.deleteFolderDialogDesc', {
+          count: folderToDelete?.sessions.length || 0,
+          name: folderToDelete?.name || ''
+        })}
+        confirmLabel={t('dashboard.deleteFolderConfirm')}
+        cancelLabel={t('common.cancel')}
+        isDestructive={true}
+        onConfirm={async () => {
+          if (!folderToDelete) return
+          const ids = folderToDelete.sessions.map((s) => s.id)
+          setFolderToDelete(null)
+          await window.api.dashboard.deleteSessions(ids)
+          await loadData(true)
+        }}
+        onClose={() => setFolderToDelete(null)}
+      />
+
+      {/* Folder Header Context Menu */}
+      {folderContextMenu && (
+        <>
+          <div
+            className="dash-context-menu-backdrop"
+            onClick={() => setFolderContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setFolderContextMenu(null)
+            }}
+          />
+          <div
+            className="dash-context-menu"
+            style={{
+              top: Math.min(folderContextMenu.y, window.innerHeight - 100),
+              left: Math.min(folderContextMenu.x, window.innerWidth - 220)
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {folderContextMenu.path && (
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={() => {
+                  const targetPath = folderContextMenu.path
+                  setFolderContextMenu(null)
+                  if (targetPath && window.api?.window?.openProjectWindow) {
+                    window.api.window.openProjectWindow(targetPath)
+                  }
+                }}
+              >
+                <IconWindowNew size={13} />
+                <span>{t('dashboard.openFolderInNewWindow')}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="dash-context-item"
+              onClick={async () => {
+                const { sessions } = folderContextMenu
+                setFolderContextMenu(null)
+                const isArchiving = viewFilter !== 'archived'
+                await window.api.dashboard.archiveSessions(
+                  sessions.map((s) => s.id),
+                  isArchiving
+                )
+                await loadData(true)
+              }}
+            >
+              <IconArchive size={13} />
+              <span>{viewFilter === 'archived' ? t('dashboard.restoreFolder') : t('dashboard.archiveFolder')}</span>
+            </button>
+            <div className="dash-context-divider" />
+            <button
+              type="button"
+              className="dash-context-item is-destructive"
+              onClick={() => {
+                const target = { ...folderContextMenu }
+                setFolderContextMenu(null)
+                setFolderToDelete(target)
+              }}
+            >
+              <IconTrash size={13} />
+              <span>{t('dashboard.deleteFolder')}</span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1016,19 +1255,36 @@ function SessionCard({
               {session.workspace && (
                 <>
                   <span>•</span>
-                  <button
-                    type="button"
-                    className="dash-session-workspace"
-                    onClick={handleWorkspaceClick}
-                    title={
-                      session.workspacePath
-                        ? `${t('dashboard.switchFolder')}: ${session.workspacePath}`
-                        : `${t('dashboard.switchFolder')}: ${session.workspace}`
-                    }
-                  >
-                    <IconFolder size={11} />
-                    <span>{session.workspace}</span>
-                  </button>
+                  <div className="dash-session-ws-group">
+                    <button
+                      type="button"
+                      className="dash-session-workspace"
+                      onClick={handleWorkspaceClick}
+                      title={
+                        session.workspacePath
+                          ? `${t('dashboard.switchFolder')}: ${session.workspacePath}`
+                          : `${t('dashboard.switchFolder')}: ${session.workspace}`
+                      }
+                    >
+                      <IconFolder size={11} />
+                      <span>{session.workspace}</span>
+                    </button>
+                    {session.workspacePath && (
+                      <button
+                        type="button"
+                        className="dash-session-open-window-btn"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (session.workspacePath && window.api?.window?.openProjectWindow) {
+                            window.api.window.openProjectWindow(session.workspacePath)
+                          }
+                        }}
+                        title={`${t('dashboard.openFolderInNewWindow')}: ${session.workspacePath}`}
+                      >
+                        <IconWindowNew size={10} />
+                      </button>
+                    )}
+                  </div>
                 </>
               )}
               <span>•</span>

@@ -5,11 +5,12 @@ import * as path from 'path'
 import * as yaml from 'js-yaml'
 import * as crypto from 'crypto'
 import { execFileSync } from 'child_process'
-import { workspace } from '../index'
+import { workspace, getWorkspaceForEvent } from '../index'
 import { resolveConnectionEnv } from './conn'
 import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
 
 const ptySessions = new Map<string, pty.IPty>()
+const ptyWindowSenders = new Map<string, number>() // ptyId -> webContents.id
 
 export interface ActiveSessionMeta {
   id: string
@@ -25,6 +26,20 @@ const ptySessionMetas = new Map<string, ActiveSessionMeta>()
 
 export function getActiveSessionMetas(): ActiveSessionMeta[] {
   return Array.from(ptySessionMetas.values())
+}
+
+export function cleanupPtyForWindow(webContentsId: number): void {
+  for (const [id, senderId] of Array.from(ptyWindowSenders.entries())) {
+    if (senderId === webContentsId) {
+      const session = ptySessions.get(id)
+      if (session) {
+        hardKill(session)
+      }
+      ptySessions.delete(id)
+      ptySessionMetas.delete(id)
+      ptyWindowSenders.delete(id)
+    }
+  }
 }
 
 const isWin = process.platform === 'win32'
@@ -165,8 +180,9 @@ app.on('before-quit', () => {
 })
 
 export function registerPtyHandlers(): void {
-  ipcMain.handle('pty:launchers', async () => {
-    const agentsDir = path.join(workspace.root, 'agents')
+  ipcMain.handle('pty:launchers', async (event) => {
+    const ws = getWorkspaceForEvent(event)
+    const agentsDir = path.join(ws, 'agents')
     const launchers: CliLauncher[] = []
     
     if (!fs.existsSync(agentsDir)) {
@@ -216,7 +232,8 @@ export function registerPtyHandlers(): void {
     }
     
     if (opts.launcherId) {
-      const agentsDir = path.join(workspace.root, 'agents')
+      const ws = getWorkspaceForEvent(event)
+      const agentsDir = path.join(ws, 'agents')
       if (fs.existsSync(agentsDir)) {
         const files = fs.readdirSync(agentsDir)
         for (const file of files) {
@@ -283,7 +300,8 @@ export function registerPtyHandlers(): void {
     const rows = opts.rows || 24
     
     try {
-      const spawnCwd = opts.cwd && fs.existsSync(opts.cwd) ? opts.cwd : workspace.root
+      const ws = getWorkspaceForEvent(event)
+      const spawnCwd = opts.cwd && fs.existsSync(opts.cwd) ? opts.cwd : ws
       const ptyProcess = pty.spawn(command, args, {
         name: 'xterm-color',
         cols,
@@ -293,6 +311,7 @@ export function registerPtyHandlers(): void {
       })
       
       ptySessions.set(id, ptyProcess)
+      ptyWindowSenders.set(id, event.sender.id)
       ptySessionMetas.set(id, {
         id,
         command: opts.command || opts.launcherId || 'shell',
@@ -309,16 +328,25 @@ export function registerPtyHandlers(): void {
       // 共用的 ptySessions，繼續吐 data/exit 事件。這時候再對已銷毀的 webContents
       // 呼叫 .send() 會丟出未捕捉例外，直接讓整個 main process 崩潰。
       ptyProcess.onData((data) => {
-        if (event.sender.isDestroyed()) return
-        event.sender.send(`pty:data:${id}`, data)
+        try {
+          if (event.sender.isDestroyed()) return
+          event.sender.send(`pty:data:${id}`, data)
+        } catch {
+          // ignore destroyed sender
+        }
       })
 
       ptyProcess.onExit(({ exitCode }) => {
-        if (!event.sender.isDestroyed()) {
-          event.sender.send(`pty:exit:${id}`, exitCode)
+        try {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send(`pty:exit:${id}`, exitCode)
+          }
+        } catch {
+          // ignore destroyed sender
         }
         ptySessions.delete(id)
         ptySessionMetas.delete(id)
+        ptyWindowSenders.delete(id)
       })
       
       return id
@@ -353,12 +381,13 @@ export function registerPtyHandlers(): void {
     return true
   })
 
-  ipcMain.on('pty:kill', (event, id: string) => {
+  ipcMain.on('pty:kill', (_event, id: string) => {
     const session = ptySessions.get(id)
     if (session) {
       hardKill(session)
       ptySessions.delete(id)
       ptySessionMetas.delete(id)
+      ptyWindowSenders.delete(id)
     }
   })
 }

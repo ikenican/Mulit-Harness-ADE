@@ -37,9 +37,11 @@ export function isInstalledApp(): boolean {
 
 function broadcastStatus(): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
-      win.webContents.send('updater:statusChange', updaterStatus)
-    }
+    try {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+        win.webContents.send('updater:statusChange', updaterStatus)
+      }
+    } catch {}
   }
 }
 

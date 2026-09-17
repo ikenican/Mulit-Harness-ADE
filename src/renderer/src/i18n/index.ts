@@ -158,6 +158,12 @@ export const translations = {
       deleteDialogTitle: 'Delete Session Record?',
       deleteDialogDesc: "This will permanently delete this session's telemetry and token metrics from the dashboard. This action cannot be undone.",
       deleteConfirm: 'Delete Record',
+      archiveFolder: 'Archive All Sessions in Folder',
+      restoreFolder: 'Restore All Sessions in Folder',
+      deleteFolder: 'Delete All Sessions in Folder',
+      deleteFolderDialogTitle: 'Delete All Sessions in {name}?',
+      deleteFolderDialogDesc: 'This will permanently delete all {count} sessions under "{name}" from the dashboard. This action cannot be undone.',
+      deleteFolderConfirm: 'Delete All Sessions',
       analysisBadge: 'ANALYSIS',
       contextPrompt: 'Context & Prompts',
       toolExecution: 'Tool Execution',
@@ -169,7 +175,9 @@ export const translations = {
       statusCompleted: 'Completed',
       statusIdle: 'Idle',
       statusWaitingApproval: 'Needs Approval',
-      switchFolder: 'Switch to folder'
+      switchFolder: 'Switch to folder',
+      openProjectWindow: 'Open project',
+      openFolderInNewWindow: 'Open in new project window'
     },
     fileTree: {
       openFolder: 'Open Folder',
@@ -219,7 +227,12 @@ export const translations = {
       splitCols2: 'Split V',
       splitRows2: 'Split H',
       splitGrid4: 'Grid',
-      awaitingApproval: '{count} Awaiting Approval'
+      awaitingApproval: '{count} Awaiting Approval',
+      copy: 'Copy',
+      paste: 'Paste',
+      selectAll: 'Select All',
+      clearBuffer: 'Clear Terminal',
+      killSession: 'Kill / Close Session'
     },
     browser: {
       serverNotRunning: 'Local Dev Server Not Running',
@@ -386,6 +399,12 @@ export const translations = {
       deleteDialogTitle: '確定刪除會話紀錄？',
       deleteDialogDesc: '這將從儀表板中永久移除此會話的遙測紀錄與 Token 統計數據。此動作無法復原。',
       deleteConfirm: '確認刪除',
+      archiveFolder: '封存此資料夾的所有會話',
+      restoreFolder: '還原此資料夾的所有會話',
+      deleteFolder: '刪除此資料夾的所有會話',
+      deleteFolderDialogTitle: '確定刪除「{name}」的所有會話紀錄？',
+      deleteFolderDialogDesc: '這將從儀表板中永久移除「{name}」資料夾下的全部 {count} 個會話紀錄與 Token 統計數據。此動作無法復原。',
+      deleteFolderConfirm: '確認刪除全部會話',
       analysisBadge: '分析統計',
       contextPrompt: '系統與上下文提示詞',
       toolExecution: '工具執行與檔案讀寫',
@@ -397,7 +416,9 @@ export const translations = {
       statusCompleted: '已完成',
       statusIdle: '閒置',
       statusWaitingApproval: '等待授權',
-      switchFolder: '切換資料夾'
+      switchFolder: '切換資料夾',
+      openProjectWindow: '開啟專案',
+      openFolderInNewWindow: '在新專案視窗開啟'
     },
     fileTree: {
       openFolder: '開啟資料夾',
@@ -447,7 +468,12 @@ export const translations = {
       splitCols2: '垂直分割',
       splitRows2: '水平分割',
       splitGrid4: '四格分割',
-      awaitingApproval: '{count} 個等待授權'
+      awaitingApproval: '{count} 個等待授權',
+      copy: '複製',
+      paste: '貼上',
+      selectAll: '全選',
+      clearBuffer: '清除畫面',
+      killSession: '中斷 / 關閉終端'
     },
     browser: {
       serverNotRunning: '本地開發伺服器未啟動',
