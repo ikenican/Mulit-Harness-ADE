@@ -134,7 +134,22 @@ if (Test-Path "release\win-unpacked") {
         Remove-Item $portableZip -Force
     }
     Write-Host "Compressing release\win-unpacked -> $portableZip..." -ForegroundColor Gray
-    Compress-Archive -Path "release\win-unpacked\*" -DestinationPath $portableZip -Force
+    $retries = 5
+    $success = $false
+    for ($i = 1; $i -le $retries; $i++) {
+        try {
+            Compress-Archive -Path "release\win-unpacked\*" -DestinationPath $portableZip -Force
+            $success = $true
+            break
+        } catch {
+            Write-Host "  -> Attempt $i failed due to transient file lock, waiting 3s to retry..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 3
+        }
+    }
+    if (-not $success) {
+        Write-Host "[ERROR] Failed to create portable zip package after $retries attempts." -ForegroundColor Red
+        exit 1
+    }
     $zipSizeMB = [math]::Round((Get-Item $portableZip).Length / 1MB, 2)
     Write-Host "[OK] Portable ZIP package created ($zipSizeMB MB)." -ForegroundColor Green
 } else {
