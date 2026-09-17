@@ -179,7 +179,8 @@ export default function SettingsModal({
     cliPaths: { claude: '', antigravity: '', codex: '', powershell: '', cmd: '' },
     cliEnabled: { claude: true, antigravity: true, codex: true, powershell: true, cmd: true },
     cliBypassPermissions: false,
-    docToolPaths: { word: '', excel: '', powerpoint: '', pdf: '' }
+    docToolPaths: { word: '', excel: '', powerpoint: '', pdf: '' },
+    autoCheckUpdates: true
   })
   const [detectedPaths, setDetectedPaths] = useState<Record<string, string>>({
     claude: '',
@@ -700,6 +701,20 @@ export default function SettingsModal({
 
   const handleOpenReleasePage = (): void => {
     window.api.updater.openRelease()
+  }
+
+  const handleToggleAutoCheck = (checked: boolean): void => {
+    setSettings((prev) => {
+      const nextSettings: WorkbenchSettings = {
+        ...prev,
+        autoCheckUpdates: checked
+      }
+      window.api.settings.set(nextSettings).catch((err) => {
+        console.error('Failed to save autoCheckUpdates setting:', err)
+      })
+      bumpSettings()
+      return nextSettings
+    })
   }
 
   return (
@@ -1679,9 +1694,7 @@ export default function SettingsModal({
                             <input
                               type="checkbox"
                               checked={settings.autoCheckUpdates ?? true}
-                              onChange={(e) =>
-                                setSettings((prev) => ({ ...prev, autoCheckUpdates: e.target.checked }))
-                              }
+                              onChange={(e) => handleToggleAutoCheck(e.target.checked)}
                             />
                             <span className="apple-toggle-slider" />
                           </label>

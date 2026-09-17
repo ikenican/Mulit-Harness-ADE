@@ -133,7 +133,7 @@ export const translations = {
       restartAndUpdate: 'Restart & Install Update',
       downloadPortablePackage: 'Download New Portable Package',
       autoCheckUpdates: 'Automatically check for updates on startup',
-      autoCheckUpdatesDesc: 'Check GitHub Releases periodically and notify when an update is available',
+      autoCheckUpdatesDesc: 'Check GitHub Releases and notify when an update is available (without auto-downloading)',
       openGithubReleases: 'View GitHub Releases',
       footerAboutHint: 'Updates are fetched directly from official GitHub Releases.'
     },
@@ -386,7 +386,7 @@ export const translations = {
       restartAndUpdate: '立即重啟並安裝更新',
       downloadPortablePackage: '下載免安裝更新包',
       autoCheckUpdates: '啟動時自動檢查更新',
-      autoCheckUpdatesDesc: '定期比對 GitHub Releases 並在有新版本時主動提示',
+      autoCheckUpdatesDesc: '比對 GitHub Releases 並在有新版本時主動提示（絕不自動下載）',
       openGithubReleases: '前往 GitHub Releases 頁面',
       footerAboutHint: '更新資訊與安裝檔均直接自 GitHub Releases 官方發布下載。'
     },

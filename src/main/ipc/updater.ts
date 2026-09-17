@@ -2,11 +2,11 @@ import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { autoUpdater, UpdateInfo as ElectronUpdateInfo, ProgressInfo } from 'electron-updater'
 import * as fs from 'fs'
 import { join, dirname } from 'path'
-import { isProtectedPath } from './settings'
+import { isProtectedPath, loadSettings } from './settings'
 import type { UpdaterStatus, UpdateInfo } from '../../preload/index'
 
 let updaterStatus: UpdaterStatus = {
-  currentVersion: app.getVersion() || '0.1.6',
+  currentVersion: app.getVersion() || '0.1.12',
   isPackaged: app.isPackaged,
   isInstalled: false,
   checking: false,
@@ -101,7 +101,7 @@ export function registerUpdaterHandlers(): void {
     broadcastStatus()
   })
 
-  autoUpdater.on('update-available', (info: ElectronUpdateInfo) => {
+    autoUpdater.on('update-available', (info: ElectronUpdateInfo) => {
     updaterStatus.checking = false
     updaterStatus.updateAvailable = true
     updaterStatus.updateInfo = {
@@ -112,18 +112,6 @@ export function registerUpdaterHandlers(): void {
       downloadUrl: 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
     }
     broadcastStatus()
-
-    // 若為安裝版且非手動停用，可自動開始下載更新
-    if (updaterStatus.isInstalled && !updaterStatus.isDownloading && !updaterStatus.updateDownloaded) {
-      updaterStatus.isDownloading = true
-      broadcastStatus()
-      autoUpdater.downloadUpdate().catch((err) => {
-        console.warn('[Updater] Auto download failed:', err)
-        updaterStatus.isDownloading = false
-        updaterStatus.error = err instanceof Error ? err.message : String(err)
-        broadcastStatus()
-      })
-    }
   })
 
   autoUpdater.on('update-not-available', () => {
@@ -273,11 +261,18 @@ function formatUpdaterError(msg: string): string {
     await shell.openExternal(url)
   })
 
-  // 應用程式啟動 5 秒後自動靜默檢查一次更新。
-  // 不可用 ipcMain.emit('updater:check')：emit 只觸發 ipcMain.on 的 listener，
-  // 碰不到 ipcMain.handle 註冊的 invoke handler，等於整段開機自動檢查從未執行過。
+  // 應用程式啟動 5 秒後若使用者開啟 autoCheckUpdates，執行一次靜默檢查（僅提示，絕不自動下載）
   setTimeout(() => {
     if (app.isPackaged) {
+      try {
+        const settings = loadSettings()
+        if (settings.autoCheckUpdates === false) {
+          console.log('[Updater] Startup check skipped: autoCheckUpdates is disabled.')
+          return
+        }
+      } catch (err) {
+        console.warn('[Updater] Failed to read autoCheckUpdates setting:', err)
+      }
       performCheck().catch((e) => console.warn('[Updater] startup check failed:', e))
     }
   }, 5000)
