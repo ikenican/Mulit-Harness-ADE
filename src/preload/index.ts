@@ -67,6 +67,12 @@ const api = {
     get: (): Promise<WorkbenchSettings> => ipcRenderer.invoke('settings:get'),
     set: (patch: Partial<WorkbenchSettings>): Promise<WorkbenchSettings> =>
       ipcRenderer.invoke('settings:set', patch),
+    getRecentWorkspaces: (): Promise<string[]> =>
+      ipcRenderer.invoke('settings:getRecentWorkspaces'),
+    removeRecentWorkspace: (workspacePath: string): Promise<string[]> =>
+      ipcRenderer.invoke('settings:removeRecentWorkspace', workspacePath),
+    clearRecentWorkspaces: (): Promise<void> =>
+      ipcRenderer.invoke('settings:clearRecentWorkspaces'),
     testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
       ipcRenderer.invoke('settings:testCliPath', path),
     testDocToolPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
@@ -251,6 +257,7 @@ export interface WorkbenchSettings {
   autoOpenAgentModifiedFiles?: boolean
   language?: 'en' | 'zh-TW'
   lastWorkspace?: string
+  recentWorkspaces?: string[]
   autoCheckUpdates?: boolean
 }
 

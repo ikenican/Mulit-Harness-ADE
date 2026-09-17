@@ -168,6 +168,11 @@ export function loadSettings(): WorkbenchSettings {
     autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true,
     language: parsed.language === 'en' || parsed.language === 'zh-TW' ? parsed.language : undefined,
     lastWorkspace: typeof parsed.lastWorkspace === 'string' ? parsed.lastWorkspace : undefined,
+    recentWorkspaces: Array.isArray(parsed.recentWorkspaces)
+      ? parsed.recentWorkspaces
+          .filter((p: unknown): p is string => typeof p === 'string' && p.trim().length > 0 && !isProtectedPath(p))
+          .map((p: string) => resolve(p))
+      : undefined,
     autoCheckUpdates: parsed.autoCheckUpdates ?? true
   }
 }
@@ -211,6 +216,118 @@ export function saveLastWorkspace(dir: string): void {
     saveSettings({ ...s, lastWorkspace: dir })
   } catch (err) {
     console.warn('[Settings] Failed to save lastWorkspace:', err)
+  }
+}
+
+let jumpListUpdater: (() => void) | null = null
+
+export function setJumpListUpdater(fn: () => void): void {
+  jumpListUpdater = fn
+}
+
+export function notifyJumpListUpdate(): void {
+  if (jumpListUpdater) {
+    try {
+      jumpListUpdater()
+    } catch (e) {
+      console.warn('[Settings] Failed to notify jumpListUpdater:', e)
+    }
+  }
+}
+
+/**
+ * 取得最近使用過的工作區路徑清單（按最近使用排序，已過濾無效目錄與保護路徑）
+ */
+export function getRecentWorkspaces(): string[] {
+  try {
+    const s = loadSettings()
+    const list = s.recentWorkspaces || []
+    const results: string[] = []
+    const seen = new Set<string>()
+
+    for (const dir of list) {
+      if (!dir) continue
+      const norm = resolve(dir)
+      const key = norm.toLowerCase()
+      if (!seen.has(key) && fs.existsSync(norm) && !isProtectedPath(norm)) {
+        try {
+          if (fs.statSync(norm).isDirectory()) {
+            seen.add(key)
+            results.push(norm)
+          }
+        } catch {}
+      }
+    }
+
+    // 若為空，嘗試以 lastWorkspace 作為兜底
+    if (s.lastWorkspace && fs.existsSync(s.lastWorkspace) && !isProtectedPath(s.lastWorkspace)) {
+      const normLast = resolve(s.lastWorkspace)
+      if (!seen.has(normLast.toLowerCase())) {
+        try {
+          if (fs.statSync(normLast).isDirectory()) {
+            results.push(normLast)
+          }
+        } catch {}
+      }
+    }
+
+    return results
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 加入或更新最近專案工作區至清單頂端，並自動限制上限為 20 筆
+ */
+export function addRecentWorkspace(dir: string): void {
+  try {
+    if (!dir || isProtectedPath(dir) || !fs.existsSync(dir)) return
+    const norm = resolve(dir)
+    const stat = fs.statSync(norm)
+    if (!stat.isDirectory()) return
+
+    const s = loadSettings()
+    const existing = (s.recentWorkspaces || []).filter(
+      (p) => resolve(p).toLowerCase() !== norm.toLowerCase() && fs.existsSync(p) && !isProtectedPath(p)
+    )
+    const updated = [norm, ...existing].slice(0, 20)
+    saveSettings({ ...s, recentWorkspaces: updated, lastWorkspace: norm })
+    notifyJumpListUpdate()
+  } catch (err) {
+    console.warn('[Settings] Failed to add recentWorkspace:', err)
+  }
+}
+
+/**
+ * 從最近專案清單移除特定工作區
+ */
+export function removeRecentWorkspace(dir: string): string[] {
+  try {
+    const norm = resolve(dir).toLowerCase()
+    const s = loadSettings()
+    const updated = (s.recentWorkspaces || []).filter(
+      (p) => resolve(p).toLowerCase() !== norm
+    )
+    saveSettings({ ...s, recentWorkspaces: updated })
+    notifyJumpListUpdate()
+    return updated
+  } catch (err) {
+    console.warn('[Settings] Failed to remove recentWorkspace:', err)
+    return []
+  }
+}
+
+/**
+ * 清空最近專案清單
+ */
+export function clearRecentWorkspaces(): void {
+  try {
+    const s = loadSettings()
+    saveSettings({ ...s, recentWorkspaces: [] })
+    notifyJumpListUpdate()
+  } catch (err) {
+    console.warn('[Settings] Failed to clear recentWorkspaces:', err)
   }
 }
 
@@ -296,10 +413,27 @@ export function registerSettingsHandlers(): void {
         ...(patch.docToolPaths || {})
       },
       language: patch.language !== undefined ? patch.language : current.language,
-      lastWorkspace: patch.lastWorkspace !== undefined ? patch.lastWorkspace : current.lastWorkspace
+      lastWorkspace: patch.lastWorkspace !== undefined ? patch.lastWorkspace : current.lastWorkspace,
+      recentWorkspaces: patch.recentWorkspaces !== undefined ? patch.recentWorkspaces : current.recentWorkspaces
     }
     saveSettings(updated)
+    if (patch.language !== undefined || patch.recentWorkspaces !== undefined) {
+      notifyJumpListUpdate()
+    }
     return updated
+  })
+
+  ipcMain.handle('settings:getRecentWorkspaces', async (): Promise<string[]> => {
+    return getRecentWorkspaces()
+  })
+
+  ipcMain.handle('settings:removeRecentWorkspace', async (_e, workspacePath: string): Promise<string[]> => {
+    return removeRecentWorkspace(workspacePath)
+  })
+
+  ipcMain.handle('settings:clearRecentWorkspaces', async (): Promise<boolean> => {
+    clearRecentWorkspaces()
+    return true
   })
 
   ipcMain.handle('settings:testCliPath', async (_e, rawPath: string): Promise<{ ok: boolean; version?: string; error?: string }> => {

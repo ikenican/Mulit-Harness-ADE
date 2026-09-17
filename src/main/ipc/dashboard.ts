@@ -310,6 +310,58 @@ function saveDashboardCache(): void {
 }
 
 /**
+ * 從歷史 Agent 會話與快取中探索可用的專案工作區路徑（供 JumpList / 最近專案推薦）
+ */
+export function getRecentWorkspacesFromDashboard(): string[] {
+  const results = new Set<string>()
+
+  // 1. 從記憶體快取或檔案快取提取
+  try {
+    const cache = loadDashboardCache()
+    const sorted = Array.from(cache.values()).sort((a, b) => (b.mtime || 0) - (a.mtime || 0))
+    for (const entry of sorted) {
+      const p = entry.session.workspacePath
+      if (p && !isProtectedPath(p) && fs.existsSync(p)) {
+        try {
+          if (fs.statSync(p).isDirectory()) {
+            results.add(path.resolve(p))
+          }
+        } catch {}
+      }
+      if (results.size >= 10) break
+    }
+  } catch {}
+
+  // 2. 探測 ~/.claude/projects 目錄
+  try {
+    const claudeDir = join(H, '.claude', 'projects')
+    if (fs.existsSync(claudeDir)) {
+      const entries = fs.readdirSync(claudeDir, { withFileTypes: true })
+      const dirsWithTime: { name: string; mtime: number }[] = []
+      for (const e of entries) {
+        if (e.isDirectory() && e.name.match(/^[A-Za-z]--/)) {
+          try {
+            const st = fs.statSync(join(claudeDir, e.name))
+            dirsWithTime.push({ name: e.name, mtime: st.mtimeMs })
+          } catch {}
+        }
+      }
+      dirsWithTime.sort((a, b) => b.mtime - a.mtime)
+
+      for (const d of dirsWithTime) {
+        const decoded = extractClaudeWorkspace(d.name)
+        if (decoded.workspacePath && !isProtectedPath(decoded.workspacePath) && fs.existsSync(decoded.workspacePath)) {
+          results.add(path.resolve(decoded.workspacePath))
+        }
+        if (results.size >= 15) break
+      }
+    }
+  } catch {}
+
+  return Array.from(results)
+}
+
+/**
  * 讀取 Antigravity 本地會話日誌與真實 Token 概況（支援 mtime 快速快取）
  */
 function scanAntigravitySessions(max = 20): AgentSessionInfo[] {

@@ -3,6 +3,7 @@ out/
 dist/
 .deps/
 *.log
+electron.vite.config.*.mjs
 .DS_Store
 .hub_prompt.md
 
@@ -22,3 +23,4 @@ scratch/
 
 # 本機 AI 專案交接記憶（純本地使用，不進版控）
 .project-memory/
+node_modules

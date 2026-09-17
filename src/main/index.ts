@@ -12,9 +12,15 @@ import { registerPtyHandlers, cleanupPtyForWindow } from './ipc/pty'
 import { registerNotifyHandlers } from './ipc/notify'
 import { registerExtHandlers } from './ipc/ext'
 import { registerConnHandlers } from './ipc/conn'
-import { registerSettingsHandlers, getLastWorkspace, isProtectedPath, saveLastWorkspace } from './ipc/settings'
+import { registerSettingsHandlers, getLastWorkspace, isProtectedPath, saveLastWorkspace, addRecentWorkspace } from './ipc/settings'
 import { registerDashboardHandlers } from './ipc/dashboard'
 import { registerUpdaterHandlers } from './ipc/updater'
+import { initJumpList, parseCommandLineArgs } from './jumplist'
+
+// 在 Windows 最早期設定 Application User Model ID，確保工作列 Jump List 與釘選關聯正確
+if (process.platform === 'win32') {
+  app.setAppUserModelId('io.github.zkylek1212-k.agent-workbench')
+}
 
 function determineInitialWorkspace(): string {
   const last = getLastWorkspace()
@@ -77,6 +83,7 @@ export function setWorkspaceForWindow(win: BrowserWindow, newPath: string): void
   }
   defaultWorkspaceRoot = newPath
   saveLastWorkspace(newPath)
+  addRecentWorkspace(newPath)
 
   try {
     const name = path.basename(newPath)
@@ -158,6 +165,7 @@ export function createWindow(initialWorkspace?: string): BrowserWindow {
 
   projectWindows.set(winId, { window: win, workspaceRoot: ws })
   defaultWorkspaceRoot = ws
+  addRecentWorkspace(ws)
 
   // 掛載該視窗專屬的工作區檔案監聽
   attachWindowToWorkspace(winId, ws)
@@ -371,23 +379,12 @@ if (!gotTheLock) {
   app.quit()
 } else {
   app.on('second-instance', (_event, commandLine, workingDirectory) => {
-    // 檢查是否從命令列傳入了欲開啟的目錄路徑
-    let targetPath: string | undefined
-    for (let i = 1; i < commandLine.length; i++) {
-      const arg = commandLine[i]
-      if (arg && !arg.startsWith('-') && !arg.startsWith('--')) {
-        const candidate = path.isAbsolute(arg)
-          ? arg
-          : path.resolve(workingDirectory || process.cwd(), arg)
-        if (fs.existsSync(candidate) && !isProtectedPath(candidate)) {
-          targetPath = candidate
-          break
-        }
-      }
-    }
+    const { targetPath, isNewWindow } = parseCommandLineArgs(commandLine, workingDirectory)
 
     if (targetPath) {
       openProjectWindow(targetPath)
+    } else if (isNewWindow) {
+      openProjectWindow()
     } else {
       const win = getActiveProjectWindow()
       if (win && !win.isDestroyed()) {
@@ -409,7 +406,17 @@ if (!gotTheLock) {
     registerDashboardHandlers()
     registerUpdaterHandlers()
     registerWindowHandlers()
-    createWindow()
+
+    // 檢查冷啟動命令列是否帶有目標專案路徑
+    const { targetPath } = parseCommandLineArgs(process.argv)
+    if (targetPath) {
+      createWindow(targetPath)
+    } else {
+      createWindow()
+    }
+
+    // 初始化 Windows 工作列 Jump List
+    initJumpList()
 
     app.on('activate', () => {
       if (projectWindows.size === 0) createWindow()
