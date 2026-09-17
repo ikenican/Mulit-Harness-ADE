@@ -22,7 +22,7 @@ import {
   IconAppLogo
 } from './Icons'
 import './settingsModal.css'
-import type { WorkbenchSettings, DocToolPaths, UpdaterStatus } from '../../../preload/index'
+import type { WorkbenchSettings, DocToolPaths, UpdaterStatus, AgentInstallInfo, CliTestRecord } from '../../../preload/index'
 import type { SettingsTab } from '@/store'
 
 interface SettingsModalProps {
@@ -210,6 +210,8 @@ export default function SettingsModal({
   const [expandedCli, setExpandedCli] = useState<Record<string, boolean>>({})
   const [detectingCli, setDetectingCli] = useState<Record<string, boolean>>({})
   const [detectFeedback, setDetectFeedback] = useState<Record<string, { type: 'ok' | 'fail'; msg: string }>>({})
+  const [installConfirmAgent, setInstallConfirmAgent] = useState<AgentInstallInfo | null>(null)
+  const [installingAgent, setInstallingAgent] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -228,6 +230,20 @@ export default function SettingsModal({
     // 載入當前設定
     window.api.settings.get().then((s) => {
       setSettings(s)
+      if (s.cliTestResults) {
+        const restored: Record<string, TestResult> = {}
+        for (const [id, r] of Object.entries(s.cliTestResults)) {
+          if (r && r.ok) {
+            restored[id] = {
+              testing: false,
+              ok: r.ok,
+              version: r.version,
+              error: r.error
+            }
+          }
+        }
+        setTestResults((prev) => ({ ...prev, ...restored }))
+      }
     })
 
     // 取得當前更新狀態並訂閱即時廣播
@@ -280,13 +296,18 @@ export default function SettingsModal({
   if (!isOpen) return null
 
   const handlePathChange = (id: string, val: string): void => {
-    setSettings((prev: WorkbenchSettings) => ({
-      ...prev,
-      cliPaths: {
-        ...prev.cliPaths,
-        [id]: val
+    setSettings((prev: WorkbenchSettings) => {
+      const nextCliTestResults = { ...(prev.cliTestResults || {}) }
+      delete nextCliTestResults[id]
+      return {
+        ...prev,
+        cliPaths: {
+          ...prev.cliPaths,
+          [id]: val
+        },
+        cliTestResults: nextCliTestResults
       }
-    }))
+    })
     setTestResults((prev: Record<string, TestResult>) => ({
       ...prev,
       [id]: { testing: false }
@@ -352,6 +373,36 @@ export default function SettingsModal({
           ...prev,
           [id]: { type: 'ok', msg: `${t('settings.detected')}: ${found}` }
         }))
+
+        // 自動執行快速驗證並持久化記憶 pass 狀態，使用者下次開啟直接顯示 pass
+        window.api.settings.testCliPath(found).then((testRes) => {
+          if (testRes.ok) {
+            setTestResults((prev) => ({
+              ...prev,
+              [id]: {
+                testing: false,
+                ok: true,
+                version: testRes.version
+              }
+            }))
+            setSettings((prev) => {
+              const nextSettings: WorkbenchSettings = {
+                ...prev,
+                cliTestResults: {
+                  ...(prev.cliTestResults || {}),
+                  [id]: {
+                    ok: true,
+                    version: testRes.version,
+                    testedPath: testRes.resolvedPath || found,
+                    testedAt: Date.now()
+                  }
+                }
+              }
+              window.api.settings.set(nextSettings).catch(() => {})
+              return nextSettings
+            })
+          }
+        })
       } else {
         setDetectFeedback((prev) => ({
           ...prev,
@@ -365,6 +416,52 @@ export default function SettingsModal({
       }))
     } finally {
       setDetectingCli((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
+  const handleRequestInstall = async (id: string): Promise<void> => {
+    if (id !== 'claude' && id !== 'antigravity' && id !== 'codex') return
+    try {
+      const info = await window.api.ext.getAgentInstallInfo(id)
+      setInstallConfirmAgent(info)
+    } catch (e) {
+      console.error('Failed to get install info:', e)
+    }
+  }
+
+  const handleConfirmInstall = async (): Promise<void> => {
+    if (!installConfirmAgent) return
+    const id = installConfirmAgent.id
+    const agentName = installConfirmAgent.name
+    setInstallConfirmAgent(null)
+
+    setInstallingAgent((prev) => ({ ...prev, [id]: true }))
+    setDetectFeedback((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+
+    try {
+      const res = await window.api.ext.installAgent(id)
+      if (res.ok) {
+        window.api.notify.show(agentName, res.message)
+        // 自動重新偵測並套用路徑
+        await handleDetectCli(id)
+      } else {
+        setDetectFeedback((prev) => ({
+          ...prev,
+          [id]: { type: 'fail', msg: res.message }
+        }))
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setDetectFeedback((prev) => ({
+        ...prev,
+        [id]: { type: 'fail', msg: `Installation failed: ${msg}` }
+      }))
+    } finally {
+      setInstallingAgent((prev) => ({ ...prev, [id]: false }))
     }
   }
 
@@ -428,6 +525,11 @@ export default function SettingsModal({
     }))
 
     const res = await window.api.settings.testCliPath(target)
+    const actualPath = res.resolvedPath || target
+
+    if (res.ok && res.resolvedPath) {
+      setDetectedPaths((prev) => ({ ...prev, [id]: res.resolvedPath! }))
+    }
 
     setTestResults((prev) => ({
       ...prev,
@@ -438,6 +540,27 @@ export default function SettingsModal({
         error: res.error
       }
     }))
+
+    if (res.ok) {
+      setSettings((prev) => {
+        const nextSettings: WorkbenchSettings = {
+          ...prev,
+          cliTestResults: {
+            ...(prev.cliTestResults || {}),
+            [id]: {
+              ok: true,
+              version: res.version,
+              testedPath: actualPath,
+              testedAt: Date.now()
+            }
+          }
+        }
+        window.api.settings.set(nextSettings).catch((err) => {
+          console.warn('[Settings] Failed to persist test result:', err)
+        })
+        return nextSettings
+      })
+    }
   }
 
   // ── Document Tools 處理函式 ───────────────────────────────────────
@@ -1113,6 +1236,20 @@ export default function SettingsModal({
                                 >
                                   {detectingCli[cfg.id] ? t('settings.detecting') : t('settings.detect')}
                                 </button>
+                                {cfg.category === 'agent' && (
+                                  <button
+                                    type="button"
+                                    className="macos-btn-secondary macos-btn-install"
+                                    onClick={() => handleRequestInstall(cfg.id)}
+                                    disabled={!isEnabled || installingAgent[cfg.id]}
+                                    title={t('settings.installAgent')}
+                                  >
+                                    <IconDownload size={12} className={installingAgent[cfg.id] ? 'macos-spin' : ''} />
+                                    <span>
+                                      {installingAgent[cfg.id] ? t('settings.installingAgent') : t('settings.installAgent')}
+                                    </span>
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   className="macos-btn-secondary"
@@ -1601,6 +1738,82 @@ export default function SettingsModal({
           </div>
         </div>
       </div>
+
+      {/* Apple HIG Modal Alert: CLI Install Confirmation */}
+      {installConfirmAgent && (
+        <div
+          className="macos-install-confirm-backdrop"
+          onClick={() => setInstallConfirmAgent(null)}
+        >
+          <div
+            className="macos-install-confirm-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="macos-install-confirm-header">
+              <div className="macos-install-confirm-badge">
+                <IconDownload size={18} />
+              </div>
+              <div className="macos-install-confirm-title-col">
+                <h3 className="macos-install-confirm-title">
+                  {t('settings.installConfirmTitle', { agent: installConfirmAgent.name })}
+                </h3>
+                <p className="macos-install-confirm-desc">
+                  {t('settings.installConfirmDesc')}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="macos-close-btn"
+                onClick={() => setInstallConfirmAgent(null)}
+                title={t('settings.closeEsc')}
+              >
+                <IconClose size={12} />
+              </button>
+            </div>
+
+            <div className="macos-install-confirm-body">
+              <div className="macos-install-info-group">
+                <span className="macos-install-label">{t('settings.installConfirmPathLabel')}</span>
+                <div className="macos-install-path-box">
+                  <code>{installConfirmAgent.targetPath}</code>
+                </div>
+              </div>
+
+              <div className="macos-install-info-group">
+                <span className="macos-install-label">{t('settings.installConfirmCmdLabel')}</span>
+                <div className="macos-install-cmd-box">
+                  <code>{installConfirmAgent.command}</code>
+                </div>
+              </div>
+
+              <div className="macos-install-notice-banner">
+                <span className="macos-install-notice-icon">ℹ️</span>
+                <span className="macos-install-notice-text">
+                  {t('settings.installConfirmNotice')}
+                </span>
+              </div>
+            </div>
+
+            <div className="macos-install-confirm-footer">
+              <button
+                type="button"
+                className="macos-btn-cancel"
+                onClick={() => setInstallConfirmAgent(null)}
+              >
+                {t('settings.cancel')}
+              </button>
+              <button
+                type="button"
+                className="macos-btn-primary"
+                onClick={handleConfirmInstall}
+              >
+                <IconDownload size={13} />
+                <span>{t('settings.confirmInstall')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

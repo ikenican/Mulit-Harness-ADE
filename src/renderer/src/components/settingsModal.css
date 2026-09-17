@@ -1213,3 +1213,223 @@
   user-select: all;
   white-space: nowrap;
 }
+
+/* ── One-Click CLI Agent Download & Apple HIG Confirmation Dialog ─────── */
+.macos-btn-install {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg2));
+}
+
+.macos-btn-install:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg2));
+  border-color: var(--accent);
+}
+
+@keyframes macosSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.macos-spin {
+  animation: macosSpin 1s linear infinite;
+}
+
+@keyframes macosDialogFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes macosDialogScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.macos-install-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: macosDialogFadeIn 0.16s ease-out;
+}
+
+.macos-install-confirm-card {
+  width: 100%;
+  max-width: 470px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: macosDialogScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.macos-install-confirm-header {
+  display: flex;
+  gap: 14px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.macos-install-confirm-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.macos-install-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+.macos-install-confirm-desc {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.macos-install-confirm-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.macos-install-info-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.macos-install-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.macos-install-path-box,
+.macos-install-cmd-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  overflow-x: auto;
+}
+
+.macos-install-path-box code,
+.macos-install-cmd-box code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg);
+  white-space: nowrap;
+  user-select: all;
+}
+
+.macos-install-notice-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.macos-install-notice-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.macos-install-notice-text {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  line-height: 1.45;
+}
+
+.macos-install-confirm-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 20px 16px;
+  background: color-mix(in srgb, var(--bg) 50%, var(--bg2));
+  border-top: 1px solid var(--border);
+}
+
+.macos-btn-cancel {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.macos-btn-cancel:hover {
+  background: var(--bg3);
+  border-color: var(--border-strong);
+}
+
+.macos-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.macos-btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.macos-btn-primary:active {
+  transform: scale(0.98);
+}

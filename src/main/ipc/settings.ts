@@ -4,6 +4,7 @@ import { join, dirname, resolve, basename } from 'path'
 import { execFile, exec } from 'child_process'
 import { promisify } from 'util'
 import { workspace } from '../index'
+import { findCli } from '../ext/paths'
 import type { AgentId, WorkbenchSettings } from '../../preload/index'
 
 const execFileAsync = promisify(execFile)
@@ -106,6 +107,10 @@ export function loadSettings(): WorkbenchSettings {
     docToolPaths: {
       ...(parsedGlobal.docToolPaths || {}),
       ...(parsedWs.docToolPaths || {})
+    },
+    cliTestResults: {
+      ...(parsedGlobal.cliTestResults || {}),
+      ...(parsedWs.cliTestResults || {})
     }
   }
 
@@ -128,6 +133,21 @@ export function loadSettings(): WorkbenchSettings {
       if (!exists) return ''
     }
     return trimmed
+  }
+
+  const sanitizeTestResults = (res: unknown): Record<string, any> => {
+    if (!res || typeof res !== 'object') return {}
+    const out: Record<string, any> = {}
+    for (const [k, v] of Object.entries(res as Record<string, any>)) {
+      if (v && typeof v === 'object' && v.ok) {
+        const tp = v.testedPath
+        if (tp && typeof tp === 'string' && (tp.includes('/') || tp.includes('\\'))) {
+          if (!sanitizePath(tp)) continue
+        }
+        out[k] = v
+      }
+    }
+    return out
   }
 
   const docToolPaths = {
@@ -163,6 +183,7 @@ export function loadSettings(): WorkbenchSettings {
       cmd: parsed.cliEnabled?.cmd ?? true,
       ...(parsed.cliEnabled || {})
     },
+    cliTestResults: sanitizeTestResults(parsed.cliTestResults),
     cliBypassPermissions: parsed.cliBypassPermissions ?? false,
     docToolPaths,
     autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true,
@@ -436,7 +457,7 @@ export function registerSettingsHandlers(): void {
     return true
   })
 
-  ipcMain.handle('settings:testCliPath', async (_e, rawPath: string): Promise<{ ok: boolean; version?: string; error?: string }> => {
+  ipcMain.handle('settings:testCliPath', async (_e, rawPath: string): Promise<{ ok: boolean; version?: string; error?: string; resolvedPath?: string }> => {
     const cleanPath = rawPath.trim()
     if (!cleanPath) {
       return { ok: false, error: 'Path cannot be empty' }
@@ -461,44 +482,82 @@ export function registerSettingsHandlers(): void {
       if (isDocGui && fs.existsSync(target)) {
         const st = fs.statSync(target)
         if (st.isFile() || target.endsWith('.app')) {
-          return { ok: true, version: `Ready (${basename(target)})` }
+          return { ok: true, version: `Ready (${basename(target)})`, resolvedPath: target }
         }
       }
-
-      let cmdStr = ''
 
       if (isWin) {
         if (lower === 'powershell' || lower.endsWith('powershell.exe')) {
-          cmdStr = 'powershell.exe -NoProfile -Command "Write-Output $PSVersionTable.PSVersion.ToString()"'
-        } else if (lower === 'cmd' || lower.endsWith('cmd.exe')) {
-          cmdStr = 'cmd.exe /c ver'
-        } else if (lower === 'pwsh' || lower.endsWith('pwsh.exe')) {
-          cmdStr = 'pwsh --version'
-        } else {
-          if (!lower.endsWith('.exe') && !lower.endsWith('.cmd') && !lower.endsWith('.bat') && !lower.endsWith('.ps1')) {
-            if (fs.existsSync(`${target}.cmd`)) target = `${target}.cmd`
-            else if (fs.existsSync(`${target}.exe`)) target = `${target}.exe`
-            else if (fs.existsSync(`${target}.bat`)) target = `${target}.bat`
-            else if (fs.existsSync(`${target}.ps1`)) target = `${target}.ps1`
-          }
-
-          if (target.toLowerCase().endsWith('.ps1')) {
-            cmdStr = `powershell.exe -ExecutionPolicy Bypass -File "${target}" --version`
-          } else {
-            cmdStr = `"${target}" --version`
-          }
+          const { stdout } = await execAsync(
+            'powershell.exe -NoProfile -Command "Write-Output $PSVersionTable.PSVersion.ToString()"',
+            { timeout: 6000, encoding: 'utf8' }
+          )
+          const version = (stdout || '').trim().split(/\r?\n/)[0]
+          return { ok: true, version: version || 'Ready', resolvedPath: 'powershell.exe' }
         }
-      } else {
-        cmdStr = `"${cleanPath}" --version`
+        if (lower === 'cmd' || lower.endsWith('cmd.exe')) {
+          const { stdout } = await execAsync('cmd.exe /c ver', { timeout: 6000, encoding: 'utf8' })
+          const version = (stdout || '').trim().split(/\r?\n/)[0]
+          return { ok: true, version: version || 'Ready', resolvedPath: 'cmd.exe' }
+        }
+        if (lower === 'pwsh' || lower.endsWith('pwsh.exe')) {
+          const { stdout } = await execAsync('pwsh --version', { timeout: 6000, encoding: 'utf8' })
+          const version = (stdout || '').trim().split(/\r?\n/)[0]
+          return { ok: true, version: version || 'Ready', resolvedPath: 'pwsh' }
+        }
+
+        // 若不是絕對路徑且不帶路徑斜線，先透過 findCli 尋找實體路徑（如 'codex', 'agy', 'claude'）
+        if (!target.includes('/') && !target.includes('\\')) {
+          const found = findCli(target)
+          if (found) target = found
+        }
+
+        if (!target.toLowerCase().endsWith('.exe') && !target.toLowerCase().endsWith('.cmd') && !target.toLowerCase().endsWith('.bat') && !target.toLowerCase().endsWith('.ps1')) {
+          if (fs.existsSync(`${target}.cmd`)) target = `${target}.cmd`
+          else if (fs.existsSync(`${target}.exe`)) target = `${target}.exe`
+          else if (fs.existsSync(`${target}.bat`)) target = `${target}.bat`
+          else if (fs.existsSync(`${target}.ps1`)) target = `${target}.ps1`
+        }
+
+        const tLower = target.toLowerCase()
+        if (tLower.endsWith('.ps1')) {
+          const { stdout, stderr } = await execFileAsync(
+            'powershell.exe',
+            ['-ExecutionPolicy', 'Bypass', '-File', target, '--version'],
+            { timeout: 6000, encoding: 'utf8' }
+          )
+          const version = (stdout || stderr || '').trim().split(/\r?\n/)[0]
+          return { ok: true, version: version || 'Ready', resolvedPath: target }
+        }
+
+        if (tLower.endsWith('.cmd') || tLower.endsWith('.bat')) {
+          const { stdout, stderr } = await execFileAsync(
+            'cmd.exe',
+            ['/c', target, '--version'],
+            { timeout: 6000, encoding: 'utf8' }
+          )
+          const version = (stdout || stderr || '').trim().split(/\r?\n/)[0]
+          return { ok: true, version: version || 'Ready', resolvedPath: target }
+        }
+
+        if (fs.existsSync(target)) {
+          const { stdout, stderr } = await execFileAsync(
+            target,
+            ['--version'],
+            { timeout: 6000, encoding: 'utf8' }
+          )
+          const version = (stdout || stderr || '').trim().split(/\r?\n/)[0]
+          return { ok: true, version: version || 'Ready', resolvedPath: target }
+        }
       }
 
-      const { stdout, stderr } = await execAsync(cmdStr, {
+      const { stdout, stderr } = await execAsync(`"${target}" --version`, {
         timeout: 6000,
         encoding: 'utf8'
       })
 
       const version = (stdout || stderr || '').trim().split(/\r?\n/)[0]
-      return { ok: true, version: version || 'Ready' }
+      return { ok: true, version: version || 'Ready', resolvedPath: target }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       return { ok: false, error: msg }

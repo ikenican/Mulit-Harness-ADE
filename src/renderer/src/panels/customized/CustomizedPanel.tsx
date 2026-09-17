@@ -48,7 +48,6 @@ export default function CustomizedPanel(): JSX.Element {
   const [conns, setConns] = useState<ConnectionInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [lastScanned, setLastScanned] = useState<string | null>(null)
-  const [installingCodex, setInstallingCodex] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 同步預覽
@@ -185,30 +184,6 @@ export default function CustomizedPanel(): JSX.Element {
                   {n}
                 </div>
               ))}
-              {a.agent === 'codex' && !a.cliFound && (
-                <button
-                  className="btn cz-install-codex"
-                  disabled={installingCodex}
-                  onClick={async () => {
-                    setInstallingCodex(true)
-                    try {
-                      const res = await window.api.ext.installCodex()
-                      if (res.ok) {
-                        window.api.notify.show('Codex Installation', res.message)
-                        await refresh()
-                      } else {
-                        setError(res.message)
-                      }
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : String(e))
-                    } finally {
-                      setInstallingCodex(false)
-                    }
-                  }}
-                >
-                  {installingCodex ? 'Installing Codex CLI…' : '⬇ Download & Install Codex'}
-                </button>
-              )}
               {a.agent === 'antigravity' &&
                 a.notes.some((n) => n.includes('trust list')) && (
                   <button

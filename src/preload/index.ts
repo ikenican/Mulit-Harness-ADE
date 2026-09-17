@@ -52,6 +52,12 @@ const api = {
     applySync: (): Promise<{ written: string[] }> => ipcRenderer.invoke('ext:applySync'),
     trustWorkspace: (): Promise<boolean> => ipcRenderer.invoke('ext:trustWorkspace'),
     installCodex: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('ext:installCodex'),
+    getAgentInstallInfo: (agent: AgentId): Promise<AgentInstallInfo> =>
+      ipcRenderer.invoke('ext:getAgentInstallInfo', agent),
+    installAgent: (
+      agent: AgentId
+    ): Promise<{ ok: boolean; message: string; installedPath?: string }> =>
+      ipcRenderer.invoke('ext:installAgent', agent),
     toggleItem: (kind: string, id: string, enabled: boolean): Promise<boolean> =>
       ipcRenderer.invoke('ext:toggleItem', kind, id, enabled)
   },
@@ -73,7 +79,7 @@ const api = {
       ipcRenderer.invoke('settings:removeRecentWorkspace', workspacePath),
     clearRecentWorkspaces: (): Promise<void> =>
       ipcRenderer.invoke('settings:clearRecentWorkspaces'),
-    testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
+    testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string; resolvedPath?: string }> =>
       ipcRenderer.invoke('settings:testCliPath', path),
     testDocToolPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
       ipcRenderer.invoke('settings:testDocToolPath', path)
@@ -235,6 +241,14 @@ export interface FileStat {
   isFile: boolean
 }
 
+export interface CliTestRecord {
+  ok: boolean
+  version?: string
+  error?: string
+  testedAt?: number
+  testedPath?: string
+}
+
 export interface WorkbenchSettings {
   cliPaths: {
     claude?: string
@@ -252,6 +266,7 @@ export interface WorkbenchSettings {
     cmd?: boolean
     [key: string]: boolean | undefined
   }
+  cliTestResults?: Record<string, CliTestRecord>
   cliBypassPermissions?: boolean
   docToolPaths?: DocToolPaths
   autoOpenAgentModifiedFiles?: boolean
@@ -352,6 +367,13 @@ export interface CliLauncher {
 // ── 擴充管理型別 ──────────────────────────────────────────────────
 export type AgentId = 'claude' | 'antigravity' | 'codex'
 export type ExtKind = 'skill' | 'mcp' | 'plugin'
+
+export interface AgentInstallInfo {
+  id: AgentId
+  name: string
+  command: string
+  targetPath: string
+}
 
 /** 某個擴充在某個 agent 上的狀態 */
 export type SupportState =
