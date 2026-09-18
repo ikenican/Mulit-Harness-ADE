@@ -33,6 +33,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   perMachine: false
   deleteAppDataOnUninstall: false
+  runAfterFinish: true
 
 mac:
   target: [dmg]

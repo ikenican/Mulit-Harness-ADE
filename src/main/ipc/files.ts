@@ -295,7 +295,9 @@ export function registerFileHandlers(): void {
 
   // List directory entries: directories first, sorted by name; ignore .git/node_modules/out/.deps
   ipcMain.handle('files:list', async (event, dirPath: string): Promise<FsEntry[]> => {
+    if (!dirPath || !dirPath.trim()) return []
     const ws = getWorkspaceForEvent(event)
+    if (!ws) return []
     const safePath = resolveSafePath(dirPath, ws)
     const entries = await fs.readdir(safePath, { withFileTypes: true })
 

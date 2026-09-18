@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.15] - 2026-09-18
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.15 強化工作區啟動機制與安裝升級體驗，實現預設不主動載入目錄（僅依使用者手動載入記錄復原），並新增更新與安裝完成後自動啟動應用程式：
+1. **預設不主動載入目錄，僅復原使用者主動開啟之專案**：
+   - **移除強制 cwd / Documents 兜底**：全面改寫 `determineInitialWorkspace()`，移除原先無先前記錄時盲目載入目前執行目錄或 Documents 之行為。首次啟動或無使用者主動開啟之專案時，直接進入乾淨的空白首頁。
+   - **排除已自 Dashboard 移除之專案**：在啟動與還原工作區時，主動比對 `deletedWorkspaces`，確保已手動移除的專案不會在下次啟動時被強制載入。
+   - **優化空工作區首頁與面板體驗**：
+     - 空工作區狀態下視窗標題保持精簡 `Agent Workbench`，側邊欄預設停留在 `Dashboard` 儀表板，提供專案與會話總覽入口。
+     - 檔案樹（`FileTreePanel`）在尚未開啟工作區時呈現 Apple 質感的 Empty State（資料夾圖示、說明引導與「開啟資料夾」按鈕）。
+     - 底層保護：`files:list` 在目錄為空時安全回傳空陣列 `[]`，終端 PTY 在無工作區時安全回退至使用者家目錄，防止行程崩潰或越界警告。
+2. **安裝與更新完成後自動啟動 Agent Workbench**：
+   - **NSIS 安裝設定升級 (`electron-builder.yml`)**：加入 `runAfterFinish: true`，確保無論是手動執行安裝程式或背景自動更新升級完成，皆會自動啟動應用程式。
+   - **快速安裝腳本升級 (`install.ps1`)**：在安裝完成後自動探測 `Agent Workbench.exe` 路徑並立即調用 `Start-Process` 啟動應用程式，免去手動尋找開始功能表之繁瑣操作。
+   - **應用程式內部無縫升級重啟 (`updater.ts`)**：配合 NSIS 自動完成新版本重啟。
+
+### Added / 新增功能
+- **檔案樹無工作區空狀態介面 (`FileTreePanel.tsx`)**:
+  - 新增無開啟資料夾時的引導畫面與「開啟資料夾」按鈕。
+- **安裝完成自動執行設定 (`electron-builder.yml` & `install.ps1`)**:
+  - NSIS 安裝精靈預設勾選「執行 Agent Workbench」，安裝或升級完畢後自動啟動。
+  - `install.ps1` 靜默/一般安裝成功後自動啟動應用程式。
+
+### Changed & Fixed / 變更與修復
+- **工作區初始化邏輯重構 (`index.ts`)**:
+  - 移除預設強制以 cwd 或 Documents 作為工作區之行為，回歸由使用者主動決定。
+  - 啟動時自動過濾已被標記移除的專案。
+- **空工作區保護機制 (`files.ts` & `pty.ts`)**:
+  - `files:list` 支援安全空目錄回傳。
+  - 終端 PTY 初始化時防禦空路徑，回退至使用者家目錄。
+
+---
+
 ## [0.1.14] - 2026-09-18
 
 ### Highlights & Summary / 更新亮點

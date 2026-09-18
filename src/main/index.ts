@@ -13,7 +13,7 @@ import { registerNotifyHandlers } from './ipc/notify'
 import { registerExtHandlers } from './ipc/ext'
 import { registerConnHandlers } from './ipc/conn'
 import { registerSettingsHandlers, getLastWorkspace, isProtectedPath, saveLastWorkspace, addRecentWorkspace } from './ipc/settings'
-import { registerDashboardHandlers } from './ipc/dashboard'
+import { registerDashboardHandlers, loadDashboardState } from './ipc/dashboard'
 import { registerUpdaterHandlers } from './ipc/updater'
 import { initJumpList, parseCommandLineArgs } from './jumplist'
 
@@ -24,22 +24,22 @@ if (process.platform === 'win32') {
 
 function determineInitialWorkspace(): string {
   const last = getLastWorkspace()
-  if (last && fs.existsSync(last) && !isProtectedPath(last)) return last
-
-  const cwd = process.cwd()
-  if (cwd && !isProtectedPath(cwd) && fs.existsSync(cwd)) {
-    return cwd
+  if (last && fs.existsSync(last) && !isProtectedPath(last)) {
+    try {
+      const dashState = loadDashboardState()
+      const normLast = path.normalize(path.resolve(last)).toLowerCase()
+      const isDeleted = dashState.deletedWorkspaces.some(
+        (d) => path.normalize(path.resolve(d)).toLowerCase() === normLast
+      )
+      if (isDeleted) return ''
+    } catch {}
+    return last
   }
 
-  try {
-    const docs = app.getPath('documents')
-    if (docs && fs.existsSync(docs)) return docs
-    const home = app.getPath('home')
-    if (home && fs.existsSync(home)) return home
-  } catch {}
-
-  return cwd
+  // 預設不主動猜測或載入任何資料夾，僅在使用者自行載入過專案時於下次啟動恢復
+  return ''
 }
+
 
 export interface ProjectWindowEntry {
   window: BrowserWindow
@@ -82,13 +82,19 @@ export function setWorkspaceForWindow(win: BrowserWindow, newPath: string): void
     projectWindows.set(win.id, { window: win, workspaceRoot: newPath })
   }
   defaultWorkspaceRoot = newPath
-  saveLastWorkspace(newPath)
-  addRecentWorkspace(newPath)
-
-  try {
-    const name = path.basename(newPath)
-    win.setTitle(`${name} — Agent Workbench`)
-  } catch {}
+  if (newPath) {
+    saveLastWorkspace(newPath)
+    addRecentWorkspace(newPath)
+    attachWindowToWorkspace(win.id, newPath)
+    try {
+      const name = path.basename(newPath)
+      win.setTitle(`${name} — Agent Workbench`)
+    } catch {}
+  } else {
+    try {
+      win.setTitle('Agent Workbench')
+    } catch {}
+  }
 }
 
 /**
@@ -131,14 +137,15 @@ export function createWindow(initialWorkspace?: string): BrowserWindow {
     ? path.resolve(initialWorkspace)
     : determineInitialWorkspace()
 
-  const folderName = path.basename(ws) || 'Agent Workbench'
+  const folderName = ws ? path.basename(ws) : ''
+  const windowTitle = folderName ? `${folderName} — Agent Workbench` : 'Agent Workbench'
 
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    title: `${folderName} — Agent Workbench`,
+    title: windowTitle,
     backgroundColor: '#161618',
     show: false,
     autoHideMenuBar: true,
@@ -165,10 +172,13 @@ export function createWindow(initialWorkspace?: string): BrowserWindow {
 
   projectWindows.set(winId, { window: win, workspaceRoot: ws })
   defaultWorkspaceRoot = ws
-  addRecentWorkspace(ws)
 
-  // 掛載該視窗專屬的工作區檔案監聽
-  attachWindowToWorkspace(winId, ws)
+  // 僅在使用者有提供或先前有開啟過有效工作區時才紀錄與監聽，不主動塞入預設目錄
+  if (ws) {
+    addRecentWorkspace(ws)
+    saveLastWorkspace(ws)
+    attachWindowToWorkspace(winId, ws)
+  }
 
   const showWindow = (): void => {
     if (win && !win.isDestroyed() && !win.isVisible()) {
@@ -229,17 +239,19 @@ export function createWindow(initialWorkspace?: string): BrowserWindow {
     }
   })
 
-  // electron-vite dev server / 生產打包載入，附帶 ?workspace= 參數
+  // electron-vite dev server / 生產打包載入，附帶 ?workspace= 參數（僅當有指定工作區時帶入）
   if (process.env['ELECTRON_RENDERER_URL']) {
     const url = new URL(process.env['ELECTRON_RENDERER_URL'])
-    url.searchParams.set('workspace', ws)
+    if (ws) {
+      url.searchParams.set('workspace', ws)
+    }
     console.log('[Main] loading ELECTRON_RENDERER_URL:', url.toString())
     win.loadURL(url.toString())
   } else {
     const htmlPath = join(__dirname, '../renderer/index.html')
     console.log('[Main] loading file:', htmlPath, 'workspace:', ws)
     win.loadFile(htmlPath, {
-      query: { workspace: ws }
+      query: ws ? { workspace: ws } : {}
     })
   }
 

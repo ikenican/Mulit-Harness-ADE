@@ -301,7 +301,12 @@ export function registerPtyHandlers(): void {
     
     try {
       const ws = getWorkspaceForEvent(event)
-      const spawnCwd = opts.cwd && fs.existsSync(opts.cwd) ? opts.cwd : ws
+      const spawnCwd =
+        opts.cwd && fs.existsSync(opts.cwd)
+          ? opts.cwd
+          : ws && fs.existsSync(ws)
+            ? ws
+            : process.env.USERPROFILE || process.env.HOME || process.cwd()
       const ptyProcess = pty.spawn(command, args, {
         name: 'xterm-color',
         cols,

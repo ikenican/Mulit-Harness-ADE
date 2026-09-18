@@ -54,13 +54,15 @@ export default function App(): JSX.Element {
   const { centerMaximized, terminalOpenSession, settingsModal, sidebarTab } = useWorkbench()
   const { t } = useTranslation()
 
-  // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄
+  // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const wsParam = urlParams.get('workspace')
     if (wsParam) {
       setWorkspaceRoot(wsParam)
       setSidebarTab('files')
+    } else {
+      setSidebarTab('dashboard')
     }
   }, [])
 

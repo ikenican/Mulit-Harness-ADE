@@ -221,6 +221,8 @@ export const translations = {
       openFolder: 'Open Folder',
       refreshTree: 'Refresh file tree (Auto-updates enabled)',
       emptyWorkspace: 'This workspace is empty',
+      noFolderOpen: 'No folder opened',
+      noFolderOpenDesc: 'Open a project folder to browse files, view git changes, and run AI agent sessions.',
       loading: 'Loading…',
       retry: 'Retry',
       cannotReadDir: 'Cannot read directory'
@@ -500,6 +502,8 @@ export const translations = {
       openFolder: '開啟資料夾',
       refreshTree: '重新整理檔案樹 (已啟用自動更新)',
       emptyWorkspace: '此工作區目前為空',
+      noFolderOpen: '尚未開啟專案資料夾',
+      noFolderOpenDesc: '開啟專案資料夾以瀏覽檔案結構、檢視 Git 變更並啟動 AI 代理。',
       loading: '載入中…',
       retry: '重試',
       cannotReadDir: '無法讀取目錄'

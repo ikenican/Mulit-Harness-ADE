@@ -1,6 +1,7 @@
 /// <reference path="../../../../preload/index.d.ts" />
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { openFile, useWorkbench, setWorkspaceRoot as setGlobalWorkspaceRoot, bumpGit } from '@/store'
+import { IconFolder } from '@/components/Icons'
 import { useTranslation } from '@/i18n'
 import './FileTreePanel.css'
 
@@ -368,7 +369,7 @@ export default function FileTreePanel(): JSX.Element {
 
   const folderName = workspaceRoot
     ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || workspaceRoot
-    : 'Workspace'
+    : t('fileTree.noFolderOpen')
 
   return (
     <div className="filetree-container">
@@ -416,7 +417,26 @@ export default function FileTreePanel(): JSX.Element {
 
         {!loading && !error && rootEntries.length === 0 && (
           <div className="filetree-center-msg">
-            <span>{t('fileTree.emptyWorkspace')}</span>
+            {workspaceRoot ? (
+              <span>{t('fileTree.emptyWorkspace')}</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '16px 12px' }}>
+                <IconFolder size={32} style={{ opacity: 0.5, color: 'var(--accent)' }} />
+                <span style={{ fontWeight: 600, fontSize: '13px' }}>{t('fileTree.noFolderOpen')}</span>
+                <p style={{ fontSize: '11.5px', color: 'var(--fg-dim)', margin: '0 0 10px', textAlign: 'center', lineHeight: 1.45, maxWidth: '200px' }}>
+                  {t('fileTree.noFolderOpenDesc')}
+                </p>
+                <button
+                  type="button"
+                  className="filetree-btn"
+                  onClick={handlePickWorkspace}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 14px' }}
+                >
+                  <OpenFolderIcon />
+                  <span>{t('fileTree.openFolder')}</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
 

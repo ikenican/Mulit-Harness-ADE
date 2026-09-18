@@ -284,10 +284,16 @@ if ($FileName.EndsWith(".exe")) {
         if ($proc.ExitCode -eq 0) {
             Write-Host "[SUCCESS] Agent Workbench has been installed successfully!" -ForegroundColor Green
             $InstalledApp = Join-Path $env:LOCALAPPDATA "Programs\Agent Workbench\Agent Workbench.exe"
+            if (-not (Test-Path $InstalledApp)) {
+                $InstalledApp = Join-Path $env:ProgramFiles "Agent Workbench\Agent Workbench.exe"
+            }
             if (Test-Path $InstalledApp) {
                 Write-Host "Installed location: $InstalledApp" -ForegroundColor Gray
+                Write-Host "Launching Agent Workbench..." -ForegroundColor Cyan
+                Start-Process -FilePath $InstalledApp
+            } else {
+                Write-Host "You can start Agent Workbench from your Start Menu or Desktop shortcut." -ForegroundColor Cyan
             }
-            Write-Host "You can start Agent Workbench from your Start Menu or Desktop shortcut." -ForegroundColor Cyan
         } else {
             Write-Host "[WARNING] Installer exited with code $($proc.ExitCode)." -ForegroundColor Yellow
         }
