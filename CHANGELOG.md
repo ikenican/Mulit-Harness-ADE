@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.18] - 2026-09-18
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.18 重點重構並優化設定視窗中的「關於與更新（About & Updates）」UI 排版佈局：
+1. **全面導入 Apple HIG Inset Grouped 設計體系，修復 0px 擠壓貼合問題**：
+   - 解決「Check for Updates」按鈕與下方更新資訊卡片之間 0 間距、擠壓黏合的視覺問題。
+   - 替換舊版自創無樣式 class，全面對齊 macOS 系統設定標準規範：外層 `.macos-section`、工具列 `.macos-section-header-bar` 與內容容器 `.macos-inset-group`。
+   - 為按鈕與資訊卡片提供標準、舒適的 8px 垂直呼吸空間。
+2. **About & Updates 專屬 Apple HIG 樣式建構**：
+   - 建立 `.macos-about-hero` 品牌卡片，整合 App Logo、版本資訊與發行通道藥丸徽章（Installed / Dev / Portable）。
+   - 建立 `.macos-update-card` 更新卡片，配置優雅的內距（`padding: 16px 18px; gap: 12px;`），使更新說明日誌滾動框與下載進度條/重啟按鈕排列清晰美觀。
+   - 修復 `.macos-settings-body` 的 Flex 溢出行為（加入 `min-height: 0;`），避免彈窗內容在滾動時被底部 Footer 裁切。
+3. **偏好設定與 GitHub Releases 頁面整合為標準 Inset 清單行**：
+   - 將「啟動時自動檢查更新」開關與「前往 GitHub Releases 頁面」整合至同一組 Inset Group 之中，消除原本孤立懸浮在底部的外連按鈕。
+
+---
+
 ## [0.1.17] - 2026-09-18
 
 ### Highlights & Summary / 更新亮點

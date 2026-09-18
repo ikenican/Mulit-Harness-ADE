@@ -138,6 +138,7 @@ export const translations = {
       autoDownloadUpdates: 'Automatically download updates in background',
       autoDownloadUpdatesDesc: 'Silently download new installer packages and prompt when ready to restart and install',
       openGithubReleases: 'View GitHub Releases',
+      updatePreferencesSection: 'Update Preferences',
       footerAboutHint: 'Updates are fetched directly from official GitHub Releases.'
     },
     dashboard: {
@@ -420,6 +421,7 @@ export const translations = {
       autoDownloadUpdates: '發現新版本時於背景自動下載',
       autoDownloadUpdatesDesc: '在背景下載更新安裝檔，下載完成後提示立即重啟安裝',
       openGithubReleases: '前往 GitHub Releases 頁面',
+      updatePreferencesSection: '更新喜好設定',
       footerAboutHint: '更新資訊與安裝檔均直接自 GitHub Releases 官方發布下載。'
     },
     dashboard: {
