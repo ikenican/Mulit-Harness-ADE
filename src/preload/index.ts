@@ -58,8 +58,8 @@ const api = {
       agent: AgentId
     ): Promise<{ ok: boolean; message: string; installedPath?: string }> =>
       ipcRenderer.invoke('ext:installAgent', agent),
-    toggleItem: (kind: string, id: string, enabled: boolean): Promise<boolean> =>
-      ipcRenderer.invoke('ext:toggleItem', kind, id, enabled)
+    toggleItem: (kind: string, id: string, enabled: boolean, agent?: AgentId): Promise<boolean> =>
+      ipcRenderer.invoke('ext:toggleItem', kind, id, enabled, agent)
   },
   // 連線憑證（值只進 OS 加密儲存，不回傳給 renderer）—— main/ipc/conn.ts
   conn: {
@@ -280,6 +280,7 @@ export interface WorkbenchSettings {
   cliTestResults?: Record<string, CliTestRecord>
   cliBypassPermissions?: boolean
   docToolPaths?: DocToolPaths
+  docToolTestResults?: Record<string, CliTestRecord>
   autoOpenAgentModifiedFiles?: boolean
   language?: 'en' | 'zh-TW'
   lastWorkspace?: string
@@ -409,6 +410,7 @@ export interface AgentSupport {
   agent: AgentId
   state: SupportState
   detail?: string
+  enabled?: boolean
 }
 
 export interface ExtItem {

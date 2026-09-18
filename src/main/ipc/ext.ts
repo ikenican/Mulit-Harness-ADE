@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
@@ -10,34 +10,54 @@ import { AGENT_PATHS, findAgentCli } from '../ext/paths'
 import { buildInventory, buildAgentStatus } from '../ext/inventory'
 import { readManifest, writeManifest, managedKeys, connRefsOf } from '../ext/manifest'
 import { planSync, applySync } from '../ext/adapters'
-import type { AgentStatus, ExtItem, ExtManifest, FileChange } from '../../preload/index'
+import type { AgentId, AgentStatus, ExtItem, ExtManifest, FileChange } from '../../preload/index'
 
 const execFileAsync = promisify(execFile)
 
 function getDisabledKeys(wsPath?: string): Set<string> {
   const ws = wsPath || workspace.root
+  const keys = new Set<string>()
   try {
-    const file = path.join(ws, '.workbench', 'customized-state.json')
-    if (fs.existsSync(file)) {
-      const data = JSON.parse(fs.readFileSync(file, 'utf8'))
-      return new Set(data.disabled || [])
+    const globalFile = path.join(app.getPath('userData'), 'customized-state.json')
+    if (fs.existsSync(globalFile)) {
+      const data = JSON.parse(fs.readFileSync(globalFile, 'utf8'))
+      for (const k of data.disabled || []) keys.add(k)
     }
   } catch {
     /* ignore */
   }
-  return new Set()
+  if (ws) {
+    try {
+      const file = path.join(ws, '.workbench', 'customized-state.json')
+      if (fs.existsSync(file)) {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+        for (const k of data.disabled || []) keys.add(k)
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return keys
 }
 
 function saveDisabledKeys(keys: Set<string>, wsPath?: string): void {
   const ws = wsPath || workspace.root
-  if (!ws || isProtectedPath(ws)) return
   try {
-    const dir = path.join(ws, '.workbench')
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    const file = path.join(dir, 'customized-state.json')
-    fs.writeFileSync(file, JSON.stringify({ disabled: Array.from(keys) }, null, 2), 'utf8')
+    const globalFile = path.join(app.getPath('userData'), 'customized-state.json')
+    fs.mkdirSync(path.dirname(globalFile), { recursive: true })
+    fs.writeFileSync(globalFile, JSON.stringify({ disabled: Array.from(keys) }, null, 2), 'utf8')
   } catch (e) {
-    console.error('Failed to save customized state:', e)
+    console.error('Failed to save global customized state:', e)
+  }
+  if (ws && !isProtectedPath(ws)) {
+    try {
+      const dir = path.join(ws, '.workbench')
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+      const file = path.join(dir, 'customized-state.json')
+      fs.writeFileSync(file, JSON.stringify({ disabled: Array.from(keys) }, null, 2), 'utf8')
+    } catch (e) {
+      console.error('Failed to save workspace customized state:', e)
+    }
   }
 }
 
@@ -68,14 +88,85 @@ export function registerExtHandlers(): void {
         }))
       })
     }
-    // 補上憑證需求標記與啟用狀態
+    // 讀取 Claude native settings.json 內的 enabledPlugins
+    let claudeEnabledPlugins: Record<string, boolean> = {}
+    try {
+      const claudeSettings = path.join(os.homedir(), '.claude', 'settings.json')
+      if (fs.existsSync(claudeSettings)) {
+        const raw = fs.readFileSync(claudeSettings, 'utf8')
+        const cfg = JSON.parse(raw)
+        if (cfg.enabledPlugins && typeof cfg.enabledPlugins === 'object') {
+          claudeEnabledPlugins = cfg.enabledPlugins
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 補上憑證需求標記與各 agent 獨立啟用狀態
     const disabled = getDisabledKeys(ws)
     for (const it of items) {
       if (it.kind === 'mcp') {
         const decl = m.mcp.find((x) => x.id.toLowerCase() === it.id)
         if (decl) it.needsConnection = connRefsOf(decl.env)
       }
-      it.enabled = !disabled.has(`${it.kind}:${it.id.toLowerCase()}`)
+
+      const idLower = it.id.toLowerCase()
+
+      for (const a of it.agents) {
+        if (a.state !== 'installed') {
+          a.enabled = false
+          continue
+        }
+
+        if (a.agent === 'claude') {
+          const isExplicitDisabled =
+            disabled.has(`claude:${it.kind}:${idLower}`) ||
+            (disabled.has(`${it.kind}:${idLower}`) && !disabled.has(`claude:enabled:${it.kind}:${idLower}`))
+
+          if (isExplicitDisabled) {
+            a.enabled = false
+          } else if (it.kind === 'plugin') {
+            const matchKey = Object.keys(claudeEnabledPlugins).find(
+              (k) => k === it.id || k.startsWith(`${it.id}@`) || k.split('@')[0].toLowerCase() === idLower
+            )
+            if (matchKey && claudeEnabledPlugins[matchKey] === false) {
+              a.enabled = false
+            } else {
+              a.enabled = true
+            }
+          } else if (it.kind === 'skill' || it.kind === 'mcp') {
+            if (a.detail && a.detail.startsWith('plugin:')) {
+              const pName = a.detail.replace('plugin:', '').trim().split('@')[0].toLowerCase()
+              const pMatch = Object.keys(claudeEnabledPlugins).find(
+                (k) => k.toLowerCase() === pName || k.split('@')[0].toLowerCase() === pName
+              )
+              if (pMatch && claudeEnabledPlugins[pMatch] === false) {
+                a.enabled = false
+              } else {
+                a.enabled = true
+              }
+            } else {
+              a.enabled = true
+            }
+          } else {
+            a.enabled = true
+          }
+        } else if (a.agent === 'antigravity') {
+          const isExplicitDisabled =
+            disabled.has(`antigravity:${it.kind}:${idLower}`) ||
+            (disabled.has(`${it.kind}:${idLower}`) && !disabled.has(`antigravity:enabled:${it.kind}:${idLower}`))
+          a.enabled = !isExplicitDisabled
+        } else if (a.agent === 'codex') {
+          const isExplicitDisabled =
+            disabled.has(`codex:${it.kind}:${idLower}`) ||
+            (disabled.has(`${it.kind}:${idLower}`) && !disabled.has(`codex:enabled:${it.kind}:${idLower}`))
+          a.enabled = !isExplicitDisabled
+        }
+      }
+
+      const installed = it.agents.filter((a) => a.state === 'installed')
+      it.enabled = installed.length > 0 ? installed.some((a) => a.enabled !== false) : false
     }
     return items
   }
@@ -85,34 +176,68 @@ export function registerExtHandlers(): void {
     return inventory(ws)
   })
 
-  ipcMain.handle('ext:toggleItem', async (event, kind: string, id: string, enabled: boolean): Promise<boolean> => {
-    const ws = getWorkspaceForEvent(event)
-    const disabled = getDisabledKeys(ws)
-    const key = `${kind}:${id.toLowerCase()}`
-    if (enabled) {
-      disabled.delete(key)
-    } else {
-      disabled.add(key)
-    }
-    saveDisabledKeys(disabled, ws)
+  ipcMain.handle(
+    'ext:toggleItem',
+    async (
+      event,
+      kind: string,
+      id: string,
+      enabled: boolean,
+      agent?: AgentId
+    ): Promise<boolean> => {
+      const ws = getWorkspaceForEvent(event)
+      const disabled = getDisabledKeys(ws)
+      const idLower = id.toLowerCase()
 
-    // 若為 Claude plugin，嘗試同步寫入 ~/.claude/settings.json
-    if (kind === 'plugin') {
-      try {
-        const claudeSettings = path.join(os.homedir(), '.claude', 'settings.json')
-        if (fs.existsSync(claudeSettings)) {
-          const raw = fs.readFileSync(claudeSettings, 'utf8')
-          const cfg = JSON.parse(raw)
-          if (!cfg.enabledPlugins) cfg.enabledPlugins = {}
-          cfg.enabledPlugins[id] = enabled
-          fs.writeFileSync(claudeSettings, JSON.stringify(cfg, null, 2), 'utf8')
+      const toggleForAgent = (targetAgent: AgentId, targetEnabled: boolean): void => {
+        const agentKey = `${targetAgent}:${kind}:${idLower}`
+        if (targetEnabled) {
+          disabled.delete(agentKey)
+          disabled.delete(`${kind}:${idLower}`)
+        } else {
+          disabled.add(agentKey)
         }
-      } catch {
-        /* ignore */
+
+        if (targetAgent === 'claude') {
+          if (kind === 'plugin') {
+            try {
+              const claudeSettings = path.join(os.homedir(), '.claude', 'settings.json')
+              if (fs.existsSync(claudeSettings)) {
+                const raw = fs.readFileSync(claudeSettings, 'utf8')
+                const cfg = JSON.parse(raw)
+                if (!cfg.enabledPlugins) cfg.enabledPlugins = {}
+                cfg.enabledPlugins[id] = targetEnabled
+                for (const k of Object.keys(cfg.enabledPlugins)) {
+                  if (k === id || k.startsWith(`${id}@`) || k.split('@')[0].toLowerCase() === idLower) {
+                    cfg.enabledPlugins[k] = targetEnabled
+                  }
+                }
+                fs.writeFileSync(claudeSettings, JSON.stringify(cfg, null, 2), 'utf8')
+              }
+            } catch (e) {
+              console.warn('[ext:toggleItem] Failed to write claude settings:', e)
+            }
+          }
+        }
       }
+
+      if (agent) {
+        toggleForAgent(agent, enabled)
+      } else {
+        for (const a of ['claude', 'antigravity', 'codex'] as const) {
+          toggleForAgent(a, enabled)
+        }
+        if (enabled) {
+          disabled.delete(`${kind}:${idLower}`)
+        } else {
+          disabled.add(`${kind}:${idLower}`)
+        }
+      }
+
+      saveDisabledKeys(disabled, ws)
+      return true
     }
-    return true
-  })
+  )
 
   ipcMain.handle('ext:agents', async (event): Promise<AgentStatus[]> => {
     const ws = getWorkspaceForEvent(event)

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.17] - 2026-09-18
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.17 深度優化設定視窗（Settings Modal）的擴充功能、儲存按鈕佈局與文檔工具驗證狀態記憶機制：
+1. **Extensions & Skills 移除 Switch，改為點擊各 Agent 符號縮圖作為獨立開關**：
+   - 取消右側單一的 Switch 按鈕，改為直接點擊各 Agent（Claude 太陽、Antigravity 行星、Codex 徽章）縮圖切換。
+   - 每個 Agent 的開關完全獨立，切換 Claude 絕不影響 Antigravity 或 Codex；Claude 原生 `enabledPlugins` 與後端狀態完全隔離同步。
+   - 擴展 Antigravity 技能掃描，支援外掛子目錄技能、全域原生技能與工作區專用技能獨立枚舉。
+2. **開關符號縮圖固定寬度，整齊三欄垂直對齊**：
+   - 嚴格鎖定每顆縮圖寬度為 `104px`、狀態徽章（`ON`/`OFF`）固定 `27px`，未安裝狀態補上等寬佔位符。
+   - 徹底解決 `ON` 與 `OFF` 字寬差異及未安裝項目的寬度抖動問題，使所有項目整齊劃一垂直對齊成三直欄。
+3. **Appearance 與 Extensions 底部儲存按鈕排版標準化**：
+   - 修復彈窗內容主體 `height: 100%` 導致視窗內容溢出擠壓 Footer 的問題，改為 Flex 容器自適應滾動。
+   - 鎖定 Footer 高度為 48px，規範 Save 與 Cancel 按鈕尺寸與行高，避免折行破壞佈局。
+4. **Document Tools 測試通過狀態持久化記憶**：
+   - 修復開啟視窗時因初始狀態未定義誤判為「Verification failed」的錯誤。
+   - 在 `settings.json` 新增 `docToolTestResults` 記憶體，測試通過後永久記憶，下次開啟立即顯示 Verified。
+5. **CLI & Agents 安裝狀態動態標籤**：
+   - 當系統已自動探測到或已設定有效路徑時，按鈕自動切換為「Reinstall / 重新安裝」，消除安裝就緒時的混淆。
+
+---
+
 ## [0.1.16] - 2026-09-18
 
 ### Highlights & Summary / 更新亮點

@@ -203,48 +203,130 @@ function scanClaude(workspaceRoot: string): Found[] {
   return out
 }
 
-function scanAntigravity(): Found[] {
+function scanAntigravity(workspaceRoot: string): Found[] {
   const P = AGENT_PATHS.antigravity
   const out: Found[] = []
 
-  for (const d of listDirs(P.pluginsDir!)) {
-    const dir = join(P.pluginsDir!, d)
-    const meta = readJson<{ name?: string; version?: string; description?: string }>(
-      join(dir, 'plugin.json'),
-      {}
-    )
-    out.push({
-      kind: 'plugin',
-      id: norm(meta.name || d),
-      name: meta.name || d,
-      description: meta.description,
-      version: meta.version,
-      agent: 'antigravity',
-      state: 'installed'
-    })
-
-    // Antigravity 的 skill 掛在 plugin 底下
-    const md = join(dir, 'skills', 'SKILL.md')
-    if (fs.existsSync(md)) {
-      const fm = parseSkillMd(md)
+  // 1. 全域插件與其子技能：~/.gemini/config/plugins/<d>
+  if (P.pluginsDir && fs.existsSync(P.pluginsDir)) {
+    for (const d of listDirs(P.pluginsDir)) {
+      const dir = join(P.pluginsDir, d)
+      const meta = readJson<{ name?: string; version?: string; description?: string }>(
+        join(dir, 'plugin.json'),
+        {}
+      )
       out.push({
-        kind: 'skill',
-        id: norm(fm.name || d),
-        name: fm.name || d,
-        description: fm.description,
-        version: fm.version,
+        kind: 'plugin',
+        id: norm(meta.name || d),
+        name: meta.name || d,
+        description: meta.description,
+        version: meta.version,
         agent: 'antigravity',
-        state: 'installed',
-        detail: md
+        state: 'installed'
       })
-    }
 
-    // plugin 也能宣告 mcpServers（gemini-extension.json）
-    const ext = readJson<{ mcpServers?: Record<string, { command?: string }> }>(
-      join(dir, 'gemini-extension.json'),
-      {}
-    )
-    for (const [k, v] of Object.entries(ext.mcpServers || {})) {
+      // Antigravity 的 skill 掛在 plugin 底下（可能為直屬 SKILL.md 或子目錄 <subskill>/SKILL.md）
+      const skillsDir = join(dir, 'skills')
+      if (fs.existsSync(skillsDir)) {
+        const directMd = join(skillsDir, 'SKILL.md')
+        if (fs.existsSync(directMd)) {
+          const fm = parseSkillMd(directMd)
+          out.push({
+            kind: 'skill',
+            id: norm(fm.name || d),
+            name: fm.name || d,
+            description: fm.description,
+            version: fm.version,
+            agent: 'antigravity',
+            state: 'installed',
+            detail: directMd
+          })
+        }
+        for (const sub of listDirs(skillsDir)) {
+          const subMd = join(skillsDir, sub, 'SKILL.md')
+          if (fs.existsSync(subMd)) {
+            const fm = parseSkillMd(subMd)
+            out.push({
+              kind: 'skill',
+              id: norm(fm.name || sub),
+              name: fm.name || sub,
+              description: fm.description || `Provided by plugin ${meta.name || d}`,
+              version: fm.version || meta.version,
+              agent: 'antigravity',
+              state: 'installed',
+              detail: subMd
+            })
+          }
+        }
+      }
+
+      // plugin 也能宣告 mcpServers（gemini-extension.json）
+      const ext = readJson<{ mcpServers?: Record<string, { command?: string }> }>(
+        join(dir, 'gemini-extension.json'),
+        {}
+      )
+      for (const [k, v] of Object.entries(ext.mcpServers || {})) {
+        out.push({
+          kind: 'mcp',
+          id: norm(k),
+          name: k,
+          description: v?.command,
+          agent: 'antigravity',
+          state: 'installed',
+          detail: `plugin: ${d}`
+        })
+      }
+    }
+  }
+
+  // 2. 全域獨立技能：~/.gemini/config/skills/<subskill>/SKILL.md
+  const globalSkillsDir = join(P.configHome, 'skills')
+  if (fs.existsSync(globalSkillsDir)) {
+    for (const sub of listDirs(globalSkillsDir)) {
+      const md = join(globalSkillsDir, sub, 'SKILL.md')
+      if (fs.existsSync(md)) {
+        const fm = parseSkillMd(md)
+        out.push({
+          kind: 'skill',
+          id: norm(fm.name || sub),
+          name: fm.name || sub,
+          description: fm.description,
+          version: fm.version,
+          agent: 'antigravity',
+          state: 'installed',
+          detail: md
+        })
+      }
+    }
+  }
+
+  // 3. 工作區專用技能：<workspace>/.agents/skills/<subskill>/SKILL.md
+  if (workspaceRoot) {
+    const wsSkillsDir = join(workspaceRoot, '.agents', 'skills')
+    if (fs.existsSync(wsSkillsDir)) {
+      for (const sub of listDirs(wsSkillsDir)) {
+        const md = join(wsSkillsDir, sub, 'SKILL.md')
+        if (fs.existsSync(md)) {
+          const fm = parseSkillMd(md)
+          out.push({
+            kind: 'skill',
+            id: norm(fm.name || sub),
+            name: fm.name || sub,
+            description: fm.description,
+            version: fm.version,
+            agent: 'antigravity',
+            state: 'installed',
+            detail: md
+          })
+        }
+      }
+    }
+  }
+
+  // 4. 全域 mcp_config.json
+  if (P.mcpConfig && fs.existsSync(P.mcpConfig)) {
+    const mcp = readJson<{ mcpServers?: Record<string, { command?: string }> }>(P.mcpConfig, {})
+    for (const [k, v] of Object.entries(mcp.mcpServers || {})) {
       out.push({
         kind: 'mcp',
         id: norm(k),
@@ -252,23 +334,9 @@ function scanAntigravity(): Found[] {
         description: v?.command,
         agent: 'antigravity',
         state: 'installed',
-        detail: `plugin: ${d}`
+        detail: 'mcp_config.json'
       })
     }
-  }
-
-  // 全域 mcp_config.json（初始為空檔）
-  const mcp = readJson<{ mcpServers?: Record<string, { command?: string }> }>(P.mcpConfig!, {})
-  for (const [k, v] of Object.entries(mcp.mcpServers || {})) {
-    out.push({
-      kind: 'mcp',
-      id: norm(k),
-      name: k,
-      description: v?.command,
-      agent: 'antigravity',
-      state: 'installed',
-      detail: 'mcp_config.json'
-    })
   }
 
   return out
@@ -385,7 +453,7 @@ function scanCodex(): Found[] {
 
 // ── 對外：合併成跨 agent 的統一清單 ──────────────────────────────
 export function buildInventory(workspaceRoot: string, managedIds: Set<string>): ExtItem[] {
-  const found = [...scanClaude(workspaceRoot), ...scanAntigravity(), ...scanCodex()]
+  const found = [...scanClaude(workspaceRoot), ...scanAntigravity(workspaceRoot), ...scanCodex()]
 
   const byKey = new Map<string, ExtItem>()
   for (const f of found) {

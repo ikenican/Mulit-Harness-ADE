@@ -245,6 +245,20 @@ export default function SettingsModal({
         }
         setTestResults((prev) => ({ ...prev, ...restored }))
       }
+      if (s.docToolTestResults) {
+        const restoredDoc: Record<string, TestResult> = {}
+        for (const [id, r] of Object.entries(s.docToolTestResults)) {
+          if (r && r.ok) {
+            restoredDoc[id] = {
+              testing: false,
+              ok: r.ok,
+              version: r.version,
+              error: r.error
+            }
+          }
+        }
+        setDocToolTestResults((prev) => ({ ...prev, ...restoredDoc }))
+      }
     })
 
     // 取得當前更新狀態並訂閱即時廣播
@@ -569,13 +583,18 @@ export default function SettingsModal({
     id: 'word' | 'excel' | 'powerpoint' | 'pdf',
     val: string
   ): void => {
-    setSettings((prev) => ({
-      ...prev,
-      docToolPaths: {
-        ...(prev.docToolPaths || {}),
-        [id]: val
+    setSettings((prev) => {
+      const nextDocResults = { ...(prev.docToolTestResults || {}) }
+      delete nextDocResults[id]
+      return {
+        ...prev,
+        docToolPaths: {
+          ...(prev.docToolPaths || {}),
+          [id]: val
+        },
+        docToolTestResults: nextDocResults
       }
-    }))
+    })
     setDocToolTestResults((prev) => ({
       ...prev,
       [id]: { testing: false }
@@ -610,10 +629,27 @@ export default function SettingsModal({
     const detected = detectedDocTools[id]
     const target = custom || detected
     if (!target) {
+      const defaultMsg = 'Will use System Default Application'
       setDocToolTestResults((prev) => ({
         ...prev,
-        [id]: { testing: false, ok: true, version: 'Will use System Default Application' }
+        [id]: { testing: false, ok: true, version: defaultMsg }
       }))
+      setSettings((prev) => {
+        const nextSettings: WorkbenchSettings = {
+          ...prev,
+          docToolTestResults: {
+            ...(prev.docToolTestResults || {}),
+            [id]: {
+              ok: true,
+              version: defaultMsg,
+              testedPath: 'System Default',
+              testedAt: Date.now()
+            }
+          }
+        }
+        window.api.settings.set(nextSettings).catch(() => {})
+        return nextSettings
+      })
       return
     }
 
@@ -623,15 +659,37 @@ export default function SettingsModal({
     }))
 
     const res = await window.api.settings.testDocToolPath(target)
+    const successVersion = res.version || t('settings.validExecutable') || 'Ready and valid'
     setDocToolTestResults((prev) => ({
       ...prev,
       [id]: {
         testing: false,
         ok: res.ok,
-        version: res.ok ? res.version || t('settings.validExecutable') || 'Ready and valid' : undefined,
+        version: res.ok ? successVersion : undefined,
         error: res.error
       }
     }))
+
+    if (res.ok) {
+      setSettings((prev) => {
+        const nextSettings: WorkbenchSettings = {
+          ...prev,
+          docToolTestResults: {
+            ...(prev.docToolTestResults || {}),
+            [id]: {
+              ok: true,
+              version: successVersion,
+              testedPath: target,
+              testedAt: Date.now()
+            }
+          }
+        }
+        window.api.settings.set(nextSettings).catch((err) => {
+          console.warn('[Settings] Failed to persist doc tool test result:', err)
+        })
+        return nextSettings
+      })
+    }
   }
 
   const handleDetectAllDocTools = (): void => {
@@ -1257,11 +1315,19 @@ export default function SettingsModal({
                                     className="macos-btn-secondary macos-btn-install"
                                     onClick={() => handleRequestInstall(cfg.id)}
                                     disabled={!isEnabled || installingAgent[cfg.id]}
-                                    title={t('settings.installAgent')}
+                                    title={
+                                      detected || currentVal
+                                        ? `${t('settings.reinstallAgent')} (${cfg.name})`
+                                        : t('settings.installAgent')
+                                    }
                                   >
                                     <IconDownload size={12} className={installingAgent[cfg.id] ? 'macos-spin' : ''} />
                                     <span>
-                                      {installingAgent[cfg.id] ? t('settings.installingAgent') : t('settings.installAgent')}
+                                      {installingAgent[cfg.id]
+                                        ? t('settings.installingAgent')
+                                        : detected || currentVal
+                                        ? t('settings.reinstallAgent')
+                                        : t('settings.installAgent')}
                                     </span>
                                   </button>
                                 )}
@@ -1443,7 +1509,7 @@ export default function SettingsModal({
                             )}
                           </div>
 
-                          {testRes && !testRes.testing && (
+                          {testRes && testRes.ok !== undefined && !testRes.testing && (
                             <div className={`macos-doctool-test-msg ${testRes.ok ? 'ok' : 'err'}`}>
                               {testRes.ok ? (
                                 <>

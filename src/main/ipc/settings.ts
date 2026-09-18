@@ -111,6 +111,10 @@ export function loadSettings(): WorkbenchSettings {
     cliTestResults: {
       ...(parsedGlobal.cliTestResults || {}),
       ...(parsedWs.cliTestResults || {})
+    },
+    docToolTestResults: {
+      ...(parsedGlobal.docToolTestResults || {}),
+      ...(parsedWs.docToolTestResults || {})
     }
   }
 
@@ -184,6 +188,7 @@ export function loadSettings(): WorkbenchSettings {
       ...(parsed.cliEnabled || {})
     },
     cliTestResults: sanitizeTestResults(parsed.cliTestResults),
+    docToolTestResults: sanitizeTestResults(parsed.docToolTestResults),
     cliBypassPermissions: parsed.cliBypassPermissions ?? false,
     docToolPaths,
     autoOpenAgentModifiedFiles: parsed.autoOpenAgentModifiedFiles ?? true,
@@ -447,6 +452,8 @@ export function registerSettingsHandlers(): void {
         ...(current.docToolPaths || {}),
         ...(patch.docToolPaths || {})
       },
+      cliTestResults: patch.cliTestResults !== undefined ? patch.cliTestResults : current.cliTestResults,
+      docToolTestResults: patch.docToolTestResults !== undefined ? patch.docToolTestResults : current.docToolTestResults,
       language: patch.language !== undefined ? patch.language : current.language,
       lastWorkspace: patch.lastWorkspace !== undefined ? patch.lastWorkspace : current.lastWorkspace,
       recentWorkspaces: patch.recentWorkspaces !== undefined ? patch.recentWorkspaces : current.recentWorkspaces

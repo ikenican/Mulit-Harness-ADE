@@ -220,7 +220,8 @@
   padding: 0 !important;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -766,7 +767,11 @@
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 .macos-settings-footer {
-  padding: 12px 24px;
+  height: 48px;
+  min-height: 48px;
+  max-height: 48px;
+  padding: 0 24px;
+  box-sizing: border-box;
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -778,16 +783,26 @@
 .macos-footer-hint {
   font-size: 11.5px;
   color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+  line-height: 1.2;
 }
 
 .macos-footer-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .macos-btn-cancel {
-  padding: 5px 14px;
+  height: 28px;
+  line-height: 28px;
+  min-width: 76px;
+  padding: 0 14px;
+  box-sizing: border-box;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg2);
@@ -795,6 +810,9 @@
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.14s ease;
 }
 
@@ -804,7 +822,11 @@
 }
 
 .macos-btn-primary {
-  padding: 5px 16px;
+  height: 28px;
+  line-height: 28px;
+  min-width: 76px;
+  padding: 0 14px;
+  box-sizing: border-box;
   border-radius: 6px;
   border: none;
   background: var(--accent);
@@ -812,6 +834,9 @@
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 30%, transparent);
   transition: all 0.15s ease;
 }

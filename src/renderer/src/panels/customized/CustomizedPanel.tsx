@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { useWorkbench } from '@/store'
 import AgentMark from '@/components/AgentMark'
+import { IconPuzzle, IconZap, IconServer } from '@/components/Icons'
 import './customized.css'
 import type {
   AgentId,
@@ -27,17 +28,51 @@ const STATE_LABEL: Record<SupportState, string> = {
   error: 'Error'
 }
 
-function StateChip({ agent, state, detail }: { agent: AgentId; state: SupportState; detail?: string }) {
+function StateChip({
+  agent,
+  state,
+  enabled,
+  detail,
+  onToggle
+}: {
+  agent: AgentId
+  state: SupportState
+  enabled?: boolean
+  detail?: string
+  onToggle?: () => void
+}) {
   const shortName = agent === 'claude' ? 'Claude' : agent === 'antigravity' ? 'AGY' : 'Codex'
+  const isInstalled = state === 'installed'
+  const isEnabled = enabled !== false
+
+  let chipClass = `cz-chip cz-${state}`
+  if (isInstalled) {
+    chipClass += isEnabled ? ' cz-installed-on' : ' cz-installed-off'
+  }
+
+  const title = isInstalled
+    ? `${AGENT_SHORT[agent]}: ${isEnabled ? '已啟用 (點擊停用)' : '已停用 (點擊啟用)'}${detail ? ` • ${detail}` : ''}`
+    : detail || `${AGENT_SHORT[agent]}: ${STATE_LABEL[state]}`
+
   return (
-    <span
-      className={`cz-chip cz-${state}`}
-      title={detail || `${AGENT_SHORT[agent]}: ${STATE_LABEL[state]}`}
+    <button
+      type="button"
+      className={`${chipClass} ${isInstalled ? 'is-clickable' : ''}`}
+      onClick={isInstalled ? onToggle : undefined}
+      disabled={!isInstalled}
+      title={title}
     >
-      <AgentMark agent={agent} size={11} />
-      <i className="cz-dot" />
-      <span className="cz-chip-name">{shortName}</span>
-    </span>
+      <span className="cz-chip-left">
+        <AgentMark agent={agent} size={12} />
+        <i className="cz-dot" />
+        <span className="cz-chip-name">{shortName}</span>
+      </span>
+      {isInstalled ? (
+        <span className="cz-chip-toggle-badge">{isEnabled ? 'ON' : 'OFF'}</span>
+      ) : (
+        <span className="cz-chip-toggle-placeholder" aria-hidden="true" />
+      )}
+    </button>
   )
 }
 
@@ -83,14 +118,52 @@ export default function CustomizedPanel(): JSX.Element {
     refresh()
   }, [refresh])
 
-  const handleToggleItem = async (it: ExtItem): Promise<void> => {
-    const nextState = it.enabled === false ? true : false
+  const handleToggleAgent = async (it: ExtItem, agent: AgentId): Promise<void> => {
+    const agentSupport = it.agents.find((a) => a.agent === agent)
+    if (!agentSupport || agentSupport.state !== 'installed') return
+    const nextState = agentSupport.enabled === false ? true : false
+    try {
+      await window.api.ext.toggleItem(it.kind, it.id, nextState, agent)
+      setItems((prev) =>
+        prev.map((x) => {
+          if (x.kind !== it.kind || x.id !== it.id) return x
+          const updatedAgents = x.agents.map((a) =>
+            a.agent === agent ? { ...a, enabled: nextState } : a
+          )
+          const isAnyEnabled = updatedAgents.some(
+            (a) => a.state === 'installed' && a.enabled !== false
+          )
+          return {
+            ...x,
+            agents: updatedAgents,
+            enabled: isAnyEnabled
+          }
+        })
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const handleToggleAllAgents = async (it: ExtItem): Promise<void> => {
+    const installedAgents = it.agents.filter((a) => a.state === 'installed')
+    if (installedAgents.length === 0) return
+    const anyEnabled = installedAgents.some((a) => a.enabled !== false)
+    const nextState = !anyEnabled
     try {
       await window.api.ext.toggleItem(it.kind, it.id, nextState)
       setItems((prev) =>
-        prev.map((x) =>
-          x.kind === it.kind && x.id === it.id ? { ...x, enabled: nextState } : x
-        )
+        prev.map((x) => {
+          if (x.kind !== it.kind || x.id !== it.id) return x
+          const updatedAgents = x.agents.map((a) =>
+            a.state === 'installed' ? { ...a, enabled: nextState } : a
+          )
+          return {
+            ...x,
+            agents: updatedAgents,
+            enabled: nextState
+          }
+        })
       )
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -211,50 +284,74 @@ export default function CustomizedPanel(): JSX.Element {
             <div className="cz-empty">No {KIND_LABEL[kind]} detected</div>
           ) : (
             <div className="cz-list">
-              {byKind(kind).map((it) => (
-                <div
-                  key={`${it.kind}:${it.id}`}
-                  className={`cz-item ${it.enabled === false ? 'is-disabled' : ''}`}
-                >
-                  <div className="cz-item-main">
-                    <div className="cz-item-title">
-                      <span className="cz-title-text" title={it.name}>{it.name}</span>
-                      {it.version && <span className="cz-ver">v{it.version}</span>}
-                      {it.managed && <span className="cz-managed" title="Managed by the workbench manifest">managed</span>}
-                    </div>
-                    {it.description && <div className="cz-item-desc">{it.description}</div>}
-                    {it.needsConnection && it.needsConnection.length > 0 && (
-                      <div className="cz-needs">
-                        Requires connection:{' '}
-                        {it.needsConnection.map((n) => {
-                          const set = conns.find((c) => c.name === n)?.isSet
-                          return (
-                            <span key={n} className={set ? 'cz-conn ok' : 'cz-conn miss'}>
-                              {n}
-                              {set ? ' ✓' : ' not set'}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div className="cz-item-agents">
-                    {it.agents.map((a) => (
-                      <StateChip key={a.agent} agent={a.agent} state={a.state} detail={a.detail} />
-                    ))}
-                  </div>
-                  <div className="cz-item-actions">
-                    <button
-                      className={`cz-toggle-switch ${it.enabled !== false ? 'on' : 'off'}`}
-                      onClick={() => handleToggleItem(it)}
-                      title={it.enabled !== false ? 'Enabled (Click to disable)' : 'Disabled (Click to enable)'}
+              {byKind(kind).map((it) => {
+                const installedAgents = it.agents.filter((a) => a.state === 'installed')
+                const allInstalledDisabled =
+                  installedAgents.length > 0 && installedAgents.every((a) => a.enabled === false)
+                return (
+                  <div
+                    key={`${it.kind}:${it.id}`}
+                    className={`cz-item ${allInstalledDisabled ? 'is-disabled' : ''}`}
+                  >
+                    <div
+                      className={`cz-kind-badge cz-kind-${it.kind} ${installedAgents.length > 0 ? 'is-clickable' : ''}`}
+                      title={
+                        installedAgents.length > 0
+                          ? `點擊切換所有支援此項目的 Agent 開關 (${it.name})`
+                          : `${KIND_LABEL[it.kind]}: ${it.name}`
+                      }
+                      onClick={() => handleToggleAllAgents(it)}
                     >
-                      <span className="cz-toggle-thumb" />
-                      <span className="cz-toggle-label">{it.enabled !== false ? 'ON' : 'OFF'}</span>
-                    </button>
+                      {it.kind === 'plugin' && <IconPuzzle size={15} />}
+                      {it.kind === 'skill' && <IconZap size={15} />}
+                      {it.kind === 'mcp' && <IconServer size={15} />}
+                    </div>
+
+                    <div className="cz-item-main">
+                      <div className="cz-item-title">
+                        <span className="cz-title-text" title={it.name}>
+                          {it.name}
+                        </span>
+                        {it.version && <span className="cz-ver">v{it.version}</span>}
+                        {it.managed && (
+                          <span className="cz-managed" title="Managed by the workbench manifest">
+                            managed
+                          </span>
+                        )}
+                      </div>
+                      {it.description && <div className="cz-item-desc">{it.description}</div>}
+                      {it.needsConnection && it.needsConnection.length > 0 && (
+                        <div className="cz-needs">
+                          Requires connection:{' '}
+                          {it.needsConnection.map((n) => {
+                            const set = conns.find((c) => c.name === n)?.isSet
+                            return (
+                              <span key={n} className={set ? 'cz-conn ok' : 'cz-conn miss'}>
+                                {n}
+                                {set ? ' ✓' : ' not set'}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 各家 Agent 符號縮圖與獨立開關 */}
+                    <div className="cz-item-agents">
+                      {it.agents.map((a) => (
+                        <StateChip
+                          key={a.agent}
+                          agent={a.agent}
+                          state={a.state}
+                          enabled={a.enabled}
+                          detail={a.detail}
+                          onToggle={() => handleToggleAgent(it, a.agent)}
+                        />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </section>
