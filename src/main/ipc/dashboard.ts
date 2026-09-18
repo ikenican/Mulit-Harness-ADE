@@ -1,12 +1,20 @@
-import { ipcMain } from 'electron'
+import { ipcMain, app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { getActiveSessionMetas } from './pty'
-import { workspace } from '../index'
-import { isCliEnabled, isProtectedPath } from './settings'
-import type { AgentId, DashboardData, AgentSessionInfo } from '../../preload/index'
+import { workspace, getAllProjectWindows } from '../index'
+import {
+  isCliEnabled,
+  isProtectedPath,
+  getRecentWorkspaces,
+  addRecentWorkspace,
+  removeRecentWorkspace,
+  notifyJumpListUpdate,
+  setOnRecentWorkspaceAdded
+} from './settings'
+import type { AgentId, DashboardData, AgentSessionInfo, DashboardWorkspaceInfo } from '../../preload/index'
 
 const H = homedir()
 
@@ -20,31 +28,28 @@ function estimateTokens(text: string): number {
 
 function normalizePath(p?: string): string {
   if (!p) return ''
-  return p.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '')
+  return p.replace(/\\+/g, '/').replace(/\/+/g, '/').toLowerCase().replace(/\/+$/, '')
 }
 
 function isSameWorkspace(wsPath1?: string, wsName1?: string, wsPath2?: string, wsName2?: string): boolean {
   const norm1 = normalizePath(wsPath1)
   const norm2 = normalizePath(wsPath2)
+
+  // 若雙方均有實體路徑：嚴格比對或結尾包含比對（不區分大小寫與正反斜線）
   if (norm1 && norm2) {
-    if (
-      norm1 === norm2 ||
-      norm1.endsWith('/' + norm2) ||
-      norm2.endsWith('/' + norm1) ||
-      norm1.startsWith(norm2 + '/') ||
-      norm2.startsWith(norm1 + '/')
-    ) {
-      return true
-    }
+    if (norm1 === norm2) return true
+    if (norm1.endsWith('/' + norm2) || norm2.endsWith('/' + norm1)) return true
   }
-  const n1 = (wsName1 || (wsPath1 ? basename(wsPath1) : '')).trim().toLowerCase()
-  const n2 = (wsName2 || (wsPath2 ? basename(wsPath2) : '')).trim().toLowerCase()
+
+  // 若其中一方缺少路徑或比對失敗，退回以專案資料夾名稱比對（不分大小寫）
+  const n1 = (wsName1 || (norm1 ? basename(norm1) : '')).trim().toLowerCase()
+  const n2 = (wsName2 || (norm2 ? basename(norm2) : '')).trim().toLowerCase()
   if (n1 && n2) {
     if (n1 === n2) return true
-    const clean1 = n1.replace(/[-_\s]+/g, ' ')
-    const clean2 = n2.replace(/[-_\s]+/g, ' ')
-    if (clean1 === clean2) return true
+    if (norm1 && (norm1 === n2 || norm1.endsWith('/' + n2))) return true
+    if (norm2 && (norm2 === n1 || norm2.endsWith('/' + n1))) return true
   }
+
   return false
 }
 
@@ -101,25 +106,17 @@ function extractAntigravityWorkspace(logPath: string): { workspace: string; work
     }
     fs.closeSync(fd)
 
-    // 1. 最高優先級：若日誌包含當前 workspace.root，直接關聯當前專案
-    if (workspace.root) {
-      const normWs = normalizePath(workspace.root)
-      const normContent = content.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase()
-      if (normContent.includes(normWs)) {
-        return { workspace: basename(workspace.root), workspacePath: workspace.root }
-      }
-    }
-
-    // 2. 匹配 [URI] -> [CorpusName] 格式 或 Workspace URI
+    // 1. 優先從日誌本身明確記錄的工作區中萃取
+    // 匹配 [URI] -> [CorpusName] 格式 或 Workspace URI
     const uriMatch = content.match(/([a-zA-Z]:[^\r\n"'>]+?)\s*->\s*[^\r\n]+/)
     if (uriMatch && uriMatch[1]) {
-      const target = uriMatch[1].trim()
+      const target = uriMatch[1].replace(/\\\\/g, '\\').trim()
       if (target.length > 3 && fs.existsSync(target)) {
         return { workspace: basename(target) || target, workspacePath: target }
       }
     }
 
-    // 3. 匹配 Cwd (工具調用參數，排除引號與跳脫字元)
+    // 匹配 Cwd (工具調用參數，排除引號與跳脫字元)
     const cwdMatch = content.match(/"[Cc]wd"\s*:\s*(?:"\\?"|")([^"\r\n]+?)(?:\\?"|")/)
     if (cwdMatch && cwdMatch[1]) {
       const target = cwdMatch[1].replace(/^[\\"]+|[\\"]+$/g, '').replace(/\\\\/g, '\\').trim()
@@ -128,13 +125,24 @@ function extractAntigravityWorkspace(logPath: string): { workspace: string; work
       }
     }
 
-    // 4. 匹配 Active Document: <path>
+    // 匹配 Active Document: <path>
     const docMatch = content.match(/(?:Active Document|Other open documents: -)\s*[:\-]?\s*([A-Za-z]:[^\r\n"()]+)/)
     if (docMatch && docMatch[1]) {
-      const full = docMatch[1].trim()
-      const dir = dirname(full)
-      if (dir.length > 3 && fs.existsSync(dir)) {
-        return { workspace: basename(dir) || dir, workspacePath: dir }
+      let docDir = dirname(docMatch[1].replace(/\\\\/g, '\\').trim())
+      while (docDir.length > 3 && !fs.existsSync(docDir)) {
+        docDir = dirname(docDir)
+      }
+      if (docDir.length > 3 && fs.existsSync(docDir)) {
+        return { workspace: basename(docDir) || docDir, workspacePath: docDir }
+      }
+    }
+
+    // 2. 兜底：若日誌內容精確包含當前工作區路徑，關聯當前工作區
+    if (workspace.root) {
+      const normWs = normalizePath(workspace.root)
+      const normContent = content.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase()
+      if (normContent.includes(normWs)) {
+        return { workspace: basename(workspace.root), workspacePath: workspace.root }
       }
     }
   } catch {
@@ -153,7 +161,9 @@ function extractAntigravityWorkspace(logPath: string): { workspace: string; work
  * 將目錄名稱轉換為 Claude 編碼格式，用於反解比對
  */
 function normalizeForClaude(str: string): string {
-  return str.replace(/[^a-zA-Z0-9]/g, '-')
+  // Claude Code 在 ~/.claude/projects/ 將各個非英數字元（如空白、連字號、底線）逐一轉成 '-'
+  // 例如 'Claude Agent - Personal' -> 'Claude-Agent---Personal'（保留連字號前後各別的 dash）
+  return str.replace(/[^A-Za-z0-9]/g, '-')
 }
 
 /**
@@ -167,22 +177,13 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
     }
   }
 
-  // 若目錄名稱包含當前 workspace.root 的名稱（含正規化比對）
-  if (workspace.root) {
-    const wsBase = basename(workspace.root).toLowerCase()
-    const normWsBase = normalizeForClaude(wsBase).toLowerCase()
-    if (dirName.toLowerCase().includes(wsBase) || dirName.toLowerCase().includes(normWsBase)) {
-      return { workspace: basename(workspace.root), workspacePath: workspace.root }
-    }
-  }
-
-  // Claude 專案目錄格式如：D--Cloud-OneDrive-AI-workspace-...
+  // Claude 專案目錄格式如：D--OneDrive-AI-workspace-...
   // 嘗試反解目錄名為真實磁碟路徑
   if (dirName.match(/^[A-Za-z]--/)) {
     const drive = dirName.charAt(0).toUpperCase() + ':\\'
     let rest = dirName.slice(3)
 
-    // 策略 1：從磁碟機根目錄遍歷對應子目錄層級（支援連字號、空格、Junction / Symlink）
+    // 策略 1：從磁碟機根目錄遍歷對應子目錄層級（精確比對連字號、空格、Junction / Symlink）
     let currentPath = drive
     while (rest.length > 0) {
       let entries: fs.Dirent[]
@@ -202,13 +203,14 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
         const norm = normalizeForClaude(entry.name)
         if (rest.toLowerCase() === norm.toLowerCase()) {
           matchedEntry = entry.name
-          matchedLen = norm.length
+          matchedLen = rest.length
           break
         }
         if (rest.toLowerCase().startsWith(norm.toLowerCase() + '-')) {
-          matchedEntry = entry.name
-          matchedLen = norm.length + 1
-          break
+          if (norm.length > matchedLen) {
+            matchedEntry = entry.name
+            matchedLen = norm.length + 1
+          }
         }
       }
 
@@ -220,10 +222,8 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
       }
     }
 
+    // 只有在 rest 完全匹配無剩餘時，currentPath 才是真正的專案工作區路徑（絕不可回傳半途的父目錄）
     if (rest.length === 0 && fs.existsSync(currentPath)) {
-      return { workspace: basename(currentPath) || currentPath, workspacePath: currentPath }
-    }
-    if (currentPath !== drive && fs.existsSync(currentPath)) {
       return { workspace: basename(currentPath) || currentPath, workspacePath: currentPath }
     }
 
@@ -237,6 +237,15 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
     const pathWithDashSpace = drive + dirName.slice(3).replace(/---/g, ' - ').split('--').join('\\')
     if (fs.existsSync(pathWithDashSpace)) {
       return { workspace: basename(pathWithDashSpace) || pathWithDashSpace, workspacePath: pathWithDashSpace }
+    }
+  }
+
+  // 策略 4：若目錄名稱包含當前 workspace.root 的名稱（含正規化比對）
+  if (workspace.root) {
+    const wsBase = basename(workspace.root).toLowerCase()
+    const normWsBase = normalizeForClaude(wsBase).toLowerCase()
+    if (dirName.toLowerCase().includes(wsBase) || dirName.toLowerCase().includes(normWsBase)) {
+      return { workspace: basename(workspace.root), workspacePath: workspace.root }
     }
   }
 
@@ -362,12 +371,76 @@ export function getRecentWorkspacesFromDashboard(): string[] {
 }
 
 /**
- * 讀取 Antigravity 本地會話日誌與真實 Token 概況（支援 mtime 快速快取）
+ * 完整探測 Antigravity 會話各項活動日誌與狀態檔案的最新修改時間。
+ * 包含：transcript.jsonl / transcript_full.jsonl、conversations/*.db 及 SQLite WAL 檔（執行中持續寫入）、
+ * presence/*.lock、以及 .system_generated/tasks 與 messages。
+ */
+function getAntigravitySessionMaxMtime(brainPath: string, sessionId: string, brainDir: string): number {
+  let maxMtime = 0
+
+  // 1. 日誌檔 transcript.jsonl & transcript_full.jsonl
+  const logsDir = join(brainPath, '.system_generated', 'logs')
+  for (const logFile of ['transcript.jsonl', 'transcript_full.jsonl']) {
+    try {
+      const p = join(logsDir, logFile)
+      if (fs.existsSync(p)) {
+        const m = fs.statSync(p).mtimeMs
+        if (m > maxMtime) maxMtime = m
+      }
+    } catch {}
+  }
+
+  // 2. conversations/<id>.db 與 .db-wal（SQLite WAL 模式在工作時不斷推進）
+  const geminiRoot = dirname(brainDir)
+  const convDir = join(geminiRoot, 'conversations')
+  for (const f of [`${sessionId}.db`, `${sessionId}.db-wal`]) {
+    try {
+      const p = join(convDir, f)
+      if (fs.existsSync(p)) {
+        const m = fs.statSync(p).mtimeMs
+        if (m > maxMtime) maxMtime = m
+      }
+    } catch {}
+  }
+
+  // 3. presence/<id>.lock
+  const presenceDir = join(geminiRoot, 'presence')
+  try {
+    const p = join(presenceDir, `${sessionId}.lock`)
+    if (fs.existsSync(p)) {
+      const m = fs.statSync(p).mtimeMs
+      if (m > maxMtime) maxMtime = m
+    }
+  } catch {}
+
+  // 4. 背景命令執行日誌 (tasks) 與最新對話訊息 (messages)
+  for (const sub of ['tasks', 'messages']) {
+    try {
+      const dir = join(brainPath, '.system_generated', sub)
+      if (fs.existsSync(dir)) {
+        const dirM = fs.statSync(dir).mtimeMs
+        if (dirM > maxMtime) maxMtime = dirM
+        const entries = fs.readdirSync(dir)
+        for (const e of entries.slice(-5)) {
+          const ep = join(dir, e)
+          const m = fs.statSync(ep).mtimeMs
+          if (m > maxMtime) maxMtime = m
+        }
+      }
+    } catch {}
+  }
+
+  return maxMtime
+}
+
+/**
+ * 讀取 Antigravity 本地會話日誌與真實 Token 概況（支援多重日誌/WAL/Task/Message mtime 快速快取）
  */
 function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
   const brainDirs = [
     join(H, '.gemini', 'antigravity-ide', 'brain'),
-    join(H, '.gemini', 'antigravity-cli', 'brain')
+    join(H, '.gemini', 'antigravity-cli', 'brain'),
+    join(H, '.gemini', 'antigravity', 'brain')
   ].filter((p) => fs.existsSync(p))
   if (brainDirs.length === 0) return []
 
@@ -383,16 +456,7 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
         .map((e) => {
           const p = join(brainDir, e.name)
           const logPath = join(p, '.system_generated', 'logs', 'transcript.jsonl')
-          let mtime = 0
-          try {
-            if (fs.existsSync(logPath)) {
-              mtime = fs.statSync(logPath).mtimeMs
-            } else {
-              mtime = fs.statSync(p).mtimeMs
-            }
-          } catch {
-            mtime = 0
-          }
+          const mtime = getAntigravitySessionMaxMtime(p, e.name, brainDir)
           return { name: e.name, path: p, logPath, mtime }
         })
       allDirs.push(...dirs)
@@ -412,7 +476,7 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
       } catch {
         continue
       }
-      const lastTimeMs = stat.mtimeMs
+      const lastTimeMs = d.mtime || stat.mtimeMs
       const cached = cache.get(logPath)
 
       // Fast-Stat 命中：未修改的會話完全免讀檔免解析，0.01ms 瞬開
@@ -420,9 +484,9 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
         const s: AgentSessionInfo = { ...cached.session }
         const timeSinceLastActive = Date.now() - lastTimeMs
         s.status =
-          timeSinceLastActive < 120 * 1000
+          timeSinceLastActive < 5 * 60 * 1000
             ? 'active'
-            : timeSinceLastActive < 15 * 60 * 1000
+            : timeSinceLastActive < 30 * 60 * 1000
             ? 'idle'
             : 'completed'
         s.lastActiveTime = new Date(lastTimeMs || Date.now()).toISOString()
@@ -471,9 +535,9 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
       const timeSinceLastActive = Date.now() - lastTimeMs
       const lastTime = new Date(lastTimeMs || Date.now()).toISOString()
       const status: 'active' | 'idle' | 'completed' =
-        timeSinceLastActive < 120 * 1000
+        timeSinceLastActive < 5 * 60 * 1000
           ? 'active'
-          : timeSinceLastActive < 15 * 60 * 1000
+          : timeSinceLastActive < 30 * 60 * 1000
           ? 'idle'
           : 'completed'
 
@@ -550,38 +614,62 @@ function estimateTokensFromBlob(buf: Buffer): number {
  * 從 blob 二進位中自動反解。
  */
 function scanAntigravityCliConversations(max = 20): AgentSessionInfo[] {
-  const dir = join(H, '.gemini', 'antigravity-cli', 'conversations')
-  if (!fs.existsSync(dir)) return []
+  const convDirs = [
+    join(H, '.gemini', 'antigravity-cli', 'conversations'),
+    join(H, '.gemini', 'antigravity-ide', 'conversations'),
+    join(H, '.gemini', 'antigravity', 'conversations')
+  ].filter((p) => fs.existsSync(p))
+  if (convDirs.length === 0) return []
 
   const list: AgentSessionInfo[] = []
   const cache = loadDashboardCache()
 
   try {
-    const files = fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith('.db'))
-      .map((e) => {
-        const p = join(dir, e.name)
-        let mtime = 0
-        try {
-          mtime = fs.statSync(p).mtimeMs
-          const wal = `${p}-wal`
-          if (fs.existsSync(wal)) {
-            const walMtime = fs.statSync(wal).mtimeMs
-            if (walMtime > mtime) mtime = walMtime
+    const allFiles: { id: string; path: string; mtime: number }[] = []
+    const seenIds = new Set<string>()
+
+    for (const dir of convDirs) {
+      const files = fs
+        .readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isFile() && e.name.endsWith('.db'))
+        .map((e) => {
+          const p = join(dir, e.name)
+          const id = e.name.slice(0, -3)
+          let mtime = 0
+          try {
+            mtime = fs.statSync(p).mtimeMs
+            const wal = `${p}-wal`
+            if (fs.existsSync(wal)) {
+              const walMtime = fs.statSync(wal).mtimeMs
+              if (walMtime > mtime) mtime = walMtime
+            }
+            const presenceLock = join(dirname(dir), 'presence', `${id}.lock`)
+            if (fs.existsSync(presenceLock)) {
+              const lockM = fs.statSync(presenceLock).mtimeMs
+              if (lockM > mtime) mtime = lockM
+            }
+          } catch {
+            mtime = 0
           }
-        } catch {
-          mtime = 0
+          return { id, path: p, mtime }
+        })
+
+      for (const f of files) {
+        if (!seenIds.has(f.id)) {
+          seenIds.add(f.id)
+          allFiles.push(f)
         }
-        return { id: e.name.slice(0, -3), path: p, mtime }
-      })
+      }
+    }
+
+    const files = allFiles
       .sort((a, b) => b.mtime - a.mtime)
       .slice(0, max)
 
     for (const f of files) {
       const timeSinceLastActive = Date.now() - f.mtime
       const status: 'active' | 'idle' | 'completed' =
-        timeSinceLastActive < 120 * 1000 ? 'active' : timeSinceLastActive < 15 * 60 * 1000 ? 'idle' : 'completed'
+        timeSinceLastActive < 5 * 60 * 1000 ? 'active' : timeSinceLastActive < 30 * 60 * 1000 ? 'idle' : 'completed'
       const lastTime = new Date(f.mtime || Date.now()).toISOString()
 
       const cached = cache.get(f.path)
@@ -883,9 +971,9 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
       if (indexTitle) s.title = indexTitle
       const timeSinceLastActive = Date.now() - mtime
       s.status =
-        timeSinceLastActive < 2 * 60 * 1000
+        timeSinceLastActive < 5 * 60 * 1000
           ? 'active'
-          : timeSinceLastActive < 15 * 60 * 1000
+          : timeSinceLastActive < 30 * 60 * 1000
           ? 'idle'
           : 'completed'
       s.lastActiveTime = new Date(mtime).toISOString()
@@ -953,9 +1041,9 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
 
     const timeSinceLastActive = Date.now() - f.mtime
     const status: 'active' | 'idle' | 'completed' =
-      timeSinceLastActive < 2 * 60 * 1000
+      timeSinceLastActive < 5 * 60 * 1000
         ? 'active'
-        : timeSinceLastActive < 15 * 60 * 1000
+        : timeSinceLastActive < 30 * 60 * 1000
         ? 'idle'
         : 'completed'
 
@@ -990,41 +1078,149 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
   return list
 }
 
-interface DashboardState {
+export interface DashboardState {
   archivedIds: string[]
   deletedIds: string[]
+  archivedWorkspaces: string[]
+  deletedWorkspaces: string[]
 }
 
 function stateFilePath(): string {
-  return join(workspace.root, '.workbench', 'dashboard-state.json')
+  try {
+    return join(app.getPath('userData'), 'dashboard-state.json')
+  } catch {
+    return join(process.env['APPDATA'] || process.cwd(), 'agent-workbench', 'dashboard-state.json')
+  }
 }
 
-function loadDashboardState(): DashboardState {
+export function loadDashboardState(): DashboardState {
   try {
     const p = stateFilePath()
     if (fs.existsSync(p)) {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf8'))
       return {
         archivedIds: Array.isArray(parsed.archivedIds) ? parsed.archivedIds : [],
-        deletedIds: Array.isArray(parsed.deletedIds) ? parsed.deletedIds : []
+        deletedIds: Array.isArray(parsed.deletedIds) ? parsed.deletedIds : [],
+        archivedWorkspaces: Array.isArray(parsed.archivedWorkspaces) ? parsed.archivedWorkspaces : [],
+        deletedWorkspaces: Array.isArray(parsed.deletedWorkspaces) ? parsed.deletedWorkspaces : []
       }
     }
   } catch {
     // ignore
   }
-  return { archivedIds: [], deletedIds: [] }
+  return { archivedIds: [], deletedIds: [], archivedWorkspaces: [], deletedWorkspaces: [] }
 }
 
-function saveDashboardState(state: DashboardState): void {
-  if (!workspace.root || isProtectedPath(workspace.root)) return
+export function saveDashboardState(state: DashboardState): void {
   try {
     const p = stateFilePath()
-    fs.mkdirSync(join(workspace.root, '.workbench'), { recursive: true })
+    const dir = dirname(p)
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(p, JSON.stringify(state, null, 2), 'utf8')
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[Dashboard] Failed to save dashboard state:', err)
   }
 }
+
+export function unmarkDeletedOrArchivedWorkspace(dir: string): void {
+  try {
+    if (!dir) return
+    const norm = normalizePath(dir)
+    const wsName = (dir.split(/[\\/]/).filter(Boolean).pop() || dir).trim().toLowerCase()
+    const state = loadDashboardState()
+    let changed = false
+
+    const isMatch = (target?: string): boolean => {
+      if (!target) return false
+      const nt = normalizePath(target)
+      if (nt === norm || nt.endsWith('/' + norm) || norm.endsWith('/' + nt)) return true
+      const base = (target.split(/[\\/]/).filter(Boolean).pop() || target).trim().toLowerCase()
+      if (base && wsName && (base === wsName || nt === wsName || base.endsWith('/' + wsName))) return true
+      return false
+    }
+
+    // 1. 從 deletedWorkspaces 與 archivedWorkspaces 移除
+    const prevDelCount = state.deletedWorkspaces.length
+    state.deletedWorkspaces = state.deletedWorkspaces.filter((w) => !isMatch(w))
+    if (state.deletedWorkspaces.length !== prevDelCount) changed = true
+
+    const prevArchCount = state.archivedWorkspaces.length
+    state.archivedWorkspaces = state.archivedWorkspaces.filter((w) => !isMatch(w))
+    if (state.archivedWorkspaces.length !== prevArchCount) changed = true
+
+    // 2. 解除屬於該工作區的所有會話的 deletedIds 與 archivedIds 標記
+    const unmarkIds = new Set<string>()
+
+    if (memCache) {
+      for (const entry of memCache.values()) {
+        const s = entry.session
+        if (isSameWorkspace(s.workspacePath, s.workspace, dir, wsName) || isMatch(s.workspacePath) || isMatch(s.workspace)) {
+          unmarkIds.add(s.id)
+        }
+      }
+    }
+
+    // 探測 Claude 專案日誌目錄
+    try {
+      const claudeDir = join(H, '.claude', 'projects')
+      if (fs.existsSync(claudeDir)) {
+        for (const e of fs.readdirSync(claudeDir, { withFileTypes: true })) {
+          if (e.isDirectory()) {
+            const decoded = extractClaudeWorkspace(e.name)
+            if (isSameWorkspace(decoded.workspacePath, decoded.workspace, dir, wsName) || isMatch(decoded.workspacePath) || isMatch(decoded.workspace)) {
+              const fullP = join(claudeDir, e.name)
+              for (const f of fs.readdirSync(fullP)) {
+                if (f.endsWith('.jsonl')) {
+                  unmarkIds.add(f.slice(0, -6))
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+
+    // 探測 Antigravity brain
+    try {
+      for (const b of [join(H, '.gemini', 'antigravity-ide', 'brain'), join(H, '.gemini', 'antigravity-cli', 'brain'), join(H, '.gemini', 'antigravity', 'brain')]) {
+        if (!fs.existsSync(b)) continue
+        for (const e of fs.readdirSync(b, { withFileTypes: true })) {
+          if (e.isDirectory() && !e.name.startsWith('.')) {
+            const logPath = join(b, e.name, '.system_generated', 'logs', 'transcript.jsonl')
+            if (fs.existsSync(logPath)) {
+              const { workspace: aWs, workspacePath: aPath } = extractAntigravityWorkspace(logPath)
+              if (isSameWorkspace(aPath, aWs, dir, wsName) || isMatch(aPath) || isMatch(aWs)) {
+                unmarkIds.add(e.name)
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+
+    if (unmarkIds.size > 0) {
+      const prevDelIds = state.deletedIds.length
+      state.deletedIds = state.deletedIds.filter((id) => !unmarkIds.has(id))
+      if (state.deletedIds.length !== prevDelIds) changed = true
+
+      const prevArchIds = state.archivedIds.length
+      state.archivedIds = state.archivedIds.filter((id) => !unmarkIds.has(id))
+      if (state.archivedIds.length !== prevArchIds) changed = true
+    }
+
+    if (changed) {
+      saveDashboardState(state)
+    }
+    invalidateDashboardMemoryCache()
+    notifyJumpListUpdate()
+  } catch (err) {
+    console.warn('[Dashboard] Failed to unmarkDeletedOrArchivedWorkspace:', err)
+  }
+}
+
+setOnRecentWorkspaceAdded((dir) => {
+  unmarkDeletedOrArchivedWorkspace(dir)
+})
 
 let activeScanPromise: Promise<DashboardData> | null = null
 
@@ -1046,8 +1242,32 @@ export function registerDashboardHandlers(): void {
         const activePtySessions = getActiveSessionMetas()
 
         // 2. 抓取歷史真實會話記錄（依 Settings 啟用狀態過濾）
+        const agyBrainSessions = scanAntigravitySessions(30)
+        const agyCliSessions = scanAntigravityCliConversations(30)
+        const agySessionMap = new Map<string, AgentSessionInfo>()
+
+        // 優先收納 scanAntigravitySessions (具有完整日誌與 Token 細節)
+        for (const s of agyBrainSessions) {
+          agySessionMap.set(s.id, s)
+        }
+
+        // 補充或更新 scanAntigravityCliConversations
+        for (const s of agyCliSessions) {
+          if (agySessionMap.has(s.id)) {
+            const existing = agySessionMap.get(s.id)!
+            const existingTime = new Date(existing.lastActiveTime).getTime()
+            const cliTime = new Date(s.lastActiveTime).getTime()
+            if (cliTime > existingTime) {
+              existing.lastActiveTime = s.lastActiveTime
+              existing.status = s.status
+            }
+          } else {
+            agySessionMap.set(s.id, s)
+          }
+        }
+
         const agySessions = isCliEnabled('antigravity')
-          ? [...scanAntigravitySessions(20), ...scanAntigravityCliConversations(20)]
+          ? Array.from(agySessionMap.values())
               .filter((s) => !deletedSet.has(s.id))
               .map((s) => ({ ...s, isArchived: archivedSet.has(s.id) }))
           : []
@@ -1160,6 +1380,14 @@ export function registerDashboardHandlers(): void {
         matched.status = 'active'
         matched.lastActiveTime = new Date().toISOString()
       } else if (!deletedSet.has(p.id)) {
+        const normTarget = normalizePath(targetCwd)
+        if (normTarget && state.deletedWorkspaces.some((w) => normalizePath(w) === normTarget)) {
+          continue
+        }
+        const isWsArchived = Boolean(
+          archivedSet.has(p.id) ||
+          (normTarget && state.archivedWorkspaces.some((w) => normalizePath(w) === normTarget))
+        )
         const currentName = targetCwd ? basename(targetCwd) : 'Workspace'
         standaloneSessions.push({
           id: p.id,
@@ -1170,7 +1398,7 @@ export function registerDashboardHandlers(): void {
           lastActiveTime: new Date().toISOString(),
           totalTokens: 0,
           model: agentType === 'claude' ? 'Claude 3.7 Sonnet' : agentType === 'antigravity' ? 'Gemini 3.8 Flash' : 'Codex CLI',
-          isArchived: archivedSet.has(p.id),
+          isArchived: isWsArchived,
           workspace: currentName,
           workspacePath: targetCwd,
           tokenBreakdown: {
@@ -1187,8 +1415,107 @@ export function registerDashboardHandlers(): void {
       }
     }
 
-    // 4. 合併清單：活躍的優先排在最前，其餘依最後活躍時間排序
-    const allSessions = [...standaloneSessions, ...agySessions, ...claudeSessions, ...codexSessions].sort((a, b) => {
+    // 4. 取得使用者真正開啟過的所有合法工作區（recentWorkspaces + 各開啟中視窗之 workspaceRoot）
+    const userPathsSet = new Set<string>()
+    for (const p of getRecentWorkspaces()) {
+      if (p && !isProtectedPath(p)) {
+        userPathsSet.add(path.resolve(p))
+      }
+    }
+    for (const pw of getAllProjectWindows()) {
+      if (pw.workspaceRoot && !isProtectedPath(pw.workspaceRoot)) {
+        userPathsSet.add(path.resolve(pw.workspaceRoot))
+      }
+    }
+    if (workspace.root && !isProtectedPath(workspace.root)) {
+      userPathsSet.add(path.resolve(workspace.root))
+    }
+
+    const deletedWorkspacesSet = new Set(state.deletedWorkspaces.map((w) => normalizePath(w)))
+    const archivedWorkspacesSet = new Set(state.archivedWorkspaces.map((w) => normalizePath(w)))
+
+    // 排除已刪除者
+    const activeUserPaths: string[] = []
+    for (const p of userPathsSet) {
+      const norm = normalizePath(p)
+      if (!deletedWorkspacesSet.has(norm) && !archivedWorkspacesSet.has(norm)) {
+        activeUserPaths.push(p)
+      }
+    }
+
+    const archivedUserPaths: string[] = []
+    for (const p of state.archivedWorkspaces) {
+      const norm = normalizePath(p)
+      if (!deletedWorkspacesSet.has(norm)) {
+        archivedUserPaths.push(p)
+      }
+    }
+
+    const allAllowedPaths = [...activeUserPaths, ...archivedUserPaths]
+    const currentRoot = workspace.root ? path.resolve(workspace.root) : ''
+    const userWorkspacesList: DashboardWorkspaceInfo[] = [
+      ...activeUserPaths.map((p) => ({
+        path: p,
+        name: basename(p) || p,
+        isCurrent: Boolean(currentRoot && normalizePath(currentRoot) === normalizePath(p)),
+        isArchived: false
+      })),
+      ...archivedUserPaths.map((p) => ({
+        path: p,
+        name: basename(p) || p,
+        isCurrent: Boolean(currentRoot && normalizePath(currentRoot) === normalizePath(p)),
+        isArchived: true
+      }))
+    ]
+
+    // 判斷某 session 是否屬於使用者合法工作區之一
+    const matchUserWorkspace = (s: AgentSessionInfo): { matched: boolean; isArchived: boolean; matchedPath?: string } => {
+      if (standaloneSessions.some((st) => st.id === s.id)) {
+        return { matched: true, isArchived: false }
+      }
+      for (const p of allAllowedPaths) {
+        const pName = basename(p)
+        if (isSameWorkspace(s.workspacePath, s.workspace, p, pName)) {
+          const isArchived = archivedWorkspacesSet.has(normalizePath(p)) || archivedSet.has(s.id)
+          return { matched: true, isArchived, matchedPath: p }
+        }
+      }
+      // 活躍會話（即使在外部終端新開專案目錄）或具有有效工作區實體目錄之會話：
+      // 只要未被使用者明確隱藏 (deletedWorkspaces)，均允許在 Dashboard 呈現，確保外面執行的 CLI 不會遺失
+      if (s.status === 'active' || (s.workspacePath && fs.existsSync(s.workspacePath) && !isProtectedPath(s.workspacePath))) {
+        const normWs = s.workspacePath ? normalizePath(s.workspacePath) : ''
+        if (normWs && deletedWorkspacesSet.has(normWs)) {
+          return { matched: false, isArchived: false }
+        }
+        const isArchived = Boolean(archivedSet.has(s.id) || (normWs && archivedWorkspacesSet.has(normWs)))
+        return { matched: true, isArchived, matchedPath: s.workspacePath }
+      }
+      return { matched: false, isArchived: false }
+    }
+
+    const filterUserSessions = (list: AgentSessionInfo[]): AgentSessionInfo[] => {
+      const res: AgentSessionInfo[] = []
+      for (const s of list) {
+        const m = matchUserWorkspace(s)
+        if (m.matched) {
+          res.push({
+            ...s,
+            isArchived: m.isArchived,
+            // 絕不覆寫該會話本身已有的真實工作區路徑與名稱，只在缺失時才以匹配工作區回填
+            workspacePath: s.workspacePath || m.matchedPath,
+            workspace: s.workspace || (m.matchedPath ? basename(m.matchedPath) : s.workspace)
+          })
+        }
+      }
+      return res
+    }
+
+    const filteredAgy = filterUserSessions(agySessions)
+    const filteredClaude = filterUserSessions(claudeSessions)
+    const filteredCodex = filterUserSessions(codexSessions)
+
+    // 合併清單：活躍的優先排在最前，其餘依最後活躍時間排序
+    const allSessions = [...standaloneSessions, ...filteredAgy, ...filteredClaude, ...filteredCodex].sort((a, b) => {
       if (a.status === 'active' && b.status !== 'active') return -1
       if (a.status !== 'active' && b.status === 'active') return 1
       return new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime()
@@ -1257,7 +1584,10 @@ export function registerDashboardHandlers(): void {
           completionTokens: codexUsage.comp
         }
       },
-      sessions: allSessions
+      sessions: allSessions,
+      userWorkspaces: userWorkspacesList,
+      archivedWorkspaces: state.archivedWorkspaces,
+      deletedWorkspaces: state.deletedWorkspaces
     }
 
         return data
@@ -1317,6 +1647,136 @@ export function registerDashboardHandlers(): void {
     }
     state.archivedIds = state.archivedIds.filter((x) => !idSet.has(x))
     saveDashboardState(state)
+    return true
+  })
+
+  ipcMain.handle(
+    'dashboard:archiveWorkspace',
+    async (_e, wsPath: string, archive: boolean, sessionIds?: string[]): Promise<boolean> => {
+      if (!wsPath) return false
+      const state = loadDashboardState()
+      const norm = normalizePath(wsPath)
+      const wsName = (wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath).trim()
+
+      const isTargetWs = (wPath?: string, wName?: string): boolean => {
+        if (!wPath && !wName) return false
+        if (isSameWorkspace(wPath, wName, wsPath, wsName)) return true
+        if (wPath) {
+          const nw = normalizePath(wPath)
+          if (nw === norm || nw.endsWith('/' + norm) || norm.endsWith('/' + nw)) return true
+        }
+        const n = (wName || (wPath ? basename(wPath) : '')).trim().toLowerCase()
+        if (n && (n === wsName.toLowerCase() || n === norm)) return true
+        return false
+      }
+
+      if (archive) {
+        if (!state.archivedWorkspaces.some((w) => isTargetWs(w, basename(w)))) {
+          state.archivedWorkspaces.push(wsPath)
+        }
+        state.deletedWorkspaces = state.deletedWorkspaces.filter((w) => !isTargetWs(w, basename(w)))
+
+        // 同步標記前端傳入的特定 session IDs
+        if (Array.isArray(sessionIds) && sessionIds.length > 0) {
+          for (const id of sessionIds) {
+            if (!state.archivedIds.includes(id)) state.archivedIds.push(id)
+          }
+        }
+
+        // 同步標記記憶體快取中屬於該工作區的所有 session
+        if (memCache) {
+          for (const entry of memCache.values()) {
+            const s = entry.session
+            if (isTargetWs(s.workspacePath, s.workspace)) {
+              if (!state.archivedIds.includes(s.id)) state.archivedIds.push(s.id)
+            }
+          }
+        }
+      } else {
+        state.archivedWorkspaces = state.archivedWorkspaces.filter((w) => !isTargetWs(w, basename(w)))
+
+        if (Array.isArray(sessionIds) && sessionIds.length > 0) {
+          const idSet = new Set(sessionIds)
+          state.archivedIds = state.archivedIds.filter((id) => !idSet.has(id))
+        }
+
+        if (memCache) {
+          for (const entry of memCache.values()) {
+            const s = entry.session
+            if (isTargetWs(s.workspacePath, s.workspace)) {
+              state.archivedIds = state.archivedIds.filter((id) => id !== s.id)
+            }
+          }
+        }
+        if (fs.existsSync(wsPath)) {
+          addRecentWorkspace(wsPath)
+        }
+      }
+      invalidateDashboardMemoryCache()
+      saveDashboardState(state)
+      notifyJumpListUpdate()
+      return true
+    }
+  )
+
+  ipcMain.handle(
+    'dashboard:deleteWorkspace',
+    async (_e, wsPath: string, sessionIds?: string[]): Promise<boolean> => {
+      if (!wsPath) return false
+      const state = loadDashboardState()
+      const norm = normalizePath(wsPath)
+      const wsName = (wsPath.split(/[\\/]/).filter(Boolean).pop() || wsPath).trim()
+
+      const isTargetWs = (wPath?: string, wName?: string): boolean => {
+        if (!wPath && !wName) return false
+        if (isSameWorkspace(wPath, wName, wsPath, wsName)) return true
+        if (wPath) {
+          const nw = normalizePath(wPath)
+          if (nw === norm || nw.endsWith('/' + norm) || norm.endsWith('/' + nw)) return true
+        }
+        const n = (wName || (wPath ? basename(wPath) : '')).trim().toLowerCase()
+        if (n && (n === wsName.toLowerCase() || n === norm)) return true
+        return false
+      }
+
+      state.archivedWorkspaces = state.archivedWorkspaces.filter((w) => !isTargetWs(w, basename(w)))
+      if (!state.deletedWorkspaces.some((w) => isTargetWs(w, basename(w)))) {
+        state.deletedWorkspaces.push(wsPath)
+      }
+
+      // 同步隱藏所屬 session IDs
+      if (Array.isArray(sessionIds) && sessionIds.length > 0) {
+        for (const id of sessionIds) {
+          if (!state.deletedIds.includes(id)) state.deletedIds.push(id)
+        }
+        const idSet = new Set(sessionIds)
+        state.archivedIds = state.archivedIds.filter((id) => !idSet.has(id))
+      }
+
+      // 同步隱藏記憶體快取中屬於該工作區的所有 session
+      if (memCache) {
+        for (const entry of memCache.values()) {
+          const s = entry.session
+          if (isTargetWs(s.workspacePath, s.workspace)) {
+            if (!state.deletedIds.includes(s.id)) state.deletedIds.push(s.id)
+            state.archivedIds = state.archivedIds.filter((id) => id !== s.id)
+          }
+        }
+      }
+
+      if (fs.existsSync(wsPath)) {
+        removeRecentWorkspace(wsPath)
+      }
+      invalidateDashboardMemoryCache()
+      saveDashboardState(state)
+      notifyJumpListUpdate()
+      return true
+    }
+  )
+
+  ipcMain.handle('dashboard:unmarkWorkspace', async (_e, wsPath: string): Promise<boolean> => {
+    if (!wsPath) return false
+    unmarkDeletedOrArchivedWorkspace(wsPath)
     return true
   })
 }

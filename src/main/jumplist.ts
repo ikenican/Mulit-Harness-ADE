@@ -8,7 +8,7 @@ import {
   isProtectedPath,
   setJumpListUpdater
 } from './ipc/settings'
-import { getRecentWorkspacesFromDashboard } from './ipc/dashboard'
+import { loadDashboardState } from './ipc/dashboard'
 
 export interface ParsedCommandLine {
   targetPath?: string
@@ -105,24 +105,20 @@ export function updateJumpList(): void {
       console.warn('[JumpList] Failed to query getJumpListSettings:', e)
     }
 
-    // 取得最近工作區清單，若筆數較少則自 Dashboard / Claude 歷史會話中探索補充
-    let recentList = getRecentWorkspaces()
-    if (recentList.length < 7) {
-      const discovered = getRecentWorkspacesFromDashboard()
-      const seen = new Set(recentList.map((p) => path.normalize(p).toLowerCase()))
-      for (const d of discovered) {
-        const key = path.normalize(d).toLowerCase()
-        if (!seen.has(key)) {
-          seen.add(key)
-          recentList.push(d)
-        }
-        if (recentList.length >= 10) break
-      }
-    }
+    // 取得最近工作區清單（只包含真正由使用者開啟且未被封存或刪除之專案）
+    const dashState = loadDashboardState()
+    const archivedSet = new Set(dashState.archivedWorkspaces.map((p) => path.normalize(p).toLowerCase()))
+    const deletedSet = new Set(dashState.deletedWorkspaces.map((p) => path.normalize(p).toLowerCase()))
 
-    const validRecent = recentList.filter((dir) => {
+    const validRecent = getRecentWorkspaces().filter((dir) => {
       const norm = path.normalize(dir).toLowerCase()
-      return !removedPaths.has(norm) && fs.existsSync(dir) && !isProtectedPath(dir)
+      return (
+        !removedPaths.has(norm) &&
+        !archivedSet.has(norm) &&
+        !deletedSet.has(norm) &&
+        fs.existsSync(dir) &&
+        !isProtectedPath(dir)
+      )
     })
 
     const appPath = app.getAppPath()

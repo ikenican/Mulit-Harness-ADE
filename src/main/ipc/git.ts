@@ -348,4 +348,29 @@ export function registerGitHandlers(): void {
       }
     }
   )
+
+  // git:clone -> { success: boolean; targetDir?: string; error?: string }
+  ipcMain.handle(
+    'git:clone',
+    async (
+      _event,
+      repoUrl: string,
+      targetDir: string
+    ): Promise<{ success: boolean; targetDir?: string; error?: string }> => {
+      try {
+        if (!repoUrl || !repoUrl.trim()) {
+          return { success: false, error: 'Repository URL is required' }
+        }
+        if (!targetDir || !targetDir.trim()) {
+          return { success: false, error: 'Target directory is required' }
+        }
+        const resolvedTarget = path.resolve(targetDir.trim())
+        await simpleGit().clone(repoUrl.trim(), resolvedTarget)
+        return { success: true, targetDir: resolvedTarget }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { success: false, error: msg }
+      }
+    }
+  )
 }

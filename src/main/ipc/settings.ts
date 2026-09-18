@@ -194,7 +194,8 @@ export function loadSettings(): WorkbenchSettings {
           .filter((p: unknown): p is string => typeof p === 'string' && p.trim().length > 0 && !isProtectedPath(p))
           .map((p: string) => resolve(p))
       : undefined,
-    autoCheckUpdates: parsed.autoCheckUpdates ?? true
+    autoCheckUpdates: parsed.autoCheckUpdates ?? true,
+    autoDownloadUpdates: parsed.autoDownloadUpdates ?? false
   }
 }
 
@@ -298,6 +299,11 @@ export function getRecentWorkspaces(): string[] {
   }
 }
 
+let onRecentWorkspaceAdded: ((dir: string) => void) | null = null
+export function setOnRecentWorkspaceAdded(fn: (dir: string) => void): void {
+  onRecentWorkspaceAdded = fn
+}
+
 /**
  * 加入或更新最近專案工作區至清單頂端，並自動限制上限為 20 筆
  */
@@ -314,6 +320,14 @@ export function addRecentWorkspace(dir: string): void {
     )
     const updated = [norm, ...existing].slice(0, 20)
     saveSettings({ ...s, recentWorkspaces: updated, lastWorkspace: norm })
+
+    // 若該目錄先前曾被使用者刪除或封存，使用者主動再次開啟時自動解除刪除與封存
+    if (onRecentWorkspaceAdded) {
+      try {
+        onRecentWorkspaceAdded(norm)
+      } catch {}
+    }
+
     notifyJumpListUpdate()
   } catch (err) {
     console.warn('[Settings] Failed to add recentWorkspace:', err)

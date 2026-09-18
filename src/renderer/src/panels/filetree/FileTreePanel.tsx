@@ -242,7 +242,11 @@ export default function FileTreePanel(): JSX.Element {
         setExpandedPaths(new Set())
         setChildrenMap({})
       } else {
-        const currentExpanded = Array.from(expandedPathsRef.current)
+        const normTargetRoot = targetRoot.replace(/\\/g, '/').toLowerCase()
+        const currentExpanded = Array.from(expandedPathsRef.current).filter((p) => {
+          const normP = p.replace(/\\/g, '/').toLowerCase()
+          return normP.startsWith(normTargetRoot)
+        })
         if (currentExpanded.length > 0) {
           const results = await Promise.all(
             currentExpanded.map(async (folderPath) => {

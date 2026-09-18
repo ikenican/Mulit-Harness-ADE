@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.14] - 2026-09-18
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.14 帶來 Antigravity CLI 外部會話深度追蹤、重塑 Apple HIG 確認彈窗、修復「從 Dashboard 移除」後重載復原機制，並支援 Git Clone 遠端儲存庫直接載入：
+1. **外部 Antigravity CLI 會話即時活躍偵測與狀態同步**：
+   - 解決外部終端或 IDE 外執行的 Antigravity CLI 運作時未顯示 Active 的問題。新增即時探測 SQLite WAL（`conversations/*.db-wal`）、背景子任務日誌（`tasks/*.log`）、即時訊息目錄與 `transcript_full.jsonl`，不再因 `transcript.jsonl` 延遲更新而落入 idle。
+   - 統一度量衡：Active 判定時間窗口調整為 5 分鐘，Idle 調整為 30 分鐘。
+   - 雙向去重與資料合併：以 session ID 合併 CLI 即時活躍時間與 UI 豐富 Token 統計，自動放行非工作區根目錄之外部 CLI 會話。
+2. **重塑「從 Dashboard 移除」確認彈窗（Apple HIG 規範）**：
+   - **徹底更換誤導性垃圾桶圖示**：改採 Apple `folder.badge.minus` 規範的 `IconFolderMinus` 專案資料夾減號圖示，並防呆設定非破壞性彈窗預設不顯垃圾桶。
+   - **Apple HIG Accessory View 結構重構**：彈窗擴充為 420px，消除右側按鈕兩行折行問題；新增專案預覽卡（Target Card）與安全免責呼籲盒（Safe Callout），以綠色護盾圖示明確說明「本機硬碟檔案完全不受影響，重新開啟隨時恢復」。
+3. **修復隱藏專案後重新載入無法重新出現之問題**：
+   - 移除 Vite 打包後失效之動態 `require('./dashboard')`，改以解耦事件回呼。
+   - 強化 `unmarkDeletedOrArchivedWorkspace`：在重新開啟、切換或克隆專案時，同步將專案路徑與旗下所有會話從 `deletedWorkspaces` 及 `deletedIds` 抹除釋放，專案與會話卡片即時重現。
+4. **Git Clone 遠端儲存庫與開啟專案**：
+   - 支援直接透過彈窗貼入 Git URL，克隆至本機並自動在新視窗或當前工作區載入。
+5. **工作區安全與目錄過濾**：
+   - 修正切換工作區時目錄探測越界拋出 `files:list Access denied` 警告。
+
+### Added / 新增功能
+- **Antigravity CLI 全面即時探測 (`dashboard.ts`)**:
+  - 新增 `getAntigravitySessionMaxMtime()`，跨 `.db-wal`、`messages`、`tasks` 多點獲取即時活躍時間。
+- **全新 Apple HIG 風格確認彈窗 (`AppleAlertDialog.tsx` & `appleAlertDialog.css`)**:
+  - 新增 `IconFolderMinus` 與 `IconShieldCheck`。
+  - 新增專案目標預覽卡（`.apple-alert-target-card`）與安全護盾呼籲盒（`.apple-alert-safe-callout`）。
+  - 對話框加寬至 420px，按鈕設定 `white-space: nowrap; min-height: 36px`。
+- **Git Clone IPC 處理器 (`git.ts`)**:
+  - 新增 `git:clone` IPC 呼叫，支援背景克隆儲存庫。
+
+### Fixed / 修復問題
+- **移除專案後重新開啟無法重現修復 (`dashboard.ts` & `settings.ts`)**:
+  - 清理 `deletedIds` 避免關聯會話持續遭到過濾。
+  - 修正 Vite 打包環境動態 require 失敗問題。
+- **檔案樹工作區切換路徑過濾 (`FileTreePanel.tsx`)**:
+  - 過濾不屬於當前 targetRoot 之舊展開目錄路徑，消除越界日誌報錯。
+- **JumpList 排除已被封存或移除之工作區 (`jumplist.ts`)**:
+  - 任務列 JumpList 即時過濾已封存與已刪除的專案。
+
+---
+
 ## [0.1.6] - 2026-09-15
 
 ### Highlights & Summary / 更新亮點

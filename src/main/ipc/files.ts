@@ -7,7 +7,7 @@ import { spawn } from 'child_process'
 import { workspace, getWorkspaceForEvent, setWorkspaceForWindow } from '../index'
 import type { FsEntry, FileStat, DocToolPaths } from '../../preload'
 import { getCustomDocToolPath, saveLastWorkspace } from './settings'
-import { invalidateDashboardMemoryCache } from './dashboard'
+import { invalidateDashboardMemoryCache, unmarkDeletedOrArchivedWorkspace } from './dashboard'
 
 const IGNORED = new Set(['.git', 'node_modules', 'out', '.deps'])
 
@@ -369,6 +369,7 @@ export function registerFileHandlers(): void {
         setWorkspaceForWindow(win, targetPath)
         attachWindowToWorkspace(win.id, targetPath)
       }
+      unmarkDeletedOrArchivedWorkspace(targetPath)
       invalidateDashboardMemoryCache()
       triggerTreeChange(targetPath)
       return true

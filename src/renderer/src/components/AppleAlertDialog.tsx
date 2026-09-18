@@ -1,12 +1,12 @@
 import React, { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { IconTrash } from './Icons'
+import { IconTrash, IconFolderMinus } from './Icons'
 import './appleAlertDialog.css'
 
 export interface AppleAlertDialogProps {
   isOpen: boolean
   title: string
-  description: string
+  description?: string
   detail?: React.ReactNode
   confirmLabel?: string
   cancelLabel?: string
@@ -57,7 +57,7 @@ export default function AppleAlertDialog({
       >
         {/* Top Icon Badge */}
         <div className={`apple-alert-icon-wrap ${isDestructive ? 'destructive' : ''}`}>
-          {icon || <IconTrash size={22} />}
+          {icon || (isDestructive ? <IconTrash size={22} /> : <IconFolderMinus size={24} />)}
         </div>
 
         {/* Content */}
@@ -65,9 +65,11 @@ export default function AppleAlertDialog({
           <h3 id="apple-alert-title" className="apple-alert-title">
             {title}
           </h3>
-          <p id="apple-alert-desc" className="apple-alert-desc">
-            {description}
-          </p>
+          {description && (
+            <p id="apple-alert-desc" className="apple-alert-desc">
+              {description}
+            </p>
+          )}
 
           {detail && <div className="apple-alert-detail">{detail}</div>}
         </div>

@@ -109,7 +109,13 @@ const api = {
     deleteSession: (sessionId: string): Promise<boolean> =>
       ipcRenderer.invoke('dashboard:deleteSession', sessionId),
     deleteSessions: (sessionIds: string[]): Promise<boolean> =>
-      ipcRenderer.invoke('dashboard:deleteSessions', sessionIds)
+      ipcRenderer.invoke('dashboard:deleteSessions', sessionIds),
+    archiveWorkspace: (workspacePath: string, archive: boolean, sessionIds?: string[]): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:archiveWorkspace', workspacePath, archive, sessionIds),
+    deleteWorkspace: (workspacePath: string, sessionIds?: string[]): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:deleteWorkspace', workspacePath, sessionIds),
+    unmarkWorkspace: (workspacePath: string): Promise<boolean> =>
+      ipcRenderer.invoke('dashboard:unmarkWorkspace', workspacePath)
   },
   // Git —— main/ipc/git.ts
   git: {
@@ -132,7 +138,12 @@ const api = {
       filePath: string,
       parentHash?: string
     ): Promise<{ original: string; modified: string }> =>
-      ipcRenderer.invoke('git:commitFileDiff', hash, filePath, parentHash)
+      ipcRenderer.invoke('git:commitFileDiff', hash, filePath, parentHash),
+    clone: (
+      repoUrl: string,
+      targetDir: string
+    ): Promise<{ success: boolean; targetDir?: string; error?: string }> =>
+      ipcRenderer.invoke('git:clone', repoUrl, targetDir)
   },
   // CLI 終端殼（node-pty）—— main/ipc/pty.ts
   pty: {
@@ -274,6 +285,7 @@ export interface WorkbenchSettings {
   lastWorkspace?: string
   recentWorkspaces?: string[]
   autoCheckUpdates?: boolean
+  autoDownloadUpdates?: boolean
 }
 
 export interface UpdateInfo {
@@ -351,9 +363,19 @@ export interface AgentUsageSummary {
   weekly?: WindowUsage
 }
 
+export interface DashboardWorkspaceInfo {
+  path: string
+  name: string
+  isCurrent: boolean
+  isArchived: boolean
+}
+
 export interface DashboardData {
   agents: Record<AgentId, AgentUsageSummary>
   sessions: AgentSessionInfo[]
+  userWorkspaces?: DashboardWorkspaceInfo[]
+  archivedWorkspaces?: string[]
+  deletedWorkspaces?: string[]
 }
 
 export interface CliLauncher {

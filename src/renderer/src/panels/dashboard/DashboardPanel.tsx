@@ -6,7 +6,7 @@ import type {
   AgentUsageSummary
 } from '../../../../preload/index'
 import AgentMark from '@/components/AgentMark'
-import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical, IconWindowNew } from '@/components/Icons'
+import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical, IconWindowNew, IconGitClone, IconEyeOff, IconFolderMinus, IconShieldCheck } from '@/components/Icons'
 import AppleAlertDialog from '@/components/AppleAlertDialog'
 import { openTerminalSession, setDraggedSession, useWorkbench, switchWorkspace, setSidebarTab, openSettings } from '@/store'
 import { useTranslation } from '@/i18n'
@@ -50,6 +50,11 @@ function formatTokens(count: number): string {
   return count.toLocaleString()
 }
 
+function normalizePath(p?: string): string {
+  if (!p) return ''
+  return p.replace(/\\+/g, '/').replace(/\/+/g, '/').toLowerCase().replace(/\/+$/, '')
+}
+
 export default function DashboardPanel(): JSX.Element {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -77,15 +82,109 @@ export default function DashboardPanel(): JSX.Element {
     key: string
     name: string
     path?: string
+    isCurrentWorkspace?: boolean
     sessions: AgentSessionInfo[]
+    x: number
+    y: number
+  } | null>(null)
+  const [sessionContextMenu, setSessionContextMenu] = useState<{
+    session: AgentSessionInfo
+    groupKey: string
     x: number
     y: number
   } | null>(null)
   const [folderToDelete, setFolderToDelete] = useState<{
     key: string
     name: string
+    path?: string
     sessions: AgentSessionInfo[]
   } | null>(null)
+
+  // Clone Repository Modal 狀態
+  const [showCloneModal, setShowCloneModal] = useState(false)
+  const [cloneUrl, setCloneUrl] = useState('')
+  const [cloneTargetDir, setCloneTargetDir] = useState('')
+  const [cloneLoading, setCloneLoading] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
+
+  const inferRepoName = (url: string): string => {
+    const clean = url.trim().replace(/\.git$/i, '').replace(/\/+$/, '')
+    const parts = clean.split(/[/:\\\\]/).filter(Boolean)
+    return parts.pop() || ''
+  }
+
+  const handleOpenFolder = async (): Promise<void> => {
+    if (window.api?.files?.pickWorkspace) {
+      const selected = await window.api.files.pickWorkspace()
+      if (selected) {
+        if (window.api?.dashboard?.unmarkWorkspace) {
+          await window.api.dashboard.unmarkWorkspace(selected)
+        }
+        await switchWorkspace(selected)
+        await loadData(true, true)
+      }
+    }
+  }
+
+  const handleOpenCloneModal = (): void => {
+    setCloneUrl('')
+    setCloneError(null)
+    setCloneLoading(false)
+    if (workspaceRoot) {
+      const parentDir = workspaceRoot.replace(/[/\\][^/\\]+$/, '')
+      setCloneTargetDir(parentDir)
+    } else {
+      setCloneTargetDir('')
+    }
+    setShowCloneModal(true)
+  }
+
+  const handleBrowseCloneTarget = async (): Promise<void> => {
+    if (window.api?.files?.pickWorkspace) {
+      const selected = await window.api.files.pickWorkspace()
+      if (selected) {
+        const repoName = inferRepoName(cloneUrl)
+        setCloneTargetDir(repoName ? `${selected}\\${repoName}` : selected)
+      }
+    }
+  }
+
+  const handleExecuteClone = async (): Promise<void> => {
+    if (!cloneUrl.trim()) {
+      setCloneError(t('dashboard.repoUrlLabel') + ' is required')
+      return
+    }
+    if (!cloneTargetDir.trim()) {
+      setCloneError(t('dashboard.targetDirLabel') + ' is required')
+      return
+    }
+    if (!window.api?.git?.clone) {
+      setCloneError('Git clone API is not available')
+      return
+    }
+
+    setCloneLoading(true)
+    setCloneError(null)
+
+    try {
+      const res = await window.api.git.clone(cloneUrl.trim(), cloneTargetDir.trim())
+      if (res.success && res.targetDir) {
+        setShowCloneModal(false)
+        if (window.api?.dashboard?.unmarkWorkspace) {
+          await window.api.dashboard.unmarkWorkspace(res.targetDir)
+        }
+        await switchWorkspace(res.targetDir)
+        await loadData(true, true)
+      } else {
+        setCloneError(res.error || t('dashboard.cloneFailed'))
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setCloneError(msg)
+    } finally {
+      setCloneLoading(false)
+    }
+  }
 
   // 自訂會話排序（各分組 key 對應之 session ID 陣列）與自訂分組覆寫，支援本地持久化
   const [customOrder, setCustomOrder] = useState<Record<string, string[]>>(() => {
@@ -113,17 +212,85 @@ export default function DashboardPanel(): JSX.Element {
     codex: true
   })
 
-  // 關閉右鍵選單
+  // 關閉右鍵選單（避免點擊選單內部時因 mousedown 搶先觸發而吞掉按鈕 click）
   useEffect(() => {
-    if (!folderContextMenu) return
-    const closeMenu = (): void => setFolderContextMenu(null)
-    window.addEventListener('mousedown', closeMenu)
-    window.addEventListener('scroll', closeMenu, true)
-    return () => {
-      window.removeEventListener('mousedown', closeMenu)
-      window.removeEventListener('scroll', closeMenu, true)
+    if (!folderContextMenu && !sessionContextMenu) return
+    const onMouseDown = (e: MouseEvent): void => {
+      const target = e.target as HTMLElement | null
+      if (target && target.closest('.dash-context-menu')) {
+        return
+      }
+      setFolderContextMenu(null)
+      setSessionContextMenu(null)
     }
-  }, [folderContextMenu])
+    const onScroll = (): void => {
+      setFolderContextMenu(null)
+      setSessionContextMenu(null)
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [folderContextMenu, sessionContextMenu])
+
+  // 右鍵選單動作：切換至此專案
+  const handleContextSwitchFolder = async (folder: typeof folderContextMenu): Promise<void> => {
+    if (!folder) return
+    const targetPath = folder.path || (folder.isCurrentWorkspace ? workspaceRoot : undefined)
+    setFolderContextMenu(null)
+    if (targetPath) {
+      if (window.api?.dashboard?.unmarkWorkspace) {
+        await window.api.dashboard.unmarkWorkspace(targetPath)
+      }
+      await switchWorkspace(targetPath)
+      await loadData(true, true)
+    } else {
+      setSidebarTab('files')
+    }
+  }
+
+  // 右鍵選單動作：在新視窗開啟
+  const handleContextOpenNewWindow = async (folder: typeof folderContextMenu): Promise<void> => {
+    if (!folder) return
+    const targetPath = folder.path || (folder.isCurrentWorkspace ? workspaceRoot : undefined)
+    setFolderContextMenu(null)
+    if (targetPath && window.api?.window?.openProjectWindow) {
+      await window.api.window.openProjectWindow(targetPath)
+    }
+  }
+
+  // 右鍵選單動作：封存／解除封存專案
+  const handleContextArchiveFolder = async (folder: typeof folderContextMenu): Promise<void> => {
+    if (!folder) return
+    const isArchiving = viewFilter !== 'archived'
+    const targetWs = folder.path || (folder.isCurrentWorkspace ? workspaceRoot : undefined) || folder.name || folder.key
+    const sessionIds = folder.sessions.map((s) => s.id)
+    setFolderContextMenu(null)
+
+    if (targetWs && window.api?.dashboard?.archiveWorkspace) {
+      await window.api.dashboard.archiveWorkspace(targetWs, isArchiving, sessionIds)
+    } else if (sessionIds.length > 0 && window.api?.dashboard?.archiveSessions) {
+      await window.api.dashboard.archiveSessions(sessionIds, isArchiving)
+    }
+    await loadData(true, true)
+  }
+
+  // 右鍵選單動作：從清單中隱藏此專案
+  const handleContextHideFolderPrompt = (folder: typeof folderContextMenu): void => {
+    if (!folder) return
+    const targetWs = folder.path || (folder.isCurrentWorkspace ? workspaceRoot : undefined) || folder.name || folder.key
+    const normalizedTarget = {
+      ...folder,
+      path: folder.path || (folder.isCurrentWorkspace ? workspaceRoot : undefined),
+      key: folder.key || targetWs
+    }
+    setFolderContextMenu(null)
+    setFolderToDelete(normalizedTarget)
+  }
+
 
   const loadData = useCallback(async (silent = false, force = false) => {
     if (!silent) setLoading(true)
@@ -153,6 +320,10 @@ export default function DashboardPanel(): JSX.Element {
       active = false
     }
   }, [settingsTick, loadData])
+
+  useEffect(() => {
+    loadData(true)
+  }, [workspaceRoot, loadData])
 
   useEffect(() => {
     loadData()
@@ -186,14 +357,14 @@ export default function DashboardPanel(): JSX.Element {
     setExpandedSessionId((prev) => (prev === id ? null : id))
   }
 
-  const handleArchive = async (id: string, currentArchived: boolean, e: React.MouseEvent): Promise<void> => {
-    e.stopPropagation()
+  const handleArchive = async (id: string, currentArchived: boolean, e?: React.MouseEvent): Promise<void> => {
+    e?.stopPropagation()
     await window.api.dashboard.archiveSession(id, !currentArchived)
-    await loadData()
+    await loadData(true, true)
   }
 
-  const handleDeletePrompt = (session: AgentSessionInfo, e: React.MouseEvent): void => {
-    e.stopPropagation()
+  const handleDeletePrompt = (session: AgentSessionInfo, e?: React.MouseEvent): void => {
+    e?.stopPropagation()
     setSessionToDelete(session)
   }
 
@@ -202,7 +373,7 @@ export default function DashboardPanel(): JSX.Element {
     const id = sessionToDelete.id
     setSessionToDelete(null)
     await window.api.dashboard.deleteSession(id)
-    await loadData()
+    await loadData(true, true)
   }
 
   const agentList: AgentUsageSummary[] = data
@@ -244,30 +415,137 @@ export default function DashboardPanel(): JSX.Element {
       ? baseSessions
       : baseSessions.filter((s) => s.agent === selectedAgent)
 
-  // 依執行資料夾歸類 Session（整合自訂拖曳排序與自訂分組覆寫）
+  // 依執行資料夾歸類 Session（結合使用者在 Workbench 中開啟過之工作區與自訂分組/排序）
   const folderGroups = useMemo<SessionFolderGroup[]>(() => {
     const map = new Map<string, SessionFolderGroup>()
-    const normRoot = workspaceRoot ? workspaceRoot.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
-    const currentName = workspaceRoot ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop()?.toLowerCase() || '' : ''
+    const normRoot = workspaceRoot ? normalizePath(workspaceRoot) : ''
 
+    const isWorkspaceDeleted = (targetPath?: string, targetName?: string, targetKey?: string): boolean => {
+      const deletedList = data?.deletedWorkspaces || []
+      if (deletedList.length === 0) return false
+      const normP = targetPath ? normalizePath(targetPath) : ''
+      const normN = targetName ? targetName.toLowerCase().trim() : ''
+      const normK = targetKey ? normalizePath(targetKey) : ''
+      for (const d of deletedList) {
+        const normD = normalizePath(d)
+        const baseD = (d.split(/[\\/]/).filter(Boolean).pop() || d).toLowerCase().trim()
+        if (normP && (normP === normD || normP.endsWith('/' + normD) || normD.endsWith('/' + normP) || normP.endsWith('/' + baseD))) return true
+        if (normN && (normN === baseD || normN === normD)) return true
+        if (normK && (normK === normD || normK === baseD)) return true
+      }
+      return false
+    }
+
+    const isWorkspaceArchived = (targetPath?: string, targetName?: string, targetKey?: string): boolean => {
+      const archivedList = data?.archivedWorkspaces || []
+      if (archivedList.length === 0) return false
+      const normP = targetPath ? normalizePath(targetPath) : ''
+      const normN = targetName ? targetName.toLowerCase().trim() : ''
+      const normK = targetKey ? normalizePath(targetKey) : ''
+      for (const a of archivedList) {
+        const normA = normalizePath(a)
+        const baseA = (a.split(/[\\/]/).filter(Boolean).pop() || a).toLowerCase().trim()
+        if (normP && (normP === normA || normP.endsWith('/' + normA) || normA.endsWith('/' + normP) || normP.endsWith('/' + baseA))) return true
+        if (normN && (normN === baseA || normN === normA)) return true
+        if (normK && (normK === normA || normK === baseA)) return true
+      }
+      return false
+    }
+
+    // 1. 先初始化使用者在 IDE 中開啟過之合法工作區（依目前 viewFilter 過濾正常或已封存）
+    const userWorkspaces = data?.userWorkspaces || []
+    for (const ws of userWorkspaces) {
+      if (isWorkspaceDeleted(ws.path, ws.name, ws.path)) continue
+      const isArch = isWorkspaceArchived(ws.path, ws.name, ws.path) || Boolean(ws.isArchived)
+      if (viewFilter === 'archived' && !isArch) continue
+      if (viewFilter === 'all' && isArch) continue
+
+      const normWs = normalizePath(ws.path)
+      const groupKey = normWs || ws.name.toLowerCase()
+      const isCurrentWs = Boolean(
+        (normRoot && normWs && normRoot === normWs) ||
+        ws.isCurrent
+      )
+      map.set(groupKey, {
+        key: groupKey,
+        name: ws.name, // 永遠保持該專案原始資料夾名稱，絕不被 workspaceRoot 覆蓋！
+        path: ws.path,
+        isCurrentWorkspace: isCurrentWs,
+        sessions: [],
+        totalTokens: 0,
+        activeCount: 0
+      })
+    }
+
+    // 確保當前開啟之工作區（workspaceRoot）即使剛切換尚未收到 data 或尚無會話紀錄，也必定出現在專案清單中
+    // 但若使用者明確將其「隱藏 (Hide)」或「封存 (Archive)」，必須嚴格尊重使用者意圖，絕不暴力復活！
+    if (workspaceRoot) {
+      const normWRoot = normalizePath(workspaceRoot)
+      const wsName = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || workspaceRoot
+      const isDeleted = isWorkspaceDeleted(workspaceRoot, wsName, normWRoot)
+      const isArchived = isWorkspaceArchived(workspaceRoot, wsName, normWRoot)
+
+      const shouldShow = !isDeleted && (
+        (viewFilter === 'all' && !isArchived) ||
+        (viewFilter === 'archived' && isArchived)
+      )
+
+      if (shouldShow && !map.has(normWRoot)) {
+        map.set(normWRoot, {
+          key: normWRoot,
+          name: wsName,
+          path: workspaceRoot,
+          isCurrentWorkspace: true,
+          sessions: [],
+          totalTokens: 0,
+          activeCount: 0
+        })
+      }
+    }
+
+    // 2. 將匹配的 Session 加入對應的工作區分組中
     for (const session of displayedSessions) {
       const rawPath = session.workspacePath?.trim() || ''
-      const normPath = rawPath ? rawPath.toLowerCase().replace(/\\/g, '/').replace(/\/$/, '') : ''
+      const normPath = rawPath ? normalizePath(rawPath) : ''
       const wsName = session.workspace?.trim() || (rawPath ? rawPath.split(/[\\/]/).filter(Boolean).pop() || '' : 'Other')
-
-      // 若有手動自訂分組，套用自訂分組 key，否則以原始工作區路徑或名稱為 key
       const overrideKey = folderOverrides[session.id]
       const groupKey = overrideKey || normPath || wsName.toLowerCase()
 
+      // 若該 session 所屬之工作區已被使用者隱藏，絕不在清單中逆向復活卡片
+      if (isWorkspaceDeleted(rawPath, wsName, groupKey)) {
+        continue
+      }
+      const isArch = isWorkspaceArchived(rawPath, wsName, groupKey) || Boolean(session.isArchived)
+      // 若在全部檢視（all），且該工作區已封存，不顯示
+      if (isArch && viewFilter === 'all') {
+        continue
+      }
+      // 若在封存檢視（archived），且該工作區未封存且 session 本身未封存，不顯示
+      if (!isArch && viewFilter === 'archived') {
+        continue
+      }
+
       let grp = map.get(groupKey)
+      if (!grp && normPath) {
+        grp = map.get(normPath)
+      }
+      if (!grp && wsName) {
+        for (const existing of map.values()) {
+          if (existing.name.toLowerCase() === wsName.toLowerCase()) {
+            grp = existing
+            break
+          }
+        }
+      }
+
       if (!grp) {
+        // 如果該 Session 的工作區不在 userWorkspaces 中（例如是獨立會話），建立其所屬專案分組
         const isCurrentWs = Boolean(
-          (normRoot && (groupKey === normRoot || normRoot.endsWith(groupKey))) ||
-          (currentName && (groupKey === currentName || wsName.toLowerCase() === currentName))
+          normRoot && normPath && normRoot === normPath
         )
         grp = {
           key: groupKey,
-          name: isCurrentWs && workspaceRoot ? workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || wsName : wsName,
+          name: wsName,
           path: rawPath || (isCurrentWs ? workspaceRoot : undefined),
           isCurrentWorkspace: isCurrentWs,
           sessions: [],
@@ -275,12 +553,10 @@ export default function DashboardPanel(): JSX.Element {
           activeCount: 0
         }
         map.set(groupKey, grp)
-      } else if (!grp.isCurrentWorkspace) {
-        const isCurrentWs = Boolean(
-          (normRoot && (groupKey === normRoot || normRoot.endsWith(groupKey))) ||
-          (currentName && (groupKey === currentName || wsName.toLowerCase() === currentName))
-        )
-        if (isCurrentWs) grp.isCurrentWorkspace = true
+      }
+
+      if (!grp.path && rawPath) {
+        grp.path = rawPath
       }
 
       grp.sessions.push(session)
@@ -319,13 +595,23 @@ export default function DashboardPanel(): JSX.Element {
       if (!a.isCurrentWorkspace && b.isCurrentWorkspace) return 1
       if (a.activeCount > 0 && b.activeCount === 0) return -1
       if (a.activeCount === 0 && b.activeCount > 0) return 1
-      const aLatest = Math.max(...a.sessions.map((s) => new Date(s.lastActiveTime).getTime() || 0))
-      const bLatest = Math.max(...b.sessions.map((s) => new Date(s.lastActiveTime).getTime() || 0))
+      const aLatest = Math.max(0, ...a.sessions.map((s) => new Date(s.lastActiveTime).getTime() || 0))
+      const bLatest = Math.max(0, ...b.sessions.map((s) => new Date(s.lastActiveTime).getTime() || 0))
       return bLatest - aLatest
     })
 
     return list
-  }, [displayedSessions, workspaceRoot, customOrder, folderOverrides, folderOrder])
+  }, [
+    displayedSessions,
+    workspaceRoot,
+    customOrder,
+    folderOverrides,
+    folderOrder,
+    data?.userWorkspaces,
+    data?.deletedWorkspaces,
+    data?.archivedWorkspaces,
+    viewFilter
+  ])
 
   // 處理在 Dashboard 視窗內拖曳資料夾重新排序
   const handleReorderFolder = useCallback(
@@ -659,6 +945,26 @@ export default function DashboardPanel(): JSX.Element {
               </button>
             )}
 
+            <button
+              type="button"
+              className="dash-open-folder-btn"
+              onClick={handleOpenFolder}
+              title={t('dashboard.openFolderBtn')}
+            >
+              <IconFolder size={12} />
+              <span>{t('dashboard.openFolderBtn')}</span>
+            </button>
+
+            <button
+              type="button"
+              className="dash-clone-repo-btn"
+              onClick={handleOpenCloneModal}
+              title={t('dashboard.cloneRepoTitle')}
+            >
+              <IconGitClone size={12} />
+              <span>{t('dashboard.cloneRepoBtn')}</span>
+            </button>
+
             {folderGroups.length > 0 && (
               <div className="dash-folder-toggle-group">
                 <button
@@ -690,7 +996,7 @@ export default function DashboardPanel(): JSX.Element {
           </div>
         </div>
 
-        {displayedSessions.length === 0 ? (
+        {folderGroups.length === 0 ? (
           <div className="dash-empty-state">
             <div className="dash-empty-icon">{enabledAgentIds.length === 0 ? '⚙️' : '📋'}</div>
             <p className="dash-empty-title">
@@ -707,7 +1013,7 @@ export default function DashboardPanel(): JSX.Element {
                 ? t('dashboard.noArchivedDesc')
                 : t('dashboard.noSessionsDesc')}
             </p>
-            {enabledAgentIds.length === 0 && (
+            {enabledAgentIds.length === 0 ? (
               <button
                 type="button"
                 className="dash-no-agents-btn"
@@ -716,6 +1022,25 @@ export default function DashboardPanel(): JSX.Element {
               >
                 {t('sidebar.settings')} ➔
               </button>
+            ) : (
+              <div className="dash-empty-actions-row">
+                <button
+                  type="button"
+                  className="dash-no-agents-btn"
+                  onClick={handleOpenFolder}
+                >
+                  <IconFolder size={13} style={{ marginRight: 6 }} />
+                  {t('dashboard.openFolderBtn')}
+                </button>
+                <button
+                  type="button"
+                  className="dash-no-agents-btn"
+                  onClick={handleOpenCloneModal}
+                >
+                  <IconGitClone size={13} style={{ marginRight: 6 }} />
+                  {t('dashboard.cloneRepoTitle')}
+                </button>
+              </div>
             )}
           </div>
         ) : (
@@ -732,6 +1057,20 @@ export default function DashboardPanel(): JSX.Element {
                   } ${dropIndicator ? `drag-over-folder-${dropIndicator}` : ''} ${
                     dragOverFolderKey === group.key ? 'drag-over-folder' : ''
                   }`}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setSessionContextMenu(null)
+                    setFolderContextMenu({
+                      key: group.key,
+                      name: group.name,
+                      path: group.path,
+                      isCurrentWorkspace: group.isCurrentWorkspace,
+                      sessions: group.sessions,
+                      x: e.clientX,
+                      y: e.clientY
+                    })
+                  }}
                   onDragOver={(e) => {
                     if (e.dataTransfer.types.includes('application/x-dashboard-folder-key')) {
                       e.preventDefault()
@@ -788,10 +1127,12 @@ export default function DashboardPanel(): JSX.Element {
                     onContextMenu={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
+                      setSessionContextMenu(null)
                       setFolderContextMenu({
                         key: group.key,
                         name: group.name,
                         path: group.path,
+                        isCurrentWorkspace: group.isCurrentWorkspace,
                         sessions: group.sessions,
                         x: e.clientX,
                         y: e.clientY
@@ -900,19 +1241,29 @@ export default function DashboardPanel(): JSX.Element {
 
                   {!isCollapsed && (
                     <div className="dash-folder-sessions">
-                      {group.sessions.map((session: AgentSessionInfo) => (
-                        <SessionCard
-                          key={session.id}
-                          session={session}
-                          groupKey={group.key}
-                          isExpanded={expandedSessionId === session.id}
-                          onToggle={() => toggleExpand(session.id)}
-                          onArchive={(e) => handleArchive(session.id, !session.isArchived, e)}
-                          onDelete={(e) => handleDeletePrompt(session, e)}
-                          onReorder={handleReorderSession}
-                          onOpenCli={handleSessionOpenCli}
-                        />
-                      ))}
+                      {group.sessions.length === 0 ? (
+                        <div className="dash-empty-folder-hint">
+                          <span>{t('dashboard.noSessionsInFolder')}</span>
+                        </div>
+                      ) : (
+                        group.sessions.map((session: AgentSessionInfo) => (
+                          <SessionCard
+                            key={session.id}
+                            session={session}
+                            groupKey={group.key}
+                            isExpanded={expandedSessionId === session.id}
+                            onToggle={() => toggleExpand(session.id)}
+                            onArchive={(e) => handleArchive(session.id, !session.isArchived, e)}
+                            onDelete={(e) => handleDeletePrompt(session, e)}
+                            onReorder={handleReorderSession}
+                            onOpenCli={handleSessionOpenCli}
+                            onContextMenu={(s, gKey, x, y) => {
+                              setFolderContextMenu(null)
+                              setSessionContextMenu({ session: s, groupKey: gKey, x, y })
+                            }}
+                          />
+                        ))
+                      )}
                     </div>
                   )}
                 </div>
@@ -974,23 +1325,57 @@ export default function DashboardPanel(): JSX.Element {
         onClose={() => setSessionToDelete(null)}
       />
 
-      {/* Folder Batch Delete Confirmation Dialog */}
+      {/* Folder Hide from Dashboard Dialog */}
       <AppleAlertDialog
         isOpen={Boolean(folderToDelete)}
-        title={t('dashboard.deleteFolderDialogTitle', { name: folderToDelete?.name || '' })}
-        description={t('dashboard.deleteFolderDialogDesc', {
-          count: folderToDelete?.sessions.length || 0,
-          name: folderToDelete?.name || ''
-        })}
-        confirmLabel={t('dashboard.deleteFolderConfirm')}
+        title={t('dashboard.hideProjectConfirmTitle')}
+        description={t('dashboard.hideProjectPrompt')}
+        icon={<IconFolderMinus size={24} />}
+        confirmLabel={t('dashboard.hideBtn')}
         cancelLabel={t('common.cancel')}
-        isDestructive={true}
+        isDestructive={false}
+        detail={
+          folderToDelete ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+              <div className="apple-alert-target-card">
+                <IconFolder size={15} className="apple-alert-target-icon" />
+                <span className="apple-alert-target-name">{folderToDelete.name}</span>
+                {folderToDelete.path && (
+                  <span className="apple-alert-target-path" title={folderToDelete.path}>
+                    {folderToDelete.path}
+                  </span>
+                )}
+              </div>
+              <div className="apple-alert-safe-callout">
+                <div className="apple-alert-safe-header">
+                  <IconShieldCheck size={14} />
+                  <span>{t('dashboard.hideProjectSafeTitle')}</span>
+                </div>
+                <p className="apple-alert-safe-desc">{t('dashboard.hideProjectSafeDesc')}</p>
+              </div>
+            </div>
+          ) : null
+        }
         onConfirm={async () => {
           if (!folderToDelete) return
-          const ids = folderToDelete.sessions.map((s) => s.id)
+          const target = folderToDelete
           setFolderToDelete(null)
-          await window.api.dashboard.deleteSessions(ids)
-          await loadData(true)
+          const targetWs = target.path || target.name || target.key
+          const sessionIds = target.sessions.map((s) => s.id)
+          if (targetWs && window.api?.dashboard?.deleteWorkspace) {
+            await window.api.dashboard.deleteWorkspace(targetWs, sessionIds)
+          } else if (sessionIds.length > 0) {
+            await window.api.dashboard.deleteSessions(sessionIds)
+          }
+          // 同步從本機自訂排序中清除
+          setFolderOrder((prev) => {
+            const next = prev.filter((k) => k !== target.key && k !== target.name && k !== target.path)
+            try {
+              localStorage.setItem('agent-workbench:dashboard-folder-order', JSON.stringify(next))
+            } catch {}
+            return next
+          })
+          await loadData(true, true)
         }}
         onClose={() => setFolderToDelete(null)}
       />
@@ -1009,59 +1394,247 @@ export default function DashboardPanel(): JSX.Element {
           <div
             className="dash-context-menu"
             style={{
-              top: Math.min(folderContextMenu.y, window.innerHeight - 100),
+              top: Math.min(folderContextMenu.y, window.innerHeight - 150),
               left: Math.min(folderContextMenu.x, window.innerWidth - 220)
             }}
+            onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
+            {folderContextMenu.path && !folderContextMenu.isCurrentWorkspace && (
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={() => handleContextSwitchFolder(folderContextMenu)}
+              >
+                <IconFolder size={13} />
+                <span>{t('dashboard.switchFolder')}</span>
+              </button>
+            )}
             {folderContextMenu.path && (
               <button
                 type="button"
                 className="dash-context-item"
-                onClick={() => {
-                  const targetPath = folderContextMenu.path
-                  setFolderContextMenu(null)
-                  if (targetPath && window.api?.window?.openProjectWindow) {
-                    window.api.window.openProjectWindow(targetPath)
-                  }
-                }}
+                onClick={() => handleContextOpenNewWindow(folderContextMenu)}
               >
                 <IconWindowNew size={13} />
-                <span>{t('dashboard.openFolderInNewWindow')}</span>
+                <span>{t('dashboard.openProjectWindow')}</span>
               </button>
             )}
             <button
               type="button"
               className="dash-context-item"
-              onClick={async () => {
-                const { sessions } = folderContextMenu
-                setFolderContextMenu(null)
-                const isArchiving = viewFilter !== 'archived'
-                await window.api.dashboard.archiveSessions(
-                  sessions.map((s) => s.id),
-                  isArchiving
-                )
-                await loadData(true)
-              }}
+              onClick={() => handleContextArchiveFolder(folderContextMenu)}
             >
               <IconArchive size={13} />
-              <span>{viewFilter === 'archived' ? t('dashboard.restoreFolder') : t('dashboard.archiveFolder')}</span>
+              <span>{viewFilter === 'archived' ? t('dashboard.restoreProject') : t('dashboard.archiveProject')}</span>
             </button>
             <div className="dash-context-divider" />
             <button
               type="button"
-              className="dash-context-item is-destructive"
-              onClick={() => {
-                const target = { ...folderContextMenu }
-                setFolderContextMenu(null)
-                setFolderToDelete(target)
-              }}
+              className="dash-context-item"
+              onClick={() => handleContextHideFolderPrompt(folderContextMenu)}
             >
-              <IconTrash size={13} />
-              <span>{t('dashboard.deleteFolder')}</span>
+              <IconEyeOff size={13} />
+              <span>{t('dashboard.hideProject')}</span>
             </button>
           </div>
         </>
+      )}
+
+      {/* Session Card Context Menu */}
+      {sessionContextMenu && (
+        <>
+          <div
+            className="dash-context-menu-backdrop"
+            onClick={() => setSessionContextMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setSessionContextMenu(null)
+            }}
+          />
+          <div
+            className="dash-context-menu"
+            style={{
+              top: Math.min(sessionContextMenu.y, window.innerHeight - 200),
+              left: Math.min(sessionContextMenu.x, window.innerWidth - 220)
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="dash-context-item"
+              onClick={() => {
+                const s = sessionContextMenu.session
+                setSessionContextMenu(null)
+                handleSessionOpenCli(s)
+              }}
+            >
+              <IconTerminalBox size={13} />
+              <span>{sessionContextMenu.session.status === 'active' ? t('dashboard.switchCli') : t('dashboard.resumeCli')}</span>
+            </button>
+
+            {sessionContextMenu.session.workspacePath && (
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={async () => {
+                  const s = sessionContextMenu.session
+                  setSessionContextMenu(null)
+                  if (s.workspacePath && window.api?.window?.openProjectWindow) {
+                    await window.api.window.openProjectWindow(s.workspacePath)
+                  }
+                }}
+              >
+                <IconWindowNew size={13} />
+                <span>{t('dashboard.openProjectWindow')}</span>
+              </button>
+            )}
+
+            {sessionContextMenu.session.workspacePath && (
+              <button
+                type="button"
+                className="dash-context-item"
+                onClick={async () => {
+                  const s = sessionContextMenu.session
+                  setSessionContextMenu(null)
+                  if (s.workspacePath) {
+                    await switchWorkspace(s.workspacePath)
+                    await loadData(true, true)
+                  }
+                }}
+              >
+                <IconFolder size={13} />
+                <span>{t('dashboard.switchFolder')}</span>
+              </button>
+            )}
+
+            <div className="dash-context-divider" />
+
+            <button
+              type="button"
+              className="dash-context-item"
+              onClick={async () => {
+                const s = sessionContextMenu.session
+                setSessionContextMenu(null)
+                await handleArchive(s.id, !s.isArchived)
+              }}
+            >
+              <IconArchive size={13} />
+              <span>{sessionContextMenu.session.isArchived ? t('dashboard.restore') : t('dashboard.archive')}</span>
+            </button>
+
+            <button
+              type="button"
+              className="dash-context-item is-destructive"
+              onClick={() => {
+                const s = sessionContextMenu.session
+                setSessionContextMenu(null)
+                handleDeletePrompt(s)
+              }}
+            >
+              <IconTrash size={13} />
+              <span>{t('dashboard.delete')}</span>
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Clone Repository Modal */}
+      {showCloneModal && (
+        <div className="dash-modal-backdrop" onClick={() => !cloneLoading && setShowCloneModal(false)}>
+          <div className="dash-modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="dash-modal-header">
+              <div className="dash-modal-title-row">
+                <IconGitClone size={18} className="dash-modal-icon" />
+                <h3 className="dash-modal-title">{t('dashboard.cloneRepoTitle')}</h3>
+              </div>
+              <p className="dash-modal-desc">{t('dashboard.cloneRepoDesc')}</p>
+            </div>
+
+            <div className="dash-modal-body">
+              <div className="dash-form-group">
+                <label className="dash-form-label">{t('dashboard.repoUrlLabel')}</label>
+                <input
+                  type="text"
+                  className="dash-form-input"
+                  placeholder={t('dashboard.repoUrlPlaceholder')}
+                  value={cloneUrl}
+                  disabled={cloneLoading}
+                  autoFocus
+                  onChange={(e) => {
+                    const newUrl = e.target.value
+                    setCloneUrl(newUrl)
+                    if (!cloneTargetDir || cloneTargetDir.endsWith('\\') || cloneTargetDir.endsWith('/')) {
+                      const repoName = inferRepoName(newUrl)
+                      if (repoName) {
+                        const parent = workspaceRoot ? workspaceRoot.replace(/[/\\][^/\\]+$/, '') : 'D:\\'
+                        setCloneTargetDir(`${parent}\\${repoName}`)
+                      }
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="dash-form-group">
+                <label className="dash-form-label">{t('dashboard.targetDirLabel')}</label>
+                <div className="dash-form-input-with-btn">
+                  <input
+                    type="text"
+                    className="dash-form-input"
+                    placeholder={t('dashboard.targetDirPlaceholder')}
+                    value={cloneTargetDir}
+                    disabled={cloneLoading}
+                    onChange={(e) => setCloneTargetDir(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="dash-form-browse-btn"
+                    disabled={cloneLoading}
+                    onClick={handleBrowseCloneTarget}
+                  >
+                    {t('dashboard.browseBtn')}
+                  </button>
+                </div>
+              </div>
+
+              {cloneError && (
+                <div className="dash-modal-error">
+                  <span>{cloneError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="dash-modal-footer">
+              <button
+                type="button"
+                className="dash-modal-btn-cancel"
+                disabled={cloneLoading}
+                onClick={() => setShowCloneModal(false)}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                className="dash-modal-btn-primary"
+                disabled={cloneLoading || !cloneUrl.trim() || !cloneTargetDir.trim()}
+                onClick={handleExecuteClone}
+              >
+                {cloneLoading ? (
+                  <>
+                    <span className="dash-spinner" />
+                    <span>{t('dashboard.cloningBtn')}</span>
+                  </>
+                ) : (
+                  <>
+                    <IconGitClone size={13} />
+                    <span>{t('dashboard.cloneBtn')}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -1075,7 +1648,8 @@ function SessionCard({
   onDelete,
   groupKey,
   onReorder,
-  onOpenCli
+  onOpenCli,
+  onContextMenu
 }: {
   session: AgentSessionInfo
   isExpanded: boolean
@@ -1090,6 +1664,7 @@ function SessionCard({
     targetGroupKey: string
   ) => void
   onOpenCli?: (session: AgentSessionInfo) => void
+  onContextMenu?: (session: AgentSessionInfo, groupKey: string, x: number, y: number) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const cfg = AGENT_CONFIG[session.agent]
@@ -1218,7 +1793,12 @@ function SessionCard({
       onDragOver={handleCardDragOver}
       onDragLeave={handleCardDragLeave}
       onDrop={handleCardDrop}
-      title="Click to open CLI, drag to reorder/move folder, or drag to terminal to handoff"
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        onContextMenu?.(session, groupKey, e.clientX, e.clientY)
+      }}
+      title="Click to open CLI, drag to reorder/move folder, or right-click for options"
     >
       <div className="dash-session-row">
         <div className="dash-drag-grip" title="Drag to reorder, move to another folder, or drag to terminal">
