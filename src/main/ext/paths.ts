@@ -156,18 +156,34 @@ export function findCli(cmd: string): string | null {
     }
     if (cmd === 'claude') {
       candidates.unshift(
+        join(H, '.local', 'bin', 'claude.exe'),
         join(appData, 'npm', 'claude.cmd'),
+        join(appData, 'npm', 'claude.ps1'),
         join(localAppData, 'Programs', 'Claude', 'claude.exe')
       )
     }
     if (cmd === 'codex') {
       candidates.unshift(
+        join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin', 'codex.exe'),
+        join(H, '.codex', 'packages', 'standalone', 'current', 'bin', 'codex.exe'),
         join(appData, 'npm', 'codex.cmd'),
+        join(appData, 'npm', 'codex.ps1'),
         join(localAppData, 'pnpm', 'codex.cmd')
       )
     }
     for (const c of candidates) {
       if (c && existsSync(c)) return c
+    }
+  } else {
+    // 非 Windows 平台候補路徑（當 Electron 未繼承終端 shell PATH 時之安全防護）
+    const unixCandidates: string[] = [
+      join(H, '.local', 'bin', cmd),
+      join(H, '.npm-global', 'bin', cmd),
+      join('/usr', 'local', 'bin', cmd),
+      join('/opt', 'homebrew', 'bin', cmd)
+    ]
+    for (const u of unixCandidates) {
+      if (u && existsSync(u)) return u
     }
   }
 

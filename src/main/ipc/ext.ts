@@ -6,7 +6,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { workspace, getWorkspaceForEvent } from '../index'
 import { isProtectedPath } from './settings'
-import { AGENT_PATHS } from '../ext/paths'
+import { AGENT_PATHS, findAgentCli } from '../ext/paths'
 import { buildInventory, buildAgentStatus } from '../ext/inventory'
 import { readManifest, writeManifest, managedKeys, connRefsOf } from '../ext/manifest'
 import { planSync, applySync } from '../ext/adapters'
@@ -194,16 +194,17 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
   const isWin = process.platform === 'win32'
   const H = os.homedir()
   const localAppData = process.env['LOCALAPPDATA'] || path.join(H, 'AppData', 'Local')
-  const appData = process.env['APPDATA'] || path.join(H, 'AppData', 'Roaming')
 
   if (id === 'claude') {
     return {
       id: 'claude',
       name: 'Claude Code',
-      command: isWin ? 'npm install -g @anthropic-ai/claude-code' : 'npm install -g @anthropic-ai/claude-code',
+      command: isWin
+        ? 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex"'
+        : 'curl -fsSL https://claude.ai/install.sh | bash',
       targetPath: isWin
-        ? path.join(appData, 'npm', 'claude.cmd')
-        : path.join(H, '.npm-global', 'bin', 'claude')
+        ? path.join(H, '.local', 'bin', 'claude.exe')
+        : path.join(H, '.local', 'bin', 'claude')
     }
   } else if (id === 'antigravity') {
     return {
@@ -220,10 +221,12 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
     return {
       id: 'codex',
       name: 'Codex CLI',
-      command: isWin ? 'npm install -g @openai/codex' : 'npm install -g @openai/codex',
+      command: isWin
+        ? 'powershell.exe -ExecutionPolicy Bypass -Command "$env:CODEX_NON_INTERACTIVE=\'1\'; irm https://chatgpt.com/codex/install.ps1 | iex"'
+        : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
       targetPath: isWin
-        ? path.join(appData, 'npm', 'codex.cmd')
-        : path.join('/usr', 'local', 'bin', 'codex')
+        ? path.join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin', 'codex.exe')
+        : path.join(H, '.local', 'bin', 'codex')
     }
   }
 }
@@ -236,15 +239,44 @@ async function runInstallAgent(
 
   try {
     if (id === 'claude') {
-      const cmd = isWin ? 'npm.cmd' : 'npm'
-      await execFileAsync(cmd, ['install', '-g', '@anthropic-ai/claude-code'], {
-        timeout: 180000,
-        shell: isWin
-      })
+      if (isWin) {
+        try {
+          await execFileAsync(
+            'powershell.exe',
+            [
+              '-ExecutionPolicy',
+              'Bypass',
+              '-Command',
+              'irm https://claude.ai/install.ps1 | iex'
+            ],
+            { timeout: 300000 }
+          )
+        } catch (psErr) {
+          console.warn('[CLI Install] PowerShell install for Claude Code failed, falling back to npm:', psErr)
+          await execFileAsync('npm.cmd', ['install', '-g', '@anthropic-ai/claude-code'], {
+            timeout: 180000,
+            shell: true
+          })
+        }
+      } else {
+        try {
+          await execFileAsync(
+            'bash',
+            ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'],
+            { timeout: 300000 }
+          )
+        } catch (shErr) {
+          console.warn('[CLI Install] Shell install for Claude Code failed, falling back to npm:', shErr)
+          await execFileAsync('npm', ['install', '-g', '@anthropic-ai/claude-code'], {
+            timeout: 180000
+          })
+        }
+      }
+      const foundPath = findAgentCli('claude') || (fs.existsSync(info.targetPath) ? info.targetPath : undefined)
       return {
         ok: true,
-        message: 'Claude Code CLI installed successfully via npm (@anthropic-ai/claude-code)',
-        installedPath: info.targetPath
+        message: 'Claude Code CLI installed successfully',
+        installedPath: foundPath
       }
     } else if (id === 'antigravity') {
       if (isWin) {
@@ -256,52 +288,61 @@ async function runInstallAgent(
             '-Command',
             'irm https://antigravity.google/cli/install.ps1 | iex'
           ],
-          { timeout: 180000 }
+          { timeout: 300000 }
         )
       } else {
         await execFileAsync(
           'bash',
           ['-c', 'curl -fsSL https://antigravity.google/cli/install.sh | bash'],
-          { timeout: 180000 }
+          { timeout: 300000 }
         )
       }
+      const foundPath = findAgentCli('antigravity') || (fs.existsSync(info.targetPath) ? info.targetPath : undefined)
       return {
         ok: true,
         message: 'Antigravity CLI (agy) installed successfully',
-        installedPath: info.targetPath
+        installedPath: foundPath
       }
     } else {
       // Codex CLI
-      try {
-        const cmd = isWin ? 'npm.cmd' : 'npm'
-        await execFileAsync(cmd, ['install', '-g', '@openai/codex'], {
-          timeout: 180000,
-          shell: isWin
-        })
-        return {
-          ok: true,
-          message: 'Codex CLI installed successfully via npm (@openai/codex)',
-          installedPath: info.targetPath
-        }
-      } catch (err: unknown) {
-        if (isWin) {
+      if (isWin) {
+        try {
           await execFileAsync(
             'powershell.exe',
             [
               '-ExecutionPolicy',
               'Bypass',
               '-Command',
-              'irm https://chatgpt.com/codex/install.ps1 | iex'
+              "$env:CODEX_NON_INTERACTIVE='1'; irm https://chatgpt.com/codex/install.ps1 | iex"
             ],
-            { timeout: 180000 }
+            { timeout: 300000 }
           )
-          return {
-            ok: true,
-            message: 'Codex CLI installed successfully via PowerShell installer',
-            installedPath: info.targetPath
-          }
+        } catch (psErr) {
+          console.warn('[CLI Install] PowerShell install for Codex failed, falling back to npm:', psErr)
+          await execFileAsync('npm.cmd', ['install', '-g', '@openai/codex'], {
+            timeout: 180000,
+            shell: true
+          })
         }
-        throw err
+      } else {
+        try {
+          await execFileAsync(
+            'sh',
+            ['-c', 'curl -fsSL https://chatgpt.com/codex/install.sh | sh'],
+            { timeout: 300000 }
+          )
+        } catch (shErr) {
+          console.warn('[CLI Install] Shell install for Codex failed, falling back to npm:', shErr)
+          await execFileAsync('npm', ['install', '-g', '@openai/codex'], {
+            timeout: 180000
+          })
+        }
+      }
+      const foundPath = findAgentCli('codex') || (fs.existsSync(info.targetPath) ? info.targetPath : undefined)
+      return {
+        ok: true,
+        message: 'Codex CLI installed successfully',
+        installedPath: foundPath
       }
     }
   } catch (err: unknown) {

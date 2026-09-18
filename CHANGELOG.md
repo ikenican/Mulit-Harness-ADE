@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.16] - 2026-09-18
+
+### Highlights & Summary / 更新亮點
+Agent Workbench v0.1.16 全面校準並升級各 AI Agent CLI 的官方原生 PowerShell 下載安裝指令與路徑自動探測機制：
+1. **Claude Code 採用官方原生 PowerShell 一鍵安裝與自動更新規範**：
+   - 全面替換原先易受全域環境與權限阻礙且已被官方 Deprecated 的 `npm` 安裝方式，對齊 Anthropic 官方推薦之原生指令：`irm https://claude.ai/install.ps1 | iex`。
+   - 原生安裝檔自動下載獨立二進位檔並配置到 `%USERPROFILE%\.local\bin\claude.exe`。
+   - 具備雙層安全容錯：若網路特殊阻擋，背景自動無縫 fallback 至 npm 備用安裝方案。
+2. **OpenAI Codex CLI 採用非交談式官方 PowerShell 一鍵安裝**：
+   - 對齊 OpenAI 官方規範：`powershell.exe -ExecutionPolicy Bypass -Command "$env:CODEX_NON_INTERACTIVE='1'; irm https://chatgpt.com/codex/install.ps1 | iex"`。
+   - 注入 `$env:CODEX_NON_INTERACTIVE='1'`，徹底解決官方腳本在背景執行時因等待終端使用者互動確認（`Prompt-YesNo`）而卡死超時的問題。
+   - 自動安裝至 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe` 或 `.codex\packages\standalone\current\bin\codex.exe`。
+3. **路徑探測與環境變數未重啟即時命中**：
+   - 擴充 `findCli` 搜尋候選清單：納入 `.local\bin\claude.exe`、`claude.ps1`、`OpenAI\Codex\bin\codex.exe`、`codex.ps1` 等。
+   - 即使使用者電腦在安裝完成後尚未重啟終端或重新登入，Agent Workbench 依然能即刻自動偵測並帶入正確二進位路徑，即時完成測試驗證。
+
+### Changed / 變更
+- **CLI 安裝指令及確認彈窗更新 (`src/main/ipc/ext.ts`)**:
+  - `getAgentInstallInfo()` 與 `runInstallAgent()` 全面切換至 Anthropic 及 OpenAI 官方原生 PowerShell 安裝命令。
+- **CLI 路徑搜尋器擴充 (`src/main/ext/paths.ts`)**:
+  - 納入官方原生安裝目錄，提升 Windows 與 Unix 跨平台自動偵測精準度。
+- **設定視窗描述更新 (`src/renderer/src/components/SettingsModal.tsx`)**:
+  - 更新 Codex CLI 說明文字為官方執行器規範。
+
+---
+
 ## [0.1.15] - 2026-09-18
 
 ### Highlights & Summary / 更新亮點

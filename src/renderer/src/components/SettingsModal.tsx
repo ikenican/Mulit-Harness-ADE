@@ -93,7 +93,7 @@ const cliConfigs: CliConfigItem[] = [
     id: 'codex',
     name: 'Codex CLI',
     category: 'agent',
-    desc: 'OpenAI Codex CLI binary sandbox runner (@openai/codex)',
+    desc: 'OpenAI Codex CLI official agent runner (codex.exe)',
     defaultCmd: 'codex',
     badgeColor: '#10B981',
     shortBadge: '@o'
