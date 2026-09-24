@@ -381,7 +381,6 @@ export interface AgentUsageSummary {
 export interface DashboardWorkspaceInfo {
   path: string
   name: string
-  isCurrent: boolean
   isArchived: boolean
 }
 
