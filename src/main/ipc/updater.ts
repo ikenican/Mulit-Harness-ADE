@@ -2,7 +2,7 @@ import { app, ipcMain, shell, BrowserWindow } from 'electron'
 import { autoUpdater, UpdateInfo as ElectronUpdateInfo, ProgressInfo } from 'electron-updater'
 import * as fs from 'fs'
 import { join, dirname } from 'path'
-import { isProtectedPath, loadSettings } from './settings'
+import { loadSettings } from './settings'
 import type { UpdaterStatus, UpdateInfo } from '../../preload/index'
 
 let updaterStatus: UpdaterStatus = {
@@ -23,11 +23,12 @@ export function isInstalledApp(): boolean {
   if (process.platform === 'win32') {
     try {
       const exeDir = dirname(app.getPath('exe'))
-      const hasUninstaller =
+      // 只認 NSIS 解除安裝程式。不可用 isProtectedPath(exeDir)：它對 exe 目錄本身恆為 true，
+      // 會把可攜版誤判成安裝版 → 靜默裝一份到 %LOCALAPPDATA%\Programs，重開舊捷徑又回到舊版。
+      return (
         fs.existsSync(join(exeDir, 'Uninstall Agent Workbench.exe')) ||
         fs.existsSync(join(exeDir, 'Uninstall.exe'))
-      const inProtected = isProtectedPath(exeDir)
-      return hasUninstaller || inProtected
+      )
     } catch {
       return false
     }

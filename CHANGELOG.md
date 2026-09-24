@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.19] - 2026-09-24
+
+### Fixed / 修復
+- **可攜版更新後重開退回舊版**：`isInstalledApp()` 原本以 `isProtectedPath(exeDir)` 輔助判斷，但該函式對 exe 目錄本身恆為 true，導致可攜版被誤判為安裝版，自動更新會靜默安裝一份到 `%LOCALAPPDATA%\Programs\Agent Workbench`；使用者再從原可攜版捷徑開啟即回到舊版。現改為僅以 NSIS 解除安裝程式判定，可攜版改導向 GitHub Releases 下載頁。
+
+---
+
 ## [0.1.18] - 2026-09-18
 
 ### Highlights & Summary / 更新亮點
