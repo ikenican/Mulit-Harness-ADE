@@ -24,7 +24,8 @@ React + Vite.
   natively as a child process via `node-pty`. No keys stored; the CLIs use their
   own subscriptions/auth.
 - **Preview & Documents** — live Markdown / HTML preview that auto-syncs on edit and save, plus built-in document viewing for Word, Excel, PowerPoint, and PDF.
-- **Dashboard & Telemetry** — local session/token statistics scanned from local CLI records (Claude Code, Codex, Antigravity) with 42x fast mtime caching, CLI enable/disable dynamic filtering, folder grouping, and one-click workspace switching.
+- **Vibe Coding Mode** — an alternative, task-first layout (Settings → Appearance → Work Mode): an icon rail (Sessions / Status / Handoff / Files / Git / Settings) whose panels fade in on hover and pin on click, the agent terminal in the middle, and the live result on the right. Dev-server URLs printed in the terminal (`http://localhost:PORT`) open automatically, and the Handoff panel summarises `.project-memory/handoff.md`. Developer Mode keeps the classic code-first layout.
+- **Dashboard & Telemetry** — session list plus token usage scanned from local CLI records (Claude Code, Codex, Antigravity), switchable between **All / 30d / 7d / Today** and split into input / cache read / output. Claude and Codex figures come from the CLIs' own usage records; Antigravity logs carry no token counts, so its figures are character-based estimates and are labelled as such. Includes CLI enable/disable filtering, folder grouping, and one-click workspace switching.
 - **Fast Startup & Mount-on-Demand** — 42x accelerated cold startup powered by disk-persisted session caches and lazy-loaded sidebar/central panels.
 - **Bilingual i18n** — full interface localization supporting seamless toggling between Strict English and Traditional Chinese.
 - **CLI Permissions & Bypass Mode** — toggleable bypass mode skipping interactive approval prompts for Claude Code (`--permission-mode bypassPermissions`), Codex (`--dangerously-bypass-approvals-and-sandbox`), and Antigravity (`--dangerously-skip-permissions`).
@@ -111,6 +112,8 @@ src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
   `.workbench/dashboard-state.json`) is git-ignored; `.workbench/extensions.yaml`
   is the checked-in template. CLI and document-tool paths are auto-detected at
   runtime and default to unspecified until configured in the app.
+- `npm run dev` uses its own user-data folder (`agent-workbench-dev`), so a dev
+  build can run alongside an installed copy without sharing settings or caches.
 
 ## Release Notes & Changelog
 
@@ -137,6 +140,10 @@ All bundled runtime dependencies are permissively licensed (MIT), including
 `js-yaml`, and `@lydell/node-pty`. Their license terms continue to apply to those
 components.
 
+The terminal dev-server URL detection (`src/renderer/src/panels/terminal/portDetect.ts`)
+is adapted from [AgentsDock](https://github.com/ZhengyiLuo/AgentsDock), licensed under
+the Apache License 2.0.
+
 ---
 
 # 繁體中文說明
@@ -157,7 +164,8 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **多 CLI 終端**——每個 CLI 各有一個 `xterm.js` 終端分頁，透過 `node-pty` 以子行程原生執行。
   不儲存金鑰；CLI 使用其自身的訂閱／驗證。
 - **預覽與文件**——Markdown／HTML 即時預覽（編輯與存檔自動同步），並內建 Word、Excel、PowerPoint 與 PDF 檢視器。
-- **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）極速掃描 session／token 統計，具備 mtime 快速快取、CLI 啟用動態連動、資料夾群組分類與一鍵工作區切換。
+- **Vibe Coding 模式**——任務優先的另一種版面（設定 → 外觀 → 工作模式）：最左側圖示列（Sessions／Status／Handoff／Files／Git／Settings）游標移過去就淡入彈出、點擊可固定；中間是 Agent 終端，右側是即時成品。終端輸出的 dev server 網址（`http://localhost:PORT`）會自動開啟，Handoff 面板會整理 `.project-memory/handoff.md`。開發者模式維持原本程式碼優先的版面。
+- **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）掃描 session 清單與 token 用量，可切換**總用量／30 天／7 天／今天**，並拆分輸入／快取讀取／輸出。Claude 與 Codex 取自 CLI 自己的用量紀錄；Antigravity 紀錄沒有 token 欄位，數字為字數估算並明確標示。支援 CLI 啟用連動、資料夾群組分類與一鍵工作區切換。
 - **極速啟動與按需掛載**——檔案 mtime 持久化快取與面板按需載入（Mount-on-Demand），開機掃描效能大幅提升 42 倍。
 - **雙語系支援**——全系統支援嚴謹英文與繁體中文介面即時無縫切換。
 - **CLI 啟動權限與略過模式**——全域開關支援切換 AI 代理（Claude Code、Codex、Antigravity）略過互動式審批確認模式，提升自動化執行流暢度。
@@ -240,6 +248,7 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 - 每台機器各自的 runtime state（`.workbench/settings.json`、`.workbench/dashboard-state.json`）
   已被 git 忽略；`.workbench/extensions.yaml` 為納入版控的範本。CLI 與文件工具路徑於執行時
   自動偵測，在 app 內設定前預設為未指定（unspecified）。
+- `npm run dev` 使用獨立的使用者資料夾（`agent-workbench-dev`），可與已安裝版本同時執行，互不共用設定與快取。
 
 ## 版本紀錄與變更日誌
 
@@ -260,3 +269,6 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 所有捆綁的 runtime 依賴皆為寬鬆授權（MIT），包含 `monaco-editor`、`@monaco-editor/react`、
 `@xterm/xterm`、`react`、`react-dom`、`react-markdown`、`rehype-highlight`、`remark-gfm`、
 `mermaid`、`simple-git`、`js-yaml`、`@lydell/node-pty`。這些元件仍受其各自授權條款約束。
+
+終端 dev server 網址偵測（`src/renderer/src/panels/terminal/portDetect.ts`）改寫自
+[AgentsDock](https://github.com/ZhengyiLuo/AgentsDock)，採 Apache License 2.0 授權。
