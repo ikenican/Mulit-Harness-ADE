@@ -462,10 +462,8 @@ export default function DashboardPanel({
 
       const normWs = normalizePath(ws.path)
       const groupKey = normWs || ws.name.toLowerCase()
-      const isCurrentWs = Boolean(
-        (normRoot && normWs && normRoot === normWs) ||
-        ws.isCurrent
-      )
+      // 只認本視窗自己的 workspaceRoot；多視窗共用同一份 main 資料，不能看 main 端的「目前」
+      const isCurrentWs = Boolean(normRoot && normWs && normRoot === normWs)
       map.set(groupKey, {
         key: groupKey,
         name: ws.name, // 永遠保持該專案原始資料夾名稱，絕不被 workspaceRoot 覆蓋！

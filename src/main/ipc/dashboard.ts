@@ -4,7 +4,7 @@ import * as path from 'path'
 import { join, basename, dirname } from 'path'
 import { homedir } from 'os'
 import { getActiveSessionMetas } from './pty'
-import { workspace, getAllProjectWindows } from '../index'
+import { getAllProjectWindows } from '../index'
 import {
   isCliEnabled,
   isProtectedPath,
@@ -66,9 +66,7 @@ function extractWorkspaceFromBlob(buf: Buffer): { workspace?: string; workspaceP
       }
     }
   } catch {}
-  if (workspace.root && fs.existsSync(workspace.root)) {
-    return { workspace: basename(workspace.root), workspacePath: workspace.root }
-  }
+  // 查不到就留空：不可回填「聚焦視窗」的工作區，否則會話會被歸到別的視窗專案
   return { workspace: undefined, workspacePath: undefined }
 }
 
@@ -131,21 +129,19 @@ function extractAntigravityWorkspace(logPath: string): { workspace: string; work
       }
     }
 
-    // 2. 兜底：若日誌內容精確包含當前工作區路徑，關聯當前工作區
-    if (workspace.root) {
-      const normWs = normalizePath(workspace.root)
-      const normContent = content.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase()
-      if (normContent.includes(normWs)) {
-        return { workspace: basename(workspace.root), workspacePath: workspace.root }
+    // 2. 兜底：日誌內容包含某個已知工作區（最近開啟＋各開啟中視窗）的路徑，就歸到該工作區。
+    //    不再只看聚焦視窗，也不再無條件回填聚焦視窗（多視窗時會把會話歸錯專案）。
+    const normContent = content.replace(/\\\\/g, '/').replace(/\\/g, '/').toLowerCase()
+    const known = [...getRecentWorkspaces(), ...getAllProjectWindows().map((w) => w.workspaceRoot)]
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length) // 最長者優先，避免父目錄搶走子專案
+    for (const ws of known) {
+      if (normContent.includes(normalizePath(ws))) {
+        return { workspace: basename(ws), workspacePath: ws }
       }
     }
   } catch {
     // ignore
-  }
-
-  // 兜底保底：若目前工作區存在，回歸當前工作區，避免散落成孤兒分組
-  if (workspace.root && fs.existsSync(workspace.root)) {
-    return { workspace: basename(workspace.root), workspacePath: workspace.root }
   }
 
   return { workspace: 'Antigravity Workspace', workspacePath: undefined }
@@ -234,15 +230,6 @@ function extractClaudeWorkspace(dirName: string, jsonlCwd?: string): { workspace
     }
   }
 
-  // 策略 4：若目錄名稱包含當前 workspace.root 的名稱（含正規化比對）
-  if (workspace.root) {
-    const wsBase = basename(workspace.root).toLowerCase()
-    const normWsBase = normalizeForClaude(wsBase).toLowerCase()
-    if (dirName.toLowerCase().includes(wsBase) || dirName.toLowerCase().includes(normWsBase)) {
-      return { workspace: basename(workspace.root), workspacePath: workspace.root }
-    }
-  }
-
   const parts = dirName.split('--')
   const lastPart = parts[parts.length - 1] || dirName
   const cleanName = lastPart.replace(/^.*?-([A-Za-z0-9_\-\s]+)$/, '$1').replace(/-/g, ' ') || lastPart
@@ -256,7 +243,7 @@ interface CachedSessionEntry {
 }
 
 interface DashboardCacheStore {
-  version: 2
+  version: 3
   sessions: Record<string, CachedSessionEntry>
 }
 
@@ -267,8 +254,10 @@ export function invalidateDashboardMemoryCache(): void {
   memCache = null
 }
 
+// 快取內容與工作區無關（掃的是 ~/.claude 等全域目錄），放 userData 一份，與 usage-cache.json 同處。
+// 舊版放在「聚焦視窗」工作區的 .workbench/ 下，多視窗時會互相覆寫、讀到別的專案的快取。
 function cacheFilePath(): string {
-  return join(workspace.root, '.workbench', 'dashboard-cache.json')
+  return join(app.getPath('userData'), 'dashboard-cache.json')
 }
 
 function loadDashboardCache(): Map<string, CachedSessionEntry> {
@@ -278,7 +267,7 @@ function loadDashboardCache(): Map<string, CachedSessionEntry> {
     const p = cacheFilePath()
     if (fs.existsSync(p)) {
       const data = JSON.parse(fs.readFileSync(p, 'utf8')) as DashboardCacheStore
-      if (data && data.version === 2 && typeof data.sessions === 'object') {
+      if (data && data.version === 3 && typeof data.sessions === 'object') {
         for (const [k, v] of Object.entries(data.sessions)) {
           if (v && typeof v.mtime === 'number' && v.session) {
             memCache.set(k, v)
@@ -293,16 +282,14 @@ function loadDashboardCache(): Map<string, CachedSessionEntry> {
 }
 
 function saveDashboardCache(): void {
-  if (!cacheDirty || !memCache || !workspace.root || isProtectedPath(workspace.root)) return
+  if (!cacheDirty || !memCache) return
   try {
-    const dir = join(workspace.root, '.workbench')
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     const sessionsObj: Record<string, CachedSessionEntry> = {}
     for (const [k, v] of memCache.entries()) {
       sessionsObj[k] = v
     }
     const store: DashboardCacheStore = {
-      version: 2,
+      version: 3,
       sessions: sessionsObj
     }
     fs.writeFileSync(cacheFilePath(), JSON.stringify(store), 'utf8')
@@ -943,8 +930,8 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
     let cachedTokens = 0
     let completionTokens = 0
     let model = 'Codex CLI'
-    let wsName = workspace.root ? basename(workspace.root) : 'Workspace'
-    let wsPath = workspace.root || ''
+    let wsName: string | undefined
+    let wsPath: string | undefined
 
     try {
       const content = fs.readFileSync(f.path, 'utf8')
@@ -954,8 +941,9 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
         try {
           const row = JSON.parse(line)
           if (row.type === 'session_meta' && row.payload?.cwd) {
-            wsPath = row.payload.cwd
-            wsName = basename(wsPath) || wsName
+            const cwd: string = row.payload.cwd
+            wsPath = cwd
+            wsName = basename(cwd) || cwd
           }
           if (!indexTitle && row.type === 'response_item' && row.payload?.role === 'user') {
             const parts = row.payload.content
@@ -1170,19 +1158,15 @@ setOnRecentWorkspaceAdded((dir) => {
   unmarkDeletedOrArchivedWorkspace(dir)
 })
 
-let activeScanPromise: Promise<DashboardData> | null = null
-
 export function registerDashboardHandlers(): void {
   // 只要 token 用量（Vibe 終端上方狀態列用），不跑整套 session 掃描
   ipcMain.handle('dashboard:usage', () => scanAllUsage())
 
   ipcMain.handle('dashboard:data', async (_e, force?: boolean): Promise<DashboardData> => {
-    if (force) {
-      invalidateDashboardMemoryCache()
-    } else if (activeScanPromise) {
-      return activeScanPromise
-    }
+    if (force) invalidateDashboardMemoryCache()
 
+    // ponytail: 掃描全程同步，main 單執行緒下不可能重疊，不需要 in-flight 去重。
+    // 舊版的 activeScanPromise 在 finally 清空「之後」才被賦值，結果永遠卡住第一次的結果 → 輪詢不更新。
     const runScan = async (): Promise<DashboardData> => {
       try {
         const state = loadDashboardState()
@@ -1259,7 +1243,7 @@ export function registerDashboardHandlers(): void {
           : agentType === 'antigravity'
           ? agySessions
           : codexSessions
-      const targetCwd = p.cwd || workspace.root
+      const targetCwd = p.cwd || ''
 
       // 提取有效關聯 Session ID（優先取 sessionId，若無則從命令參數中解析）
       let effectiveSessionId = p.sessionId
@@ -1378,9 +1362,6 @@ export function registerDashboardHandlers(): void {
         userPathsSet.add(path.resolve(pw.workspaceRoot))
       }
     }
-    if (workspace.root && !isProtectedPath(workspace.root)) {
-      userPathsSet.add(path.resolve(workspace.root))
-    }
 
     const deletedWorkspacesSet = new Set(state.deletedWorkspaces.map((w) => normalizePath(w)))
     const archivedWorkspacesSet = new Set(state.archivedWorkspaces.map((w) => normalizePath(w)))
@@ -1403,20 +1384,10 @@ export function registerDashboardHandlers(): void {
     }
 
     const allAllowedPaths = [...activeUserPaths, ...archivedUserPaths]
-    const currentRoot = workspace.root ? path.resolve(workspace.root) : ''
+    // 「目前工作區」由各視窗 renderer 用自己的 workspaceRoot 判斷；main 只知道聚焦視窗，不可在此標記
     const userWorkspacesList: DashboardWorkspaceInfo[] = [
-      ...activeUserPaths.map((p) => ({
-        path: p,
-        name: basename(p) || p,
-        isCurrent: Boolean(currentRoot && normalizePath(currentRoot) === normalizePath(p)),
-        isArchived: false
-      })),
-      ...archivedUserPaths.map((p) => ({
-        path: p,
-        name: basename(p) || p,
-        isCurrent: Boolean(currentRoot && normalizePath(currentRoot) === normalizePath(p)),
-        isArchived: true
-      }))
+      ...activeUserPaths.map((p) => ({ path: p, name: basename(p) || p, isArchived: false })),
+      ...archivedUserPaths.map((p) => ({ path: p, name: basename(p) || p, isArchived: true }))
     ]
 
     // 判斷某 session 是否屬於使用者合法工作區之一
@@ -1536,14 +1507,11 @@ export function registerDashboardHandlers(): void {
 
         return data
       } finally {
-        activeScanPromise = null
         saveDashboardCache()
       }
     }
 
-    const p = runScan()
-    activeScanPromise = p
-    return p
+    return runScan()
   })
 
   ipcMain.handle('dashboard:archiveSession', async (_e, id: string, archive: boolean): Promise<boolean> => {
