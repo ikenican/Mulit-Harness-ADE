@@ -1,0 +1,326 @@
+/* Vibe 模式最左側直列圖示列 + 懸浮彈出面板 */
+.vibe-rail {
+  position: relative;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) 0;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+}
+.vibe-rail-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  /* 所有圖示鈕固定同尺寸（含左下角設定），不隨標籤長短或有無標籤變化 */
+  flex: 0 0 52px;
+  width: 48px;
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.vibe-rail-btn:hover {
+  background: var(--bg3);
+  color: var(--fg);
+}
+.vibe-rail-btn.on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+.vibe-rail-label {
+  font-size: 10px;
+  line-height: 1.1;
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vibe-rail-badge {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
+.vibe-rail-badge.busy {
+  min-width: 8px;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  top: 5px;
+  right: 11px;
+  background: var(--green);
+  animation: vibe-pulse 1.2s ease-in-out infinite;
+}
+
+/* 懸浮面板：貼著圖示列右側彈出，右下角可拖曳調整大小 */
+.vibe-flyout {
+  position: absolute;
+  top: var(--space-4);
+  left: calc(100% + 6px);
+  width: 400px;
+  height: min(620px, calc(100vh - 80px));
+  min-width: 280px;
+  min-height: 200px;
+  max-width: 80vw;
+  max-height: calc(100vh - 60px);
+  resize: both;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-modal);
+  font-size: var(--text-size-meta);
+}
+.vibe-card-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+  color: var(--fg);
+  font-size: var(--text-size-label);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.vibe-flyout-close {
+  margin-left: var(--space-3);
+  border: none;
+  background: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+.vibe-flyout-close:hover {
+  color: var(--fg);
+}
+
+.vibe-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-6);
+}
+
+.vibe-agent {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400;
+  font-size: var(--text-size-meta);
+  color: var(--fg-dim);
+}
+.vibe-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fg-dim);
+  opacity: 0.5;
+}
+.vibe-agent.busy {
+  color: var(--fg);
+}
+.vibe-agent.busy .vibe-dot {
+  background: var(--green);
+  opacity: 1;
+  animation: vibe-pulse 1.2s ease-in-out infinite;
+}
+@keyframes vibe-pulse {
+  50% {
+    transform: scale(1.5);
+    opacity: 0.5;
+  }
+}
+.vibe-meta {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: var(--text-size-meta);
+  color: var(--fg-dim);
+}
+
+.vibe-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.vibe-label {
+  color: var(--fg-dim);
+}
+.vibe-pill {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-size-meta);
+}
+.vibe-url {
+  background: var(--vibe-gradient);
+  color: #fff;
+  font-family: var(--mono);
+}
+.vibe-link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--text-size-meta);
+}
+.vibe-file {
+  text-align: left;
+  padding: 2px var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--text-size-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.vibe-file:hover {
+  background: var(--bg3);
+}
+
+.vibe-task {
+  margin: 0 0 var(--space-2);
+  color: var(--fg);
+  font-weight: 600;
+}
+.vibe-md h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-size-meta);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.vibe-md ul,
+.vibe-md ol {
+  margin: 0;
+  padding-left: 18px;
+}
+.vibe-md p {
+  margin: 0 0 var(--space-2);
+}
+.vibe-md code {
+  font-size: 11px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--bg3);
+}
+
+/* 內嵌既有面板（FileTree / GitPanel）：它們預期父層是 .fill 絕對定位 */
+.vibe-embed {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Vibe 終端上方的 token 用量狀態列 */
+.vibe-usage-bar {
+  /* 與右欄分頁列同高（--toolbar-h），左右兩欄的每一列才會水平對齊 */
+  flex: 0 0 var(--toolbar-h);
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  height: var(--toolbar-h);
+  box-sizing: border-box;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  font-size: var(--text-size-meta);
+  color: var(--fg);
+}
+.vibe-usage-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  cursor: default;
+}
+.vibe-usage-item strong {
+  font-weight: 600;
+}
+.vibe-usage-dim {
+  color: var(--fg-dim);
+}
+.vibe-usage-spacer {
+  flex: 1;
+}
+.vibe-usage-busy {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: vibe-pulse 1.2s ease-in-out infinite;
+}
+
+.vibe-flyout.flyout-sessions {
+  width: 520px;
+}
+
+.vibe-rail-settings {
+  margin-top: auto;
+}
+
+/* 懸停預覽 vs 點擊固定：預覽只淡色提示，固定才用實心 accent */
+.vibe-rail-btn.peek {
+  background: var(--bg3);
+  color: var(--fg);
+}
+/* 淡進 / 淡出 */
+.vibe-flyout {
+  animation: vibe-fade-in 0.16s ease-out;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.vibe-flyout.fading {
+  opacity: 0;
+  transform: translateX(-4px);
+  pointer-events: none;
+}
+@keyframes vibe-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+.vibe-flyout.pinned {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+}
+/* 標題列：✕ 一律貼最右，狀態文字靠在 ✕ 左邊 */
+.vibe-head-spacer {
+  flex: 1;
+}
+.vibe-flyout .vibe-agent,
+.vibe-flyout .vibe-meta {
+  margin-left: 0;
+}
+
+.vibe-usage-name {
+  font-family: var(--font);
+  color: var(--fg-dim);
+}

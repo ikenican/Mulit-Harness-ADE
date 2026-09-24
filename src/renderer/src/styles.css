@@ -35,6 +35,25 @@
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI',
     system-ui, 'Helvetica Neue', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
   --mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+
+  /* 依用途命名的尺寸 token（參考 AgentsDock DESIGN_SYSTEM）；新元件請用這些，舊元件漸進遷移 */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 24px;
+  --text-size-caption: 11px;
+  --text-size-meta: 12px;
+  --text-size-label: 13px;
+  --text-size-ui: 14px;
+  --text-size-title: 16px;
+  --radius-control: 8px;
+  --radius-dialog: 12px;
+  --radius-pill: 999px;
+  --vibe-gradient: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
 }
 
 /* 系統偏好暗色時、JS 尚未設定 data-theme 前的 FOUC 保護 */
@@ -492,4 +511,69 @@ button {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--fg-dim);
   background-clip: padding-box;
+}
+
+/* ── Vibe Coding 模式（<html data-mode="vibe">）────────────────────
+   只覆寫 token 與少數外框；版面切換由 App.tsx 的 grid-template-areas 負責。 */
+:root[data-mode='vibe'] {
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-control: 10px;
+  --accent: #6d4aff;
+}
+:root[data-mode='vibe'][data-theme^='dark'] {
+  --accent: #9b87ff;
+}
+:root[data-mode='vibe'] .app-brand .dot {
+  background: var(--vibe-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:root[data-mode='vibe'] .app-header-center .segmented button {
+  font-size: var(--text-size-label);
+  padding: 4px 16px;
+}
+/* 對話欄：Agent 工作中時外框呼吸光暈 */
+:root[data-mode='vibe'] .col-term {
+  /* 左右卡片各留一半間距（中間分隔線兩側對稱） */
+  margin: var(--space-4) var(--space-2) var(--space-4) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: box-shadow 0.4s ease, border-color 0.4s ease;
+}
+:root[data-mode='vibe'] .col-term.agent-busy {
+  border-color: var(--accent);
+  animation: vibe-glow 2s ease-in-out infinite;
+}
+@keyframes vibe-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(109, 74, 255, 0.25), 0 0 12px rgba(109, 74, 255, 0.15); }
+  50% { box-shadow: 0 0 0 2px rgba(109, 74, 255, 0.45), 0 0 24px rgba(37, 99, 235, 0.3); }
+}
+:root[data-mode='vibe'] .col-center {
+  margin: var(--space-4) var(--space-4) var(--space-4) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tabbar[hidden] {
+  display: none;
+}
+.dev-url-chip {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font: 11px var(--mono);
+  cursor: pointer;
+}
+.usage-range-switch button {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+.usage-range-switch.compact button {
+  padding: 2px 8px;
+  font-size: 10.5px;
 }

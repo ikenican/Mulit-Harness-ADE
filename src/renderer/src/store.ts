@@ -10,6 +10,9 @@ import type { AgentId } from '../../preload/index'
 export type Theme = 'light' | 'dark' | 'light-morandi' | 'dark-morandi'
 export type Language = 'en' | 'zh-TW'
 export type SidebarTab = 'dashboard' | 'files' | 'git'
+/** developer＝現行程式碼優先版面；vibe＝對話＋即時成品優先版面 */
+export type UiMode = 'developer' | 'vibe'
+export type UsageRange = 'all' | '30d' | '7d' | '1d'
 
 /** 要送進終端的文字（例如 markdown code block 的指令）。nonce 遞增即代表有新的一筆。 */
 export interface TerminalDispatch {
@@ -86,6 +89,15 @@ export interface WorkbenchState {
    * 代表外面真的有人在跑它，標記自動失效。
    */
   closedAgentSessions: Record<string, number>
+  uiMode: UiMode
+  /** 終端輸出偵測到的最新本機開發伺服器網址（nonce 遞增＝新偵測） */
+  detectedDevUrl: { url: string; nonce: number } | null
+  /** 請求內建 Browser 開啟某網址（nonce 遞增＝新請求） */
+  browserRequest: { url: string; nonce: number } | null
+  /** Agent 終端近期有輸出（約 1.5 秒內），供 Vibe 狀態列顯示「工作中」 */
+  agentBusy: boolean
+  /** Dashboard／Vibe 狀態列共用的 token 用量區間 */
+  usageRange: UsageRange
 }
 
 function initialTheme(): Theme {
@@ -103,6 +115,29 @@ function initialTheme(): Theme {
     /* localStorage 不可用時忽略 */
   }
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function initialUiMode(): UiMode {
+  try {
+    if (localStorage.getItem('wb-ui-mode') === 'vibe') return 'vibe'
+  } catch {
+    /* localStorage 不可用時忽略 */
+  }
+  return 'developer'
+}
+
+function initialUsageRange(): UsageRange {
+  try {
+    const v = localStorage.getItem('wb-usage-range')
+    if (v === 'all' || v === '30d' || v === '7d' || v === '1d') return v
+  } catch {
+    /* 忽略 */
+  }
+  return '30d'
+}
+
+function applyUiMode(mode: UiMode): void {
+  document.documentElement.setAttribute('data-mode', mode)
 }
 
 function applyTheme(theme: Theme): void {
@@ -153,9 +188,15 @@ let state: WorkbenchState = {
   fileReloadTick: {},
   editorDraft: null,
   liveAgentSessionIds: [],
-  closedAgentSessions: {}
+  closedAgentSessions: {},
+  uiMode: initialUiMode(),
+  detectedDevUrl: null,
+  browserRequest: null,
+  agentBusy: false,
+  usageRange: initialUsageRange()
 }
 applyTheme(state.theme)
+applyUiMode(state.uiMode)
 
 // 異步載入後端工作區根目錄與偏好設定
 if (typeof window !== 'undefined' && window.api?.files?.workspaceRoot) {
@@ -260,6 +301,50 @@ export function clearAgentModified(path: string): void {
   const next = new Set(state.agentModifiedFiles)
   next.delete(path)
   set({ agentModifiedFiles: next })
+}
+
+export function clearAllAgentModified(): void {
+  if (state.agentModifiedFiles.size === 0) return
+  set({ agentModifiedFiles: new Set<string>() })
+}
+
+export function setUiMode(mode: UiMode): void {
+  if (state.uiMode === mode) return
+  applyUiMode(mode)
+  try {
+    localStorage.setItem('wb-ui-mode', mode)
+  } catch {
+    /* 忽略 */
+  }
+  set({ uiMode: mode, centerMaximized: false })
+}
+
+export function setUsageRange(range: UsageRange): void {
+  try {
+    localStorage.setItem('wb-usage-range', range)
+  } catch {
+    /* 忽略 */
+  }
+  set({ usageRange: range })
+}
+
+export function openInBrowser(url: string): void {
+  set({ browserRequest: { url, nonce: (state.browserRequest?.nonce ?? 0) + 1 } })
+}
+
+/** 終端偵測到開發伺服器網址；同網址不重複觸發。Vibe 模式直接在內建 Browser 開啟。 */
+export function reportDevUrl(url: string): void {
+  if (state.detectedDevUrl?.url === url) return
+  set({ detectedDevUrl: { url, nonce: (state.detectedDevUrl?.nonce ?? 0) + 1 } })
+  if (state.uiMode === 'vibe') openInBrowser(url)
+}
+
+let agentBusyTimer: ReturnType<typeof setTimeout> | undefined
+/** Agent 終端每有輸出就呼叫；只在 idle↔busy 轉換時 set，避免每個 chunk 都重繪。 */
+export function pulseAgentActivity(): void {
+  if (!state.agentBusy) set({ agentBusy: true })
+  clearTimeout(agentBusyTimer)
+  agentBusyTimer = setTimeout(() => set({ agentBusy: false }), 1500)
 }
 
 export function setWorkspaceRoot(path: string): void {

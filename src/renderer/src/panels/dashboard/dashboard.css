@@ -1988,3 +1988,31 @@
 @keyframes dashSpin {
   to { transform: rotate(360deg); }
 }
+
+/* 用量區間切換列（總用量／30d／7d／1d） */
+.dash-range-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+.dash-range-hint {
+  font-size: var(--text-size-meta);
+  color: var(--fg-dim);
+}
+
+/* 窄寬度（Dev 側欄、Vibe Sessions 懸浮面板）不外溢：工具列換行、按鈕收成圖示 */
+.dash-root {
+  overflow-x: hidden;
+}
+.dash-section-header,
+.dash-section-actions {
+  flex-wrap: wrap;
+}
+@container dash-panel (max-width: 480px) {
+  .dash-open-folder-btn span,
+  .dash-clone-repo-btn span {
+    display: none;
+  }
+}

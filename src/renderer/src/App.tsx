@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import FileTreePanel from '@panels/filetree/FileTreePanel'
 import GitPanel from '@panels/git/GitPanel'
 import EditorPanel from '@panels/editor/EditorPanel'
@@ -9,6 +9,8 @@ import DashboardPanel from '@panels/dashboard/DashboardPanel'
 import TestBrowserPanel from '@panels/browser/TestBrowserPanel'
 import SettingsModal from '@/components/SettingsModal'
 import Splitter from '@/components/Splitter'
+import VibeRail from '@/components/VibeRail'
+import VibeUsageBar from '@/components/VibeUsageBar'
 import {
   IconSidebarCollapse,
   IconSidebarExpand,
@@ -19,7 +21,15 @@ import {
   IconMinimize,
   IconClose
 } from '@/components/Icons'
-import { toggleCenterMaximized, useWorkbench, openSettings, closeSettings, setSidebarTab, setWorkspaceRoot } from '@/store'
+import {
+  toggleCenterMaximized,
+  useWorkbench,
+  openSettings,
+  closeSettings,
+  setSidebarTab,
+  setWorkspaceRoot,
+  openInBrowser
+} from '@/store'
 import { useTranslation } from '@/i18n'
 import {
   clamp,
@@ -49,9 +59,21 @@ export default function App(): JSX.Element {
     )
   }
 
-  const [center, setCenter] = useState<CenterTab>('editor')
+  const {
+    centerMaximized,
+    terminalOpenSession,
+    settingsModal,
+    sidebarTab,
+    uiMode,
+    browserRequest,
+    detectedDevUrl,
+    agentBusy
+  } = useWorkbench()
+  const isVibe = uiMode === 'vibe'
+  // Vibe 模式左欄只當任務看板（Dashboard）；Files / Git 收起，程式碼改由中欄「程式碼」分頁看 diff
+  const activeSidebarTab = isVibe ? 'dashboard' : sidebarTab
+  const [center, setCenter] = useState<CenterTab>(isVibe ? 'browser' : 'editor')
   const [browserOpened, setBrowserOpened] = useState(false)
-  const { centerMaximized, terminalOpenSession, settingsModal, sidebarTab } = useWorkbench()
   const { t } = useTranslation()
 
   // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
@@ -107,12 +129,25 @@ export default function App(): JSX.Element {
     }
   }, [center])
 
-  const [layout, setLayout] = useState<LayoutState>(loadLayout)
-  useEffect(() => saveLayout(layout), [layout])
+  // 兩種模式各存一份版面；layoutModeRef 記住目前 layout 屬於哪個模式，切換時不會寫錯 key
+  const layoutModeRef = useRef(uiMode)
+  const [layout, setLayout] = useState<LayoutState>(() => loadLayout(uiMode))
+  useEffect(() => saveLayout(layout, layoutModeRef.current), [layout])
+  useEffect(() => {
+    if (layoutModeRef.current === uiMode) return
+    layoutModeRef.current = uiMode
+    setLayout(loadLayout(uiMode))
+    setCenter(uiMode === 'vibe' ? 'browser' : 'editor')
+  }, [uiMode])
+
+  // 有人請求開網址（終端偵測到 dev server / 狀態列）→ 切到 Browser
+  useEffect(() => {
+    if (browserRequest) setCenter('browser')
+  }, [browserRequest?.nonce])
 
   // 監聽跨面板請求開啟/聚焦終端：若指定 ensureRightDock 且目前非右側停靠，自動切換至右側停靠
   useEffect(() => {
-    if (!terminalOpenSession) return
+    if (!terminalOpenSession || isVibe) return
     if (terminalOpenSession.ensureRightDock && layout.dock !== 'right') {
       setLayout((l) => ({
         ...l,
@@ -124,6 +159,7 @@ export default function App(): JSX.Element {
 
   // 切換側邊欄標籤時，若側邊欄原本為摺疊狀態，自動展開以利立即檢視內容
   useEffect(() => {
+    if (isVibe) return
     if (layout.leftCollapsed && sidebarTab) {
       setLayout((l) => ({
         ...l,
@@ -133,9 +169,10 @@ export default function App(): JSX.Element {
     }
   }, [sidebarTab])
 
-  const isBottom = layout.dock === 'bottom'
+  const isBottom = !isVibe && layout.dock === 'bottom'
   const isCenterMaximized = Boolean(centerMaximized)
-  const isLeftCollapsed = isCenterMaximized || Boolean(layout.leftCollapsed || layout.leftW === 0)
+  // Vibe 模式沒有左欄：Dashboard 的 session 清單改由最左圖示列懸浮開啟
+  const isLeftCollapsed = isVibe || isCenterMaximized || Boolean(layout.leftCollapsed || layout.leftW === 0)
 
   // 上限依目前視窗算，避免把中央區擠沒了
   const maxLeft = (): number =>
@@ -157,9 +194,12 @@ export default function App(): JSX.Element {
       }
     })
 
-  // 右欄在右側，往右拖代表把它縮小
+  // 右欄在右側，往右拖代表把它縮小；Vibe 模式終端在左，方向相反
   const nudgeRight = (dx: number): void =>
-    setLayout((l) => ({ ...l, rightW: clamp(l.rightW - dx, LIMITS.rightMin, maxRight()) }))
+    setLayout((l) => ({
+      ...l,
+      rightW: clamp(l.rightW + (isVibe ? dx : -dx), LIMITS.rightMin, maxRight())
+    }))
   // 終端在底部，往下拖代表把它縮小
   const nudgeTerm = (dy: number): void =>
     setLayout((l) => ({ ...l, termH: clamp(l.termH - dy, LIMITS.termMin, maxTerm()) }))
@@ -174,6 +214,12 @@ export default function App(): JSX.Element {
         gridTemplateColumns: '1fr',
         gridTemplateRows: '1fr',
         gridTemplateAreas: `"center"`
+      }
+    : isVibe
+    ? {
+        gridTemplateColumns: `56px 0px 0px ${layout.rightW}px 1px 1fr`,
+        gridTemplateRows: '1fr',
+        gridTemplateAreas: `"rail left sp1 term sp2 center"`
       }
     : isBottom
     ? {
@@ -204,7 +250,7 @@ export default function App(): JSX.Element {
               <IconSidebarCollapse size={13} />
             </button>
           )}
-          {isLeftCollapsed && !isCenterMaximized && (
+          {isLeftCollapsed && !isCenterMaximized && !isVibe && (
             <button
               className="btn-expand-left"
               onClick={() =>
@@ -223,6 +269,7 @@ export default function App(): JSX.Element {
         </div>
 
         <div className="app-header-center">
+          {!isVibe && (
           <div className="segmented">
             <button className={center === 'editor' ? 'on' : ''} onClick={() => setCenter('editor')}>
               {t('header.editor')}
@@ -243,18 +290,31 @@ export default function App(): JSX.Element {
               {t('header.browser')}
             </button>
           </div>
+          )}
         </div>
 
         <div className="app-header-right">
-          {/* Focus / Maximize Center View */}
-          <button
-            className={`btn-icon ${isCenterMaximized ? 'active' : ''}`}
-            title={isCenterMaximized ? t('header.exitFocus') : t('header.focusWorkspace')}
-            onClick={toggleCenterMaximized}
-          >
-            {isCenterMaximized ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
-          </button>
+          {!isVibe && detectedDevUrl && center !== 'browser' && (
+            <button
+              className="dev-url-chip"
+              title={t('vibe.openDevUrl')}
+              onClick={() => openInBrowser(detectedDevUrl.url)}
+            >
+              ▶ {detectedDevUrl.url.replace(/^http:\/\//, '')}
+            </button>
+          )}
+          {/* Focus / Maximize Center View（Vibe 模式版面已精簡，不提供） */}
+          {!isVibe && (
+            <button
+              className={`btn-icon ${isCenterMaximized ? 'active' : ''}`}
+              title={isCenterMaximized ? t('header.exitFocus') : t('header.focusWorkspace')}
+              onClick={toggleCenterMaximized}
+            >
+              {isCenterMaximized ? <IconMinimize size={14} /> : <IconMaximize size={14} />}
+            </button>
+          )}
 
+          {!isVibe && (
           <div className="segmented dock-switch">
             <button
               className={!isBottom ? 'on' : ''}
@@ -271,19 +331,23 @@ export default function App(): JSX.Element {
               <IconDockBottom size={13} />
             </button>
           </div>
+          )}
 
-          <button
-            className="btn-icon"
-            title={t('header.settingsTooltip')}
-            onClick={() => openSettings()}
-          >
-            <IconSettings size={14} />
-          </button>
+          {/* Vibe 模式的設定鈕在左側圖示列最下方 */}
+          {!isVibe && (
+            <button
+              className="btn-icon"
+              title={t('header.settingsTooltip')}
+              onClick={() => openSettings()}
+            >
+              <IconSettings size={14} />
+            </button>
+          )}
         </div>
       </header>
 
       {/* 工作區（各欄起始 Y 座標完全齊平，底線絕對水平對齊） */}
-      <div className={`workarea dock-${layout.dock}`} style={gridStyle}>
+      <div className={`workarea dock-${isVibe ? 'vibe' : layout.dock}`} style={gridStyle}>
         <aside
           className="col col-left"
           style={{
@@ -292,7 +356,7 @@ export default function App(): JSX.Element {
             minWidth: isLeftCollapsed ? 0 : LIMITS.leftMin
           }}
         >
-          <div className="tabbar">
+          <div className="tabbar" hidden={isVibe}>
             <div className="segmented left-segmented">
               <button className={sidebarTab === 'dashboard' ? 'on' : ''} onClick={() => setSidebarTab('dashboard')}>
                 {t('sidebarTabs.dashboard')}
@@ -306,18 +370,18 @@ export default function App(): JSX.Element {
             </div>
           </div>
           <div className="panel-body">
-            {visitedSidebarTabs.has('dashboard') && (
-              <div hidden={sidebarTab !== 'dashboard'} className="fill">
+            {(isVibe || visitedSidebarTabs.has('dashboard')) && (
+              <div hidden={activeSidebarTab !== 'dashboard'} className="fill">
                 <DashboardPanel />
               </div>
             )}
             {visitedSidebarTabs.has('files') && (
-              <div hidden={sidebarTab !== 'files'} className="fill">
+              <div hidden={activeSidebarTab !== 'files'} className="fill">
                 <FileTreePanel />
               </div>
             )}
             {visitedSidebarTabs.has('git') && (
-              <div hidden={sidebarTab !== 'git'} className="fill">
+              <div hidden={activeSidebarTab !== 'git'} className="fill">
                 <GitPanel />
               </div>
             )}
@@ -341,6 +405,22 @@ export default function App(): JSX.Element {
         )}
 
         <main className="col col-center" style={{ gridArea: 'center' }}>
+          {/* Vibe：成品／Preview／程式碼分頁放在成果欄自己的頂端（靠左），不佔 header 正中 */}
+          {isVibe && (
+            <div className="tabbar vibe-center-tabs">
+              <div className="segmented">
+                <button className={center === 'browser' ? 'on' : ''} onClick={() => setCenter('browser')}>
+                  {t('vibe.app')}
+                </button>
+                <button className={center === 'preview' ? 'on' : ''} onClick={() => setCenter('preview')}>
+                  {t('header.preview')}
+                </button>
+                <button className={center === 'editor' ? 'on' : ''} onClick={() => setCenter('editor')}>
+                  {t('vibe.code')}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="panel-body">
             {visitedCenterTabs.has('editor') && (
               <div hidden={center !== 'editor'} className="fill">
@@ -366,7 +446,10 @@ export default function App(): JSX.Element {
                   width: '100%'
                 }}
               >
-                <TestBrowserPanel onClose={() => setCenter('editor')} />
+                <TestBrowserPanel
+                  onClose={isVibe ? undefined : () => setCenter('editor')}
+                  idleUntilRequested={isVibe}
+                />
               </div>
             )}
           </div>
@@ -389,19 +472,22 @@ export default function App(): JSX.Element {
         )}
 
         <section
-          className="col col-term"
+          className={`col col-term ${isVibe && agentBusy ? 'agent-busy' : ''}`}
           style={{
             gridArea: 'term',
             display: isCenterMaximized ? 'none' : 'flex',
             minWidth: !isBottom ? LIMITS.rightMin : 0
           }}
         >
+          {isVibe && <VibeUsageBar />}
           <div className="panel-body">
             <div className="fill">
               <TerminalPanel />
             </div>
           </div>
         </section>
+
+        {isVibe && !isCenterMaximized && <VibeRail onOpenCode={() => setCenter('editor')} />}
       </div>
 
       <SettingsModal
