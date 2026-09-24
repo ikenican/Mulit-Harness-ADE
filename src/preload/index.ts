@@ -102,6 +102,8 @@ const api = {
   // 儀表板與使用量統計 —— main/ipc/dashboard.ts
   dashboard: {
     data: (force?: boolean): Promise<DashboardData> => ipcRenderer.invoke('dashboard:data', force),
+    usage: (): Promise<Record<AgentId, Record<UsageRange, UsageBucket>>> =>
+      ipcRenderer.invoke('dashboard:usage'),
     archiveSession: (sessionId: string, archive: boolean): Promise<boolean> =>
       ipcRenderer.invoke('dashboard:archiveSession', sessionId, archive),
     archiveSessions: (sessionIds: string[], archive: boolean): Promise<boolean> =>
@@ -349,6 +351,16 @@ export interface WindowUsage {
   label?: string
 }
 
+/** Dashboard 用量區間：全部歷史／近 30 天／近 7 天／今天（本地時區） */
+export type UsageRange = 'all' | '30d' | '7d' | '1d'
+
+/** input 含 cache 寫入；cacheRead 另計（Claude 計費約原價一成）；output 為模型輸出 */
+export interface UsageBucket {
+  input: number
+  cacheRead: number
+  output: number
+}
+
 export interface AgentUsageSummary {
   agent: AgentId
   label: string
@@ -358,6 +370,8 @@ export interface AgentUsageSummary {
   promptTokens: number
   toolTokens: number
   completionTokens: number
+  /** true＝紀錄檔無真實 token 欄位，數字為字數估算（Antigravity） */
+  estimated?: boolean
   usedPct?: number
   quotaLimit?: number
   fiveHour?: WindowUsage
@@ -373,6 +387,8 @@ export interface DashboardWorkspaceInfo {
 
 export interface DashboardData {
   agents: Record<AgentId, AgentUsageSummary>
+  /** 各 Agent 在各區間的用量（掃全部歷史紀錄，非僅最近 N 筆 session） */
+  usageByRange?: Record<AgentId, Record<UsageRange, UsageBucket>>
   sessions: AgentSessionInfo[]
   userWorkspaces?: DashboardWorkspaceInfo[]
   archivedWorkspaces?: string[]

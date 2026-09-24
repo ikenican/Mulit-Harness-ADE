@@ -4,10 +4,17 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
-import { useWorkbench, getDraggedSession, setLiveAgentSessionIds } from '@/store'
+import {
+  useWorkbench,
+  getDraggedSession,
+  setLiveAgentSessionIds,
+  reportDevUrl,
+  pulseAgentActivity
+} from '@/store'
 import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
 import { looksLikeApprovalPrompt } from './approvalDetect'
+import { detectDevUrl } from './portDetect'
 import AgentMark from '@/components/AgentMark'
 import {
   IconPlus,
@@ -1982,8 +1989,19 @@ function TerminalInstance({
         ptyIdRef.current = ptyId
         setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, ptyId } : s)))
 
+        const isAgent = AGENT_IDS.includes(session.launcherKey)
+        // 保留上一段尾巴，避免網址剛好被切在兩個 chunk 之間
+        let urlTail = ''
         const unsubData = window.api.pty.onData(ptyId, (data) => {
           session.term.write(data)
+
+          if (isAgent) pulseAgentActivity()
+          const scan = urlTail + data
+          urlTail = scan.slice(-200)
+          if (scan.includes('http://')) {
+            const devUrl = detectDevUrl(scan)
+            if (devUrl) reportDevUrl(devUrl)
+          }
 
           // 待審批偵測：false→true 才提醒，避免同一個提示連發通知
           if (!approvalRef.current && looksLikeApprovalPrompt(data)) {

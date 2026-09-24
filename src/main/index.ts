@@ -385,6 +385,9 @@ function registerWindowHandlers(): void {
   })
 }
 
+// dev 版與安裝版共用 userData 會搶同一把單例鎖（dev 直接被 quit）並互相污染設定，故分開
+if (!app.isPackaged) app.setPath('userData', app.getPath('userData') + '-dev')
+
 const gotTheLock = app.requestSingleInstanceLock()
 
 if (!gotTheLock) {

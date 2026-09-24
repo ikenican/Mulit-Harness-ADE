@@ -355,3 +355,28 @@
   color: var(--accent);
   border-color: var(--accent);
 }
+
+/* 窄欄（例如 Vibe 成品欄）時工具列不外溢：Desktop/Tablet/Mobile 改成下拉、再窄就收掉 Ports */
+.browser-root {
+  container-type: inline-size;
+  container-name: browser;
+}
+.browser-toolbar .browser-viewport-select {
+  display: none;
+}
+@container browser (max-width: 760px) {
+  .browser-toolbar .browser-viewport-segmented {
+    display: none;
+  }
+  .browser-toolbar .browser-viewport-select {
+    display: block;
+  }
+}
+@container browser (max-width: 560px) {
+  .browser-port-select-wrap {
+    display: none;
+  }
+  .browser-address-container {
+    min-width: 100px;
+  }
+}

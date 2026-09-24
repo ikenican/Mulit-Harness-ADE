@@ -1018,7 +1018,8 @@
   overflow-y: auto;
   overflow-x: hidden;
   box-sizing: border-box;
-  container-type: inline-size;
+  /* size：寬度與高度都可查詢（底部停靠太矮時切精簡卡片） */
+  container-type: size;
   container-name: launchpad;
 }
 
@@ -1077,14 +1078,44 @@
 }
 
 .term-launchpad-cards {
-  display: flex;
-  flex-wrap: wrap;
+  /* 固定 2 欄（寬時 4 欄），避免 flex-wrap 排出 3+1 的孤兒卡 */
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
   justify-content: center;
   align-items: stretch;
   gap: 12px;
   max-width: 840px;
   width: 100%;
   margin: 0 auto;
+}
+@container launchpad (min-width: 700px) {
+  .term-launchpad-cards {
+    grid-template-columns: repeat(4, max-content);
+  }
+}
+/* 底部停靠高度不夠：隱藏說明與卡片次要資訊，確保「Launch」按鈕看得到 */
+@container launchpad (max-height: 420px) {
+  .term-launchpad {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .term-launchpad-desc,
+  .term-launchpad-glow,
+  .launchpad-card-sub,
+  .launchpad-card-meta {
+    display: none;
+  }
+  .term-launchpad-title {
+    font-size: 15px;
+    margin-bottom: 10px;
+  }
+  .launchpad-card {
+    min-height: 0;
+    padding: 10px 8px;
+  }
+  .launchpad-card-icon {
+    margin-bottom: 4px;
+  }
 }
 
 @container launchpad (max-width: 330px) {
@@ -1364,7 +1395,10 @@
 
 .term-surface {
   position: relative;
-  padding: 6px 8px;
+  /* 不可在這裡加 padding：xterm FitAddon 用「父層」computed height（border-box 含 padding）
+     算行數，父層 padding 會被當成可用空間 → 多算一行、最底那行被裁掉（視窗大小不同時才出現）。
+     留白放在 .xterm 本身，FitAddon 會正確扣掉。 */
+  padding: 0;
   background: var(--bg);
   display: none;
   min-width: 0;
@@ -1392,6 +1426,7 @@
   height: 100%;
   width: 100%;
   position: relative;
+  padding: 6px 8px;
 }
 
 .term-surface .xterm-viewport {

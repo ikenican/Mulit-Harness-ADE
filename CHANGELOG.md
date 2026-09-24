@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.20] - 2026-09-24
+
+### Added / 新增
+- **Vibe Coding 模式**（Settings → Appearance → 工作模式切換，與 Developer 模式並存）：
+  - 版面：最左圖示列（Sessions／Status／Handoff／Files／Git／Settings）｜終端（對話）｜成品（App／Preview／程式碼）。
+  - 圖示列游標懸停即淡入彈出、移開淡出；點擊固定，點外面／✕／Esc 關閉。
+  - 終端輸出偵測到 `http://localhost:PORT` 自動在成品分頁開啟（偵測邏輯改寫自 AgentsDock，Apache-2.0）；Dev 模式則在 header 顯示可點的網址。
+  - Handoff 窗格直接讀 `.project-memory/handoff.md`，整理成已完成／未完成／下一步。
+  - Agent 輸出時對話欄外框呼吸光暈。
+- **Token 用量區間切換**：總用量／30天／7天／今天（Dashboard 與 Vibe 終端上方狀態列共用），顯示的 Agent 與 Settings 的 CLI 啟用開關連動。
+
+### Fixed / 修復
+- **Dashboard token 數字失真**：
+  - Claude：改為每次 API 呼叫依 `message.id` 去重後加總（原本輸入只取單次最大值、輸出被重複計算，實測少算約 79 倍）；拆分為 In／Cache read／Out。
+  - Antigravity：移除「整個 .db 二進位當文字」的估算（同一 session 比 transcript 估算高 11 倍），統一以 transcript 估算並標示「估算」。
+  - 總數改為掃全部歷史並按日累計，不再只加總「最近 N 筆 session」——修正每次打開數字都不同。
+- **終端最底一行被裁掉**（視窗大小不同時才出現）：xterm FitAddon 以父層含 padding 的高度算行數，會多算一行；padding 改放在 xterm 元素上。
+- **dev 版與安裝版共用 userData** 導致單例鎖衝突（`npm run dev` 直接被關）與設定互相污染；dev 版改用 `agent-workbench-dev`。
+- 設定頁卡片大小統一（工作模式／語言／主題皆為單行小卡）；Dashboard 與成品工具列在窄寬度下不再外溢；終端 Launchpad 不再排出 3+1、底部停靠太矮時自動切精簡卡片；補上缺漏的 `sidebar.settings` 翻譯。
+
+---
+
 ## [0.1.19] - 2026-09-24
 
 ### Fixed / 修復

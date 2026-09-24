@@ -15,16 +15,10 @@ import {
   setOnRecentWorkspaceAdded
 } from './settings'
 import type { AgentId, DashboardData, AgentSessionInfo, DashboardWorkspaceInfo } from '../../preload/index'
+import { scanAllUsage, fileDays } from './usage'
+import { sumDays } from './usageParse'
 
 const H = homedir()
-
-/**
- * 簡易從字元數推算 Token 數（中英混和平均 1 token ~ 3.5 字元）
- */
-function estimateTokens(text: string): number {
-  if (!text) return 0
-  return Math.ceil(text.length / 3.5)
-}
 
 function normalizePath(p?: string): string {
   if (!p) return ''
@@ -262,7 +256,7 @@ interface CachedSessionEntry {
 }
 
 interface DashboardCacheStore {
-  version: 1
+  version: 2
   sessions: Record<string, CachedSessionEntry>
 }
 
@@ -284,7 +278,7 @@ function loadDashboardCache(): Map<string, CachedSessionEntry> {
     const p = cacheFilePath()
     if (fs.existsSync(p)) {
       const data = JSON.parse(fs.readFileSync(p, 'utf8')) as DashboardCacheStore
-      if (data && data.version === 1 && typeof data.sessions === 'object') {
+      if (data && data.version === 2 && typeof data.sessions === 'object') {
         for (const [k, v] of Object.entries(data.sessions)) {
           if (v && typeof v.mtime === 'number' && v.session) {
             memCache.set(k, v)
@@ -308,7 +302,7 @@ function saveDashboardCache(): void {
       sessionsObj[k] = v
     }
     const store: DashboardCacheStore = {
-      version: 1,
+      version: 2,
       sessions: sessionsObj
     }
     fs.writeFileSync(cacheFilePath(), JSON.stringify(store), 'utf8')
@@ -511,18 +505,15 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
               if (match) {
                 title = match[1].trim().split(/\r?\n/)[0].slice(0, 45)
               }
-              promptTokens += estimateTokens(row.content)
-            }
-            if (row.source === 'MODEL' && row.type === 'PLANNER_RESPONSE') {
-              if (row.thinking) completionTokens += estimateTokens(row.thinking)
-              if (row.content) completionTokens += estimateTokens(row.content)
-            } else if (row.type === 'RUN_COMMAND' || row.type === 'VIEW_FILE' || row.type === 'SYSTEM_MESSAGE') {
-              if (row.content) toolTokens += estimateTokens(row.content)
             }
           } catch {
             // ignore malformed line
           }
         }
+        // 與 Dashboard 總數同一套估算（usage.ts）：字數估，無真實 token 欄位
+        const b = sumDays(fileDays('antigravity', logPath, content))
+        promptTokens = b.input
+        completionTokens = b.output
       } catch {
         // ignore
       }
@@ -557,9 +548,9 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
           toolReadTokens: toolTokens,
           completionTokens,
           details: [
-            { category: 'Context & System Prompt', tokens: promptTokens, percentage: promptPct },
-            { category: 'Tool Execution & Files', tokens: toolTokens, percentage: toolPct },
-            { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
+            { category: 'Input & Tool Output (estimated)', tokens: promptTokens, percentage: promptPct },
+            { category: 'Cache Read', tokens: toolTokens, percentage: toolPct },
+            { category: 'Model Output (estimated)', tokens: completionTokens, percentage: compPct }
           ]
         }
       }
@@ -575,43 +566,14 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
 }
 
 /**
- * 從二進位 blob 裡掃出連續的可讀 UTF-8 文字段落，粗估這個 session 用掉的 token 數。
- * Antigravity CLI conversation 的 .db 內部欄位是 protobuf blob、無官方 schema 可正確
- * 解析，但使用者訊息、系統提示詞、工具輸出等文字內容仍以明文 UTF-8 散落其中——用類似
- * Unix `strings` 指令的做法，把整個檔案當 UTF-8 解碼，無法解碼的位元組會變成 U+FFFD
- * 替代字元，直接排除掉；剩下連續 4 字元以上的可讀段落全部算進總長度，
- * 再套用跟 estimateTokens() 一樣的字元數量級公式（約 3.5 字元 ≈ 1 token）。
- * 不是精確值，但比恆定 0 更貼近真實使用量，而且只是掃 bytes，不依賴 protobuf 內部
- * 欄位順序或結構，Antigravity 版本更新也不容易讓它失效。
- */
-function estimateTokensFromBlob(buf: Buffer): number {
-  const text = buf.toString('utf8')
-  const MIN_RUN = 4
-  let totalChars = 0
-  let runLen = 0
-  for (const ch of text) {
-    const code = ch.codePointAt(0) || 0
-    const isReadable = code !== 0xfffd && (code >= 0x20 || code === 0x0a || code === 0x0d || code === 0x09)
-    if (isReadable) {
-      runLen++
-    } else {
-      if (runLen >= MIN_RUN) totalChars += runLen
-      runLen = 0
-    }
-  }
-  if (runLen >= MIN_RUN) totalChars += runLen
-  return Math.ceil(totalChars / 3.5)
-}
-
-/**
  * 掃描 Antigravity CLI 自己的 conversation 儲存區（`~/.gemini/antigravity-cli/conversations/*.db`，
  * 一個 session 一個 SQLite 檔）。這裡的檔名就是 `agy --conversation <id>` 真正吃得動的 ID——
  * 跟 scanAntigravitySessions() 讀的 IDE 面板 brain session 是兩組完全不重疊的 ID 空間，
  * 過去 Dashboard 只掃 brain session，導致點擊 resume 時帶的 ID 在 CLI 這邊永遠找不到對應紀錄，
  * 送出的 --conversation 會被 pty.ts 的防呆邏輯直接拔掉，於是每次都變成全新啟動。
  *
- * token 數用 estimateTokensFromBlob() 粗估（見上），工作區路徑用 extractWorkspaceFromBlob()
- * 從 blob 二進位中自動反解。
+ * .db 是 protobuf blob、沒有 token 欄位；以前把整個二進位當文字估，同一 session 比 transcript 估算高 11 倍，
+ * 已移除——token 一律以 brain transcript（usage.ts）為準，這裡只取 ID 與工作區（extractWorkspaceFromBlob）。
  */
 function scanAntigravityCliConversations(max = 20): AgentSessionInfo[] {
   const convDirs = [
@@ -679,13 +641,12 @@ function scanAntigravityCliConversations(max = 20): AgentSessionInfo[] {
         continue
       }
 
-      let promptTokens = 0
+      const promptTokens = 0
       let rawBuf: Buffer | null = null
       try {
         rawBuf = fs.readFileSync(f.path)
-        promptTokens = estimateTokensFromBlob(rawBuf)
       } catch {
-        promptTokens = 0
+        rawBuf = null
       }
 
       const { workspace: wsName, workspacePath: wsPath } = rawBuf
@@ -708,7 +669,7 @@ function scanAntigravityCliConversations(max = 20): AgentSessionInfo[] {
           toolReadTokens: 0,
           completionTokens: 0,
           details: [
-            { category: 'Estimated from binary content (approximate)', tokens: promptTokens, percentage: 100 }
+            { category: 'Unavailable (no transcript)', tokens: 0, percentage: 0 }
           ]
         }
       }
@@ -817,20 +778,15 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
               if (row.attachment?.type === 'model' && row.attachment.identity?.marketingName) {
                 model = row.attachment.identity.marketingName
               }
-              if (row.message?.usage) {
-                const u = row.message.usage
-                const inp = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0)
-                if (inp > 0) promptTokens = Math.max(promptTokens, inp)
-                if (u.output_tokens) completionTokens += u.output_tokens
-              }
-              if (row.type === 'tool_use' || row.type === 'tool_result') {
-                const len = JSON.stringify(row).length
-                toolTokens += Math.ceil(len / 3.5)
-              }
             } catch {
               // ignore
             }
           }
+          // 每次 API 呼叫的真實 usage，依 message.id 去重後加總（usage.ts）
+          const b = sumDays(fileDays('claude', f.path, content))
+          promptTokens = b.input
+          toolTokens = b.cacheRead
+          completionTokens = b.output
         } catch {
           // ignore
         }
@@ -865,9 +821,9 @@ function scanClaudeSessions(max = 20): AgentSessionInfo[] {
             toolReadTokens: toolTokens,
             completionTokens,
             details: [
-              { category: 'Context & System Prompt', tokens: promptTokens, percentage: promptPct },
-              { category: 'Tool Execution & Files', tokens: toolTokens, percentage: toolPct },
-              { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
+              { category: 'Input & Cache Write', tokens: promptTokens, percentage: promptPct },
+              { category: 'Cache Read', tokens: toolTokens, percentage: toolPct },
+              { category: 'Output', tokens: completionTokens, percentage: compPct }
             ]
           }
         }
@@ -1011,33 +967,25 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
               : undefined
             if (found?.text) title = found.text.trim().split(/\r?\n/)[0].slice(0, 40)
           }
-          const usage = row.payload?.info?.total_token_usage
-          if (usage) {
-            cachedTokens = usage.cached_input_tokens || 0
-            if (usage.input_tokens || usage.output_tokens) {
-              promptTokens = usage.input_tokens || 0
-              completionTokens = usage.output_tokens || 0
-            } else if (usage.total_tokens) {
-              // 某些 resumed/壓縮過的 session，input/output 明細會歸零但 total_tokens
-              // 仍保留真實累計值——此時把它算進 prompt，避免整個 session 顯示成 0 token。
-              promptTokens = usage.total_tokens
-              completionTokens = 0
-            }
-          }
           const provModel = row.payload?.base_instructions?.provenance?.model
           if (provModel) model = provModel
         } catch {
           // ignore malformed line
         }
       }
+      // 累計 total_token_usage 的差值加總（usage.ts），與 Dashboard 總數同一套算法
+      const b = sumDays(fileDays('codex', f.path, content))
+      promptTokens = b.input
+      cachedTokens = b.cacheRead
+      completionTokens = b.output
     } catch {
       // ignore unreadable rollout file
     }
 
-    const totalTokens = promptTokens + completionTokens
-    const promptPct = totalTokens > 0 ? Math.round((promptTokens / totalTokens) * 100) : 85
-    const compPct = Math.max(0, 100 - promptPct)
-    const cachedPct = promptTokens > 0 ? Math.round((cachedTokens / promptTokens) * 100) : 0
+    const totalTokens = promptTokens + cachedTokens + completionTokens
+    const promptPct = totalTokens > 0 ? Math.round((promptTokens / totalTokens) * 100) : 0
+    const cachedPct = totalTokens > 0 ? Math.round((cachedTokens / totalTokens) * 100) : 0
+    const compPct = Math.max(0, 100 - promptPct - cachedPct)
 
     const timeSinceLastActive = Date.now() - f.mtime
     const status: 'active' | 'idle' | 'completed' =
@@ -1060,12 +1008,12 @@ function scanCodexSessions(max = 10): AgentSessionInfo[] {
       workspacePath: wsPath,
       tokenBreakdown: {
         promptTokens,
-        toolReadTokens: 0,
+        toolReadTokens: cachedTokens,
         completionTokens,
         details: [
-          { category: 'Context & System Prompt', tokens: promptTokens, percentage: promptPct },
-          { category: 'Cached Input Context', tokens: cachedTokens, percentage: cachedPct },
-          { category: 'Thinking & Generation', tokens: completionTokens, percentage: compPct }
+          { category: 'Input (non-cached)', tokens: promptTokens, percentage: promptPct },
+          { category: 'Cache Read', tokens: cachedTokens, percentage: cachedPct },
+          { category: 'Output', tokens: completionTokens, percentage: compPct }
         ]
       }
     }
@@ -1225,6 +1173,9 @@ setOnRecentWorkspaceAdded((dir) => {
 let activeScanPromise: Promise<DashboardData> | null = null
 
 export function registerDashboardHandlers(): void {
+  // 只要 token 用量（Vibe 終端上方狀態列用），不跑整套 session 掃描
+  ipcMain.handle('dashboard:usage', () => scanAllUsage())
+
   ipcMain.handle('dashboard:data', async (_e, force?: boolean): Promise<DashboardData> => {
     if (force) {
       invalidateDashboardMemoryCache()
@@ -1521,28 +1472,19 @@ export function registerDashboardHandlers(): void {
       return new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime()
     })
 
-    // 6. 計算各 Agent 真實 Token 統計指標
+    // 6. Token 用量：掃「全部歷史」紀錄檔（不只清單上最近 N 筆 session、也不限已登記工作區），
+    //    依每日桶切 all/30d/7d/1d。舊版只加總最近 N 筆 → 每次打開數字都不同。
+    const usageByRange = scanAllUsage()
     const computeAgentUsage = (agentId: AgentId) => {
       const list = allSessions.filter((s) => s.agent === agentId)
-      let total = list.reduce((acc, s) => acc + (s.totalTokens || 0), 0)
-      let prompt = list.reduce((acc, s) => acc + (s.tokenBreakdown?.promptTokens || 0), 0)
-      let tool = list.reduce((acc, s) => acc + (s.tokenBreakdown?.toolReadTokens || 0), 0)
-      let comp = list.reduce((acc, s) => acc + (s.tokenBreakdown?.completionTokens || 0), 0)
-
-      if (total > 0 && prompt === 0 && comp === 0) {
-        prompt = Math.round(total * 0.73)
-        tool = Math.round(total * 0.17)
-        comp = Math.max(0, total - prompt - tool)
-      }
-
-      const activeCount = list.filter((s) => s.status === 'active').length
+      const u = usageByRange[agentId].all
       return {
-        total,
-        prompt,
-        tool,
-        comp,
+        total: u.input + u.cacheRead + u.output,
+        prompt: u.input,
+        tool: u.cacheRead,
+        comp: u.output,
         totalSessions: list.length,
-        activeSessions: activeCount
+        activeSessions: list.filter((s) => s.status === 'active').length
       }
     }
 
@@ -1566,6 +1508,7 @@ export function registerDashboardHandlers(): void {
         antigravity: {
           agent: 'antigravity',
           label: 'Antigravity',
+          estimated: true,
           totalSessions: agyUsage.totalSessions,
           activeSessions: agyUsage.activeSessions,
           totalTokens: agyUsage.total,
@@ -1584,6 +1527,7 @@ export function registerDashboardHandlers(): void {
           completionTokens: codexUsage.comp
         }
       },
+      usageByRange,
       sessions: allSessions,
       userWorkspaces: userWorkspacesList,
       archivedWorkspaces: state.archivedWorkspaces,

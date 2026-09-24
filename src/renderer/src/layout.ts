@@ -19,6 +19,16 @@ export const DEFAULT_LAYOUT: LayoutState = {
 
 const KEY = 'wb-layout'
 
+/** Vibe 模式：圖示列（Sessions／Status／Handoff／Files／Git 懸浮）｜終端（對話）｜成品 */
+export const VIBE_DEFAULT_LAYOUT: LayoutState = {
+  leftW: 260,
+  rightW: 640, // 終端（對話）欄寬；成品吃剩下
+  termH: 300,
+  dock: 'right',
+  leftCollapsed: false
+}
+const VIBE_KEY = 'wb-layout-vibe-v4'
+
 export const clamp = (v: number, lo: number, hi: number): number =>
   Math.min(hi, Math.max(lo, v))
 
@@ -33,7 +43,15 @@ export const LIMITS = {
   centerMin: 280
 }
 
-export function loadLayout(): LayoutState {
+export function loadLayout(mode: 'developer' | 'vibe' = 'developer'): LayoutState {
+  if (mode === 'vibe') {
+    try {
+      const p = JSON.parse(localStorage.getItem(VIBE_KEY) || 'null') as Partial<LayoutState> | null
+      return { ...VIBE_DEFAULT_LAYOUT, ...(p || {}), dock: 'right' }
+    } catch {
+      return { ...VIBE_DEFAULT_LAYOUT }
+    }
+  }
   try {
     const raw = localStorage.getItem(KEY)
     const migrated = localStorage.getItem(KEY + '-migrated-v2')
@@ -59,9 +77,9 @@ export function loadLayout(): LayoutState {
   }
 }
 
-export function saveLayout(l: LayoutState): void {
+export function saveLayout(l: LayoutState, mode: 'developer' | 'vibe' = 'developer'): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(l))
+    localStorage.setItem(mode === 'vibe' ? VIBE_KEY : KEY, JSON.stringify(l))
   } catch {
     /* 無痕視窗等情況忽略 */
   }

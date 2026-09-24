@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconClose } from '@/components/Icons'
 import { useTranslation } from '@/i18n'
+import { useWorkbench } from '@/store'
 import './browser.css'
 
 type ViewportMode = 'full' | 'tablet' | 'mobile'
@@ -14,12 +15,14 @@ const QUICK_PORTS = [
 
 interface TestBrowserPanelProps {
   onClose?: () => void
+  /** Vibe 模式：還沒偵測到 dev server 前不去開 5173，顯示「尚無執行中的 App」空狀態 */
+  idleUntilRequested?: boolean
 }
 
-export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JSX.Element {
+export default function TestBrowserPanel({ onClose, idleUntilRequested = false }: TestBrowserPanelProps): JSX.Element {
   const { t } = useTranslation()
-  const [url, setUrl] = useState('http://localhost:5173')
-  const [inputVal, setInputVal] = useState('http://localhost:5173')
+  const [url, setUrl] = useState(idleUntilRequested ? '' : 'http://localhost:5173')
+  const [inputVal, setInputVal] = useState(idleUntilRequested ? '' : 'http://localhost:5173')
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState<{ code: number; desc: string; url: string } | null>(null)
   const [viewport, setViewport] = useState<ViewportMode>('full')
@@ -40,6 +43,12 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
     setUrl(target)
     setInputVal(target)
   }
+
+  // 其他面板（終端偵測到 dev server、Vibe 狀態列）請求開啟網址
+  const { browserRequest } = useWorkbench()
+  useEffect(() => {
+    if (browserRequest) navigate(browserRequest.url)
+  }, [browserRequest?.nonce])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') {
@@ -214,6 +223,16 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
 
         {/* Viewport Presets & External */}
         <div className="browser-viewports">
+          <select
+            className="browser-port-select browser-viewport-select"
+            value={viewport}
+            onChange={(e) => setViewport(e.target.value as ViewportMode)}
+            title="Viewport"
+          >
+            <option value="full">Desktop</option>
+            <option value="tablet">Tablet</option>
+            <option value="mobile">Mobile</option>
+          </select>
           <div className="segmented browser-viewport-segmented">
             <button
               className={viewport === 'full' ? 'on' : ''}
@@ -358,8 +377,12 @@ export default function TestBrowserPanel({ onClose }: TestBrowserPanelProps): JS
             </>
           ) : (
             <div className="browser-empty-state">
-              <h3>No URL loaded</h3>
-              <p>Type a URL or select a port above to start testing.</p>
+              <h3>{idleUntilRequested ? t('vibe.noAppTitle') : 'No URL loaded'}</h3>
+              <p>
+                {idleUntilRequested
+                  ? t('vibe.noAppDesc')
+                  : 'Type a URL or select a port above to start testing.'}
+              </p>
             </div>
           )}
         </div>

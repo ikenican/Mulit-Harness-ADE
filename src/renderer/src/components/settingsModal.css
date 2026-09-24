@@ -1041,7 +1041,7 @@
 /* ── Language Selection Cards ────────────────────────────────────────────── */
 .macos-lang-cards {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1108,6 +1108,10 @@
 .macos-lang-sub {
   font-size: 11px;
   color: var(--fg-dim);
+  /* 單行截斷：各區卡片（工作模式／語言）高度一致，不因說明長短而大小不一 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .macos-lang-card .macos-radio-dot {
@@ -1621,3 +1625,9 @@
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border-top: 1px solid color-mix(in srgb, var(--red) 20%, transparent);
 }
+
+/* 主題小卡的色票（取代原本的大預覽圖）；選中時保留色票，不被 active 的 accent 蓋掉 */
+.macos-lang-card .macos-theme-swatch.swatch-light { background: #ffffff; color: #1d1d1f; border-color: rgba(0, 0, 0, 0.14); }
+.macos-lang-card .macos-theme-swatch.swatch-dark { background: #1e1e20; color: #f5f5f7; border-color: #1e1e20; }
+.macos-lang-card .macos-theme-swatch.swatch-light-morandi { background: #e9e4dc; color: #6b6258; border-color: #d8d1c6; }
+.macos-lang-card .macos-theme-swatch.swatch-dark-morandi { background: #3a3835; color: #d7cfc3; border-color: #3a3835; }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useWorkbench, setTheme, bumpSettings } from '@/store'
+import { useWorkbench, setTheme, bumpSettings, setUiMode } from '@/store'
 import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import {
@@ -172,7 +172,7 @@ export default function SettingsModal({
   onClose,
   initialTab
 }: SettingsModalProps): JSX.Element | null {
-  const { theme } = useWorkbench()
+  const { theme, uiMode } = useWorkbench()
   const { t, language, setLanguage } = useTranslation()
   const [tab, setTab] = useState<SettingsTab>(initialTab || 'appearance')
   const [settings, setSettings] = useState<WorkbenchSettings>({
@@ -879,6 +879,37 @@ export default function SettingsModal({
               </div>
 
               <div className="macos-settings-body">
+                {/* Work Mode：Developer / Vibe Coding */}
+                <div className="macos-section">
+                  <span className="macos-section-header">{t('vibe.modeSection')}</span>
+                  <div className="macos-inset-group" style={{ padding: '14px 16px' }}>
+                    <div className="macos-lang-cards">
+                      {(['developer', 'vibe'] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`macos-lang-card ${uiMode === m ? 'active' : ''}`}
+                          onClick={() => setUiMode(m)}
+                        >
+                          <div
+                            className="macos-lang-flag"
+                            style={m === 'vibe' ? { background: 'var(--vibe-gradient)', color: '#fff' } : undefined}
+                          >
+                            {m === 'vibe' ? '✦' : '</>'}
+                          </div>
+                          <div className="macos-lang-info">
+                            <span className="macos-lang-name">{t(`vibe.${m}Title`)}</span>
+                            <span className="macos-lang-sub" title={t(`vibe.${m}Desc`)}>
+                              {t(`vibe.${m}Desc`)}
+                            </span>
+                          </div>
+                          <span className="macos-radio-dot" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Language Selection */}
                 <div className="macos-section">
                   <span className="macos-section-header">{t('settings.languageSection')}</span>
@@ -921,91 +952,33 @@ export default function SettingsModal({
 
                 <div className="macos-section">
                   <span className="macos-section-header">{t('settings.themeSection')}</span>
-                  <div className="macos-inset-group" style={{ padding: '16px' }}>
-                    <div className="macos-theme-cards">
-                      <button
-                        type="button"
-                        className={`macos-theme-card ${theme === 'light' ? 'active' : ''}`}
-                        onClick={() => setTheme('light')}
-                      >
-                        <div className="macos-preview-window macos-preview-light">
-                          <div className="preview-topbar">
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
+                  <div className="macos-inset-group" style={{ padding: '14px 16px' }}>
+                    {/* 與工作模式／語言同款單行小卡，整頁視覺統一 */}
+                    <div className="macos-lang-cards">
+                      {(
+                        [
+                          ['light', <IconSun size={16} />, 'settings.lightMode', 'settings.lightModeSub'],
+                          ['dark', <IconMoon size={16} />, 'settings.darkMode', 'settings.darkModeSub'],
+                          ['light-morandi', <IconPalette size={16} />, 'settings.lightMorandi', 'settings.lightMorandiSub'],
+                          ['dark-morandi', <IconPalette size={16} />, 'settings.darkMorandi', 'settings.darkMorandiSub']
+                        ] as const
+                      ).map(([id, icon, name, sub]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          className={`macos-lang-card ${theme === id ? 'active' : ''}`}
+                          onClick={() => setTheme(id)}
+                        >
+                          <div className={`macos-lang-flag macos-theme-swatch swatch-${id}`}>{icon}</div>
+                          <div className="macos-lang-info">
+                            <span className="macos-lang-name">{t(name)}</span>
+                            <span className="macos-lang-sub" title={t(sub)}>
+                              {t(sub)}
+                            </span>
                           </div>
-                          <div className="preview-body">
-                            <IconSun size={20} />
-                          </div>
-                        </div>
-                        <div className="macos-theme-label-row">
                           <span className="macos-radio-dot" />
-                          <span>{t('settings.lightMode')}</span>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`macos-theme-card ${theme === 'dark' ? 'active' : ''}`}
-                        onClick={() => setTheme('dark')}
-                      >
-                        <div className="macos-preview-window macos-preview-dark">
-                          <div className="preview-topbar">
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                          </div>
-                          <div className="preview-body">
-                            <IconMoon size={20} />
-                          </div>
-                        </div>
-                        <div className="macos-theme-label-row">
-                          <span className="macos-radio-dot" />
-                          <span>{t('settings.darkMode')}</span>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`macos-theme-card ${theme === 'light-morandi' ? 'active' : ''}`}
-                        onClick={() => setTheme('light-morandi')}
-                      >
-                        <div className="macos-preview-window macos-preview-light-morandi">
-                          <div className="preview-topbar">
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                          </div>
-                          <div className="preview-body">
-                            <IconPalette size={20} />
-                          </div>
-                        </div>
-                        <div className="macos-theme-label-row">
-                          <span className="macos-radio-dot" />
-                          <span>{t('settings.lightMorandi')}</span>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`macos-theme-card ${theme === 'dark-morandi' ? 'active' : ''}`}
-                        onClick={() => setTheme('dark-morandi')}
-                      >
-                        <div className="macos-preview-window macos-preview-dark-morandi">
-                          <div className="preview-topbar">
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                            <span className="preview-dot" />
-                          </div>
-                          <div className="preview-body">
-                            <IconPalette size={20} />
-                          </div>
-                        </div>
-                        <div className="macos-theme-label-row">
-                          <span className="macos-radio-dot" />
-                          <span>{t('settings.darkMorandi')}</span>
-                        </div>
-                      </button>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </div>

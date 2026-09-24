@@ -10,6 +10,7 @@ import { IconArchive, IconTrash, IconTerminalBox, IconFolder, IconGripVertical, 
 import AppleAlertDialog from '@/components/AppleAlertDialog'
 import { openTerminalSession, setDraggedSession, useWorkbench, switchWorkspace, setSidebarTab, openSettings } from '@/store'
 import { useTranslation } from '@/i18n'
+import UsageRangeSwitch, { formatTokens } from '@/components/UsageRangeSwitch'
 import './dashboard.css'
 
 interface SessionFolderGroup {
@@ -40,22 +41,18 @@ const AGENT_CONFIG: Record<
   }
 }
 
-function formatTokens(count: number): string {
-  if (count >= 1_000_000) {
-    return (count / 1_000_000).toFixed(2) + 'M'
-  }
-  if (count >= 1_000) {
-    return (count / 1_000).toFixed(1) + 'k'
-  }
-  return count.toLocaleString()
-}
 
 function normalizePath(p?: string): string {
   if (!p) return ''
   return p.replace(/\\+/g, '/').replace(/\/+/g, '/').toLowerCase().replace(/\/+$/, '')
 }
 
-export default function DashboardPanel(): JSX.Element {
+export default function DashboardPanel({
+  sessionsOnly = false
+}: {
+  /** Vibe 模式懸浮面板：只顯示 Session 清單，不顯示用量卡（用量改在終端上方狀態列） */
+  sessionsOnly?: boolean
+} = {}): JSX.Element {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [viewFilter, setViewFilter] = useState<'all' | 'archived'>('all')
@@ -204,7 +201,7 @@ export default function DashboardPanel(): JSX.Element {
     }
   })
 
-  const { workspaceRoot, settingsTick, liveAgentSessionIds, closedAgentSessions } = useWorkbench()
+  const { workspaceRoot, settingsTick, liveAgentSessionIds, closedAgentSessions, usageRange } = useWorkbench()
   const { t } = useTranslation()
   const [cliEnabled, setCliEnabled] = useState<Record<string, boolean | undefined>>({
     claude: true,
@@ -380,10 +377,13 @@ export default function DashboardPanel(): JSX.Element {
     ? Object.values(data.agents).filter((a) => isAgentEnabled(a.agent))
     : []
 
-  const totalTokens: number = agentList.reduce(
-    (acc: number, a: AgentUsageSummary) => acc + a.totalTokens,
-    0
-  )
+  // 依選定區間取用量（main 掃全部歷史後切 all/30d/7d/1d）
+  const rangeUsage = (agentId: AgentId): { input: number; cacheRead: number; output: number } =>
+    data?.usageByRange?.[agentId]?.[usageRange] ?? { input: 0, cacheRead: 0, output: 0 }
+  const totalTokens: number = agentList.reduce((acc: number, a: AgentUsageSummary) => {
+    const u = rangeUsage(a.agent)
+    return acc + u.input + u.cacheRead + u.output
+  }, 0)
 
   // 用 renderer 手上的事實修正 main 端的推斷（main 只能靠 PTY meta ＋ 日誌 mtime 猜）：
   //   1. 終端分頁還活著 → 一定是 active（修掉 resume 後瞬間跳回 completed）。
@@ -755,6 +755,8 @@ export default function DashboardPanel(): JSX.Element {
 
   return (
     <div className="dash-root">
+      {!sessionsOnly && (
+      <>
       {/* Dashboard Header */}
       <div className="dash-header">
         <div className="dash-title-block">
@@ -771,7 +773,7 @@ export default function DashboardPanel(): JSX.Element {
       {/* Overview Metric Banner */}
       <div className="dash-banner">
         <div className="dash-banner-metric">
-          <span className="dash-metric-label">{t('dashboard.workspaceTokens')}</span>
+          <span className="dash-metric-label">{t('usage.totalLabel', { range: t(`usage.range_${usageRange}`) })}</span>
           <strong className="dash-metric-val">{data ? formatTokens(totalTokens) : '—'}</strong>
         </div>
         <div className="dash-banner-divider" />
@@ -784,6 +786,11 @@ export default function DashboardPanel(): JSX.Element {
           <span className="dash-metric-label">{t('dashboard.totalSessions')}</span>
           <strong className="dash-metric-val">{allSessions.length}</strong>
         </div>
+      </div>
+
+      <div className="dash-range-row">
+        <span className="dash-range-hint">{t('usage.rangeHint')}</span>
+        <UsageRangeSwitch />
       </div>
 
       {/* Agent Usage Trio Cards (filtered by CLI settings) */}
@@ -810,13 +817,14 @@ export default function DashboardPanel(): JSX.Element {
             const cfg = AGENT_CONFIG[agentId]
             const usage = data?.agents[agentId]
             const activeCount = usage?.activeSessions ?? 0
-            const agentTokens = usage?.totalTokens ?? 0
+            const ru = rangeUsage(agentId)
+            const agentTokens = ru.input + ru.cacheRead + ru.output
             const isSelected = selectedAgent === agentId
 
             const total = agentTokens || 1
-            const promptTokens = usage?.promptTokens ?? 0
-            const toolTokens = usage?.toolTokens ?? 0
-            const completionTokens = usage?.completionTokens ?? 0
+            const promptTokens = ru.input
+            const toolTokens = ru.cacheRead
+            const completionTokens = ru.output
 
             const pctPrompt = Math.min(100, Math.round((promptTokens / total) * 100))
             const pctTools = Math.min(100, Math.round((toolTokens / total) * 100))
@@ -852,14 +860,17 @@ export default function DashboardPanel(): JSX.Element {
                 <div className="dash-agent-token-stat">
                   <div className="dash-agent-stat-number-row">
                     <span className="dash-agent-stat-number">{formatTokens(agentTokens)}</span>
-                    <span className="dash-agent-stat-unit">{t('dashboard.totalTokensUnit')}</span>
+                    <span className="dash-agent-stat-unit">
+                      {t('dashboard.totalTokensUnit')}
+                      {usage?.estimated ? ` · ${t('usage.estimated')}` : ''}
+                    </span>
                   </div>
                 </div>
 
                 {/* Segmented Token Distribution Bar */}
                 <div
                   className="dash-agent-tokens-meter"
-                  title={`Input: ${promptTokens.toLocaleString()} (${pctPrompt}%) | Tools: ${toolTokens.toLocaleString()} (${pctTools}%) | Out: ${completionTokens.toLocaleString()} (${pctComp}%)`}
+                  title={`In: ${promptTokens.toLocaleString()} (${pctPrompt}%) | Cache read: ${toolTokens.toLocaleString()} (${pctTools}%) | Out: ${completionTokens.toLocaleString()} (${pctComp}%)`}
                 >
                   <div className="dash-agent-tokens-track">
                     <div
@@ -881,7 +892,7 @@ export default function DashboardPanel(): JSX.Element {
                 <div className="dash-agent-breakdown-grid">
                   <div
                     className="dash-agent-breakdown-col"
-                    title={`Input & Context Tokens: ${promptTokens.toLocaleString()} (${pctPrompt}%)`}
+                    title={`${t('usage.inTip')}: ${promptTokens.toLocaleString()} (${pctPrompt}%)`}
                   >
                     <div className="dash-agent-col-label">
                       <span className="dash-agent-chip-dot dot-prompt" />
@@ -891,17 +902,20 @@ export default function DashboardPanel(): JSX.Element {
                   </div>
                   <div
                     className="dash-agent-breakdown-col"
-                    title={`Tool Execution & File Reads: ${toolTokens.toLocaleString()} (${pctTools}%)`}
+                    title={`${t('usage.cacheTip')}: ${toolTokens.toLocaleString()} (${pctTools}%)`}
                   >
                     <div className="dash-agent-col-label">
                       <span className="dash-agent-chip-dot dot-tools" />
-                      <span>Tools</span>
+                      <span>Cache</span>
                     </div>
-                    <span className="dash-agent-col-val">{formatTokens(toolTokens)}</span>
+                    {/* Antigravity 紀錄沒有快取概念：顯示 — 而非誤導的 0 */}
+                    <span className="dash-agent-col-val">
+                      {usage?.estimated ? '—' : formatTokens(toolTokens)}
+                    </span>
                   </div>
                   <div
                     className="dash-agent-breakdown-col"
-                    title={`Model Completion & Output: ${completionTokens.toLocaleString()} (${pctComp}%)`}
+                    title={`${t('usage.outTip')}: ${completionTokens.toLocaleString()} (${pctComp}%)`}
                   >
                     <div className="dash-agent-col-label">
                       <span className="dash-agent-chip-dot dot-comp" />
@@ -914,6 +928,8 @@ export default function DashboardPanel(): JSX.Element {
             )
           })}
         </div>
+      )}
+      </>
       )}
 
       {/* Sessions & Token Breakdown Section */}
