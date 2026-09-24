@@ -112,6 +112,10 @@ src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
   `.workbench/dashboard-state.json`) is git-ignored; `.workbench/extensions.yaml`
   is the checked-in template. CLI and document-tool paths are auto-detected at
   runtime and default to unspecified until configured in the app.
+- Dashboard caches (`dashboard-cache.json`, `usage-cache.json`) live in the app's
+  user-data folder, shared by all windows. Each window decides its own
+  "Current Workspace"; the main process never uses the focused window to
+  attribute sessions.
 - `npm run dev` uses its own user-data folder (`agent-workbench-dev`), so a dev
   build can run alongside an installed copy without sharing settings or caches.
 
@@ -248,6 +252,8 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 - 每台機器各自的 runtime state（`.workbench/settings.json`、`.workbench/dashboard-state.json`）
   已被 git 忽略；`.workbench/extensions.yaml` 為納入版控的範本。CLI 與文件工具路徑於執行時
   自動偵測，在 app 內設定前預設為未指定（unspecified）。
+- 儀表板快取（`dashboard-cache.json`、`usage-cache.json`）放在 app 的使用者資料夾，所有視窗共用。
+  「當前工作區」由各視窗自行判斷；主行程不會以「目前聚焦的視窗」來歸屬 session。
 - `npm run dev` 使用獨立的使用者資料夾（`agent-workbench-dev`），可與已安裝版本同時執行，互不共用設定與快取。
 
 ## 版本紀錄與變更日誌

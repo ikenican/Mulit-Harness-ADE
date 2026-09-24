@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.21] - 2026-09-24
+
+### Fixed / 修復
+- **Dashboard Session 清單不會自動更新**：`dashboard:data` 的掃描去重在同步掃描結束後才被賦值，導致每 5 秒的輪詢永遠拿到第一次的結果，只有手動重新整理或切換工作區才會更新。已移除該去重，新的 session 約 5 秒內自動出現。
+- **多開視窗時每個視窗都顯示「當前工作區」**：原本由 main 依「目前聚焦的視窗」判斷；改由各視窗依自己的工作區判斷。
+- **Session 被歸到錯誤的工作區**：查不到所屬工作區時不再回填「聚焦視窗」的工作區；Antigravity 改為比對日誌內容是否包含任一已知工作區（最近開啟＋開啟中視窗）。查不到工作區且非活躍的 session 不再顯示。
+
+### Changed / 變更
+- `dashboard-cache.json` 從各工作區的 `.workbench/` 移到使用者資料夾（與 `usage-cache.json` 同處），多視窗不再互相覆寫；快取版本升為 3，升級後首次掃描會重新解析一次（較慢）。舊的 `.workbench/dashboard-cache.json` 已不再使用，可自行刪除。
+
+---
+
 ## [0.1.20] - 2026-09-24
 
 ### Added / 新增
