@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.22] - 2026-09-29
+
+### Changed / 變更
+- **CLI 安裝指令**（Settings → 安裝 CLI）：Windows 確認視窗改顯示官方單行指令，且實際執行的就是這一行：
+  - Claude Code：`irm https://claude.ai/install.ps1 | iex`
+  - Codex CLI：`irm https://chatgpt.com/codex/install.ps1 | iex`（`CODEX_NON_INTERACTIVE=1` 改由環境變數帶入）
+  - Antigravity：`irm https://antigravity.google/cli/install.ps1 | iex`
+
+---
+
 ## [0.1.21] - 2026-09-24
 
 ### Fixed / 修復
