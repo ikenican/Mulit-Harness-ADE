@@ -325,7 +325,7 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
       id: 'claude',
       name: 'Claude Code',
       command: isWin
-        ? 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://claude.ai/install.ps1 | iex"'
+        ? 'irm https://claude.ai/install.ps1 | iex'
         : 'curl -fsSL https://claude.ai/install.sh | bash',
       targetPath: isWin
         ? path.join(H, '.local', 'bin', 'claude.exe')
@@ -336,7 +336,7 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
       id: 'antigravity',
       name: 'Antigravity (AGY)',
       command: isWin
-        ? 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://antigravity.google/cli/install.ps1 | iex"'
+        ? 'irm https://antigravity.google/cli/install.ps1 | iex'
         : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
       targetPath: isWin
         ? path.join(localAppData, 'agy', 'bin', 'agy.exe')
@@ -347,7 +347,7 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
       id: 'codex',
       name: 'Codex CLI',
       command: isWin
-        ? 'powershell.exe -ExecutionPolicy Bypass -Command "$env:CODEX_NON_INTERACTIVE=\'1\'; irm https://chatgpt.com/codex/install.ps1 | iex"'
+        ? 'irm https://chatgpt.com/codex/install.ps1 | iex'
         : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
       targetPath: isWin
         ? path.join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin', 'codex.exe')
@@ -372,7 +372,7 @@ async function runInstallAgent(
               '-ExecutionPolicy',
               'Bypass',
               '-Command',
-              'irm https://claude.ai/install.ps1 | iex'
+              info.command
             ],
             { timeout: 300000 }
           )
@@ -411,7 +411,7 @@ async function runInstallAgent(
             '-ExecutionPolicy',
             'Bypass',
             '-Command',
-            'irm https://antigravity.google/cli/install.ps1 | iex'
+            info.command
           ],
           { timeout: 300000 }
         )
@@ -438,9 +438,9 @@ async function runInstallAgent(
               '-ExecutionPolicy',
               'Bypass',
               '-Command',
-              "$env:CODEX_NON_INTERACTIVE='1'; irm https://chatgpt.com/codex/install.ps1 | iex"
+              info.command
             ],
-            { timeout: 300000 }
+            { timeout: 300000, env: { ...process.env, CODEX_NON_INTERACTIVE: '1' } }
           )
         } catch (psErr) {
           console.warn('[CLI Install] PowerShell install for Codex failed, falling back to npm:', psErr)
