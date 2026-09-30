@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ICheck, IChevronLeft, IWifiOff } from './icons'
+import { ICheck, IChevronLeft, IconMark, IWarning, IWifiOff } from './icons'
 import { t } from './i18n'
 import type { ConnState } from './conn'
 
-// 手機端共用元件：行為比照 iOS 原生（導覽列、sheet、action sheet、下拉選單、開關）。
+// 手機端共用元件。行為比照 iOS（返回、sheet、確認、選單、開關），外觀沿用桌面版的泡泡與莫蘭迪色。
 
-/** 導覽列：返回鍵用 chevron + 上一頁名稱（不用「返回」文字），捲動後加分隔線 */
+/** 導覽列：左右是玻璃圓鈕，中間標題；clear＝在頂端時透明（首頁用），捲動後才出現毛玻璃 */
 export function NavBar({
   title,
   subtitle,
@@ -13,6 +13,7 @@ export function NavBar({
   onBack,
   trailing,
   scrolled,
+  clear,
   children
 }: {
   title: string
@@ -21,15 +22,15 @@ export function NavBar({
   onBack?: () => void
   trailing?: ReactNode
   scrolled?: boolean
+  clear?: boolean
   children?: ReactNode
 }): JSX.Element {
   return (
-    <header className={`navbar glass ${scrolled ? 'scrolled' : ''}`}>
+    <header className={`navbar glass ${clear ? 'clear' : ''} ${scrolled ? 'scrolled' : ''}`}>
       <div className="navbar-row">
         {onBack ? (
-          <button className="nav-back" onClick={onBack} aria-label={`${t('back')}${backLabel ? `：${backLabel}` : ''}`}>
-            <IChevronLeft size={24} />
-            {backLabel && <span>{backLabel}</span>}
+          <button className="circle-btn press" onClick={onBack} aria-label={backLabel ? `${t('back')}：${backLabel}` : t('back')}>
+            <IChevronLeft size={22} />
           </button>
         ) : (
           <span />
@@ -38,14 +39,13 @@ export function NavBar({
           <span>{title}</span>
           {subtitle && <span className="t-foot">{subtitle}</span>}
         </h1>
-        <div className="nav-trailing">{trailing}</div>
+        <div style={{ justifySelf: 'center' }}>{trailing}</div>
       </div>
       {children}
     </header>
   )
 }
 
-/** 捲動超過大標題後，導覽列顯示小標題與分隔線 */
 export function useScrolled(threshold = 40): boolean {
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
@@ -57,7 +57,7 @@ export function useScrolled(threshold = 40): boolean {
   return scrolled
 }
 
-/** 底部 sheet：有 grabber、可往下滑關閉、點背景關閉 */
+/** 底部 sheet：浮起的大泡泡，有 grabber、可往下滑關閉、點背景關閉 */
 export function Sheet({
   title,
   onClose,
@@ -98,9 +98,9 @@ export function Sheet({
     if (!drag.current || !ref.current) return
     const { dy } = drag.current
     drag.current = null
-    ref.current.style.transition = 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)'
+    ref.current.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)'
     if (dy > 110) {
-      ref.current.style.transform = 'translateY(100%)'
+      ref.current.style.transform = 'translateY(110%)'
       window.setTimeout(onClose, 200)
     } else {
       ref.current.style.transform = ''
@@ -132,7 +132,7 @@ export function Sheet({
   )
 }
 
-/** 破壞性動作的確認：iOS action sheet，取消永遠在最下面、粗體 */
+/** 破壞性動作的確認：同桌面 AppleAlertDialog 的樣子（染色圖示塊 + 標題 + 說明 + 兩顆膠囊鈕） */
 export function ConfirmSheet({
   title,
   message,
@@ -149,20 +149,21 @@ export function ConfirmSheet({
   return (
     <div className="sheet-layer">
       <div className="scrim" onClick={onCancel} />
-      <div className="action-sheet" role="alertdialog" aria-label={title}>
-        <div className="action-group">
-          <p className="msg">
-            <b>{title}</b>
-            {message}
-          </p>
-          <button className="destructive" onClick={onConfirm}>
-            {action}
-          </button>
-        </div>
-        <div className="action-group">
-          <button className="cancel" onClick={onCancel} autoFocus>
-            {t('cancel')}
-          </button>
+      <div className="action-sheet" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-msg">
+        <div className="action-card">
+          <IconMark tone="danger-mark" size={52}>
+            <IWarning size={24} />
+          </IconMark>
+          <b id="confirm-title">{title}</b>
+          <p id="confirm-msg">{message}</p>
+          <div className="action-btns">
+            <button className="destructive press" onClick={onConfirm}>
+              {action}
+            </button>
+            <button className="cancel press" onClick={onCancel} autoFocus>
+              {t('cancel')}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -180,9 +181,16 @@ export interface MenuItem {
 
 /** 導覽列右上角的 More 下拉選單 */
 export function Menu({ items, onClose }: { items: MenuItem[]; onClose: () => void }): JSX.Element {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
   return (
     <div className="menu-layer" onClick={onClose}>
-      <div className="menu glass" role="menu" onClick={(e) => e.stopPropagation()}>
+      <div className="menu" role="menu" onClick={(e) => e.stopPropagation()}>
         {items.map((it) => (
           <button
             key={it.label}
@@ -232,13 +240,13 @@ export function Switch({
   )
 }
 
-/** 斷線時浮在導覽列下方的狀態膠囊（連上就消失，不佔版面） */
+/** 斷線時浮在導覽列下方的膠囊（連上就消失） */
 export function ConnCapsule({ state }: { state: ConnState }): JSX.Element | null {
   if (state === 'open' || state === 'unauthorized') return null
   const offline = state === 'closed'
   return (
-    <div className={`conn glass ${offline ? 'offline' : ''}`} role="status" aria-live="polite">
-      {offline && <IWifiOff size={18} />}
+    <div className={`conn pill ${offline ? 'danger' : 'idle'}`} role="status" aria-live="polite">
+      {offline ? <IWifiOff size={16} /> : <span className="dot" />}
       {offline ? t('offline') : t('connecting')}
     </div>
   )

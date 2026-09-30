@@ -5,7 +5,7 @@ import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
 import type { RemoteConnection } from './conn'
 import { t } from './i18n'
 import { parsePrompt, type ParsedPrompt } from './prompt'
-import { IArrowUp, IEllipsis, IHand, IStop } from './icons'
+import { IArrowUp, IMore, IStop } from './icons'
 import { ConfirmSheet, Menu, NavBar } from './ui'
 
 // 手機上的終端畫面。
@@ -32,8 +32,8 @@ const FONT = "ui-monospace, 'SF Mono', Menlo, monospace"
 function termTheme(): Record<string, string> {
   const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
   return dark
-    ? { background: '#0b0b0f', foreground: '#e5e5ea', cursor: '#e5e5ea', selectionBackground: '#3a3a3c' }
-    : { background: '#fbfbfd', foreground: '#1c1c1e', cursor: '#1c1c1e', selectionBackground: '#d1d1d6' }
+    ? { background: '#16191c', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
+    : { background: '#fbfaf7', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
 }
 
 let charRatio = 0
@@ -261,12 +261,12 @@ export default function TerminalView({
         backLabel={hostName}
         onBack={onBack}
         trailing={
-          <button className="icon-btn" aria-label={t('more')} aria-haspopup="menu" onClick={() => setMenu(true)} disabled={exited}>
-            <IEllipsis size={24} />
+          <button className="circle-btn press" aria-label={t('more')} aria-haspopup="menu" onClick={() => setMenu(true)} disabled={exited}>
+            <IMore size={22} />
           </button>
         }
       >
-        <div className="segmented" role="group">
+        <div className="segmented" role="group" data-index={mode === 'read' ? 0 : 1}>
           <button aria-pressed={mode === 'read'} onClick={() => setMode('read')}>
             {t('read')}
           </button>
@@ -284,23 +284,29 @@ export default function TerminalView({
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
         }}
       >
-        <div className="reader" hidden={mode !== 'read'} aria-live="off">
-          {lines.map((l, i) => (l.kind === 'rule' ? <div key={i} className="rule" /> : <div key={i} className="ln">{l.text}</div>))}
+        <div className="output">
+          <div className="reader" hidden={mode !== 'read'} aria-live="off">
+            {lines.map((l, i) => (l.kind === 'rule' ? <div key={i} className="rule" /> : <div key={i} className="ln">{l.text}</div>))}
+          </div>
+          <div className="xterm-scroll" hidden={mode !== 'term'}>
+            <div className="xterm-box" ref={xtermHost} />
+          </div>
         </div>
-        <div className="xterm-box" hidden={mode !== 'term'} ref={xtermHost} />
       </div>
 
       {exited ? (
         <div className="ended" role="status">
-          <IStop size={18} /> {t('exited', { code: exitCode })}
+          <span className="pill idle">
+            <IStop size={14} /> {t('exited', { code: exitCode })}
+          </span>
         </div>
       ) : (
-        <div className="dock glass">
+        <div className="dock">
           <div className="dock-inner">
             {showApproval && <Approval title={session.title} prompt={prompt} onAnswer={answer} />}
             <div className="keys" role="toolbar" aria-label={t('otherKeys')}>
               {KEYS.map((k) => (
-                <button key={k.label} className="key" aria-label={k.name} onClick={() => send(k.seq)}>
+                <button key={k.label} className="key press" aria-label={k.name} onClick={() => send(k.seq)}>
                   {k.label}
                 </button>
               ))}
@@ -312,7 +318,6 @@ export default function TerminalView({
                 submit()
               }}
             >
-              <div className="composer-field">
                 <textarea
                   value={text}
                   rows={1}
@@ -334,12 +339,9 @@ export default function TerminalView({
                     }
                   }}
                 />
-                <button type="submit" className="send" aria-label={t('send')}>
-                  <span>
-                    <IArrowUp size={18} />
-                  </span>
+                <button type="submit" className="send press" aria-label={t('send')}>
+                  <IArrowUp size={20} />
                 </button>
-              </div>
             </form>
           </div>
         </div>
@@ -391,10 +393,10 @@ function Approval({
   const primary = options.findIndex((o) => o.selected)
   return (
     <section className="approval" role="alertdialog" aria-labelledby="approval-q">
-      <div className="approval-kicker">
-        <IHand size={16} />
+      <span className="pill wait">
+        <span className="dot" />
         {t('wants', { title })}
-      </div>
+      </span>
       {prompt?.question && (
         <p id="approval-q" className="approval-q">
           {prompt.question}
@@ -403,7 +405,7 @@ function Approval({
       {prompt && prompt.details.length > 0 && <pre className="approval-details">{prompt.details.join('\n')}</pre>}
       <div className="choices">
         {options.map((o, i) => (
-          <button key={o.key + i} className={`choice ${i === (primary === -1 ? 0 : primary) ? 'prominent' : ''}`} onClick={() => onAnswer(o.key)}>
+          <button key={o.key + i} className={`choice press ${i === (primary === -1 ? 0 : primary) ? 'prominent' : ''}`} onClick={() => onAnswer(o.key)}>
             <kbd aria-hidden="true">{o.key === '\x1b' ? 'esc' : o.key}</kbd>
             <span>{o.label}</span>
           </button>

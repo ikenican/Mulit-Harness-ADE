@@ -55,6 +55,17 @@ export const IEllipsis = (p: P): JSX.Element => (
     <path d="M8 12h.01M12 12h.01M16 12h.01" strokeWidth={2.6} />
   </Svg>
 )
+export const IMore = (p: P): JSX.Element => (
+  <Svg {...p}>
+    <path d="M6 12h.01M12 12h.01M18 12h.01" strokeWidth={3.2} />
+  </Svg>
+)
+export const IPhone = (p: P): JSX.Element => (
+  <Svg {...p}>
+    <rect x="7" y="2.5" width="10" height="19" rx="2.5" />
+    <path d="M11 18.5h2" />
+  </Svg>
+)
 export const IBell = (p: P): JSX.Element => (
   <Svg {...p}>
     <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
@@ -121,55 +132,54 @@ export const IResize = (p: P): JSX.Element => (
   </Svg>
 )
 
-// —— Agent 標誌：每家形狀不同（不是只靠顏色分辨），白色圖形放在品牌色圓角方塊上，比照 iOS 設定 App 的圖示 ——
+// —— Agent 標誌：沿用桌面版的染色方圓塊（品牌色 16% 底 + 28% 邊 + 同色圖形），
+// 每家形狀不同，不只靠顏色分辨。顏色由 CSS 的 .mark.claude / .codex / .agy 決定（莫蘭迪色）。
 
-const MARKS: Record<string, { bg: string; path: JSX.Element }> = {
-  claude: {
-    bg: '#C15F3C',
-    path: (
-      <path
-        fill="#fff"
-        d="M12 2c.55 0 1 .45 1 1v5.59l3.29-3.3a1 1 0 1 1 1.42 1.42L14.41 10H20a1 1 0 1 1 0 2h-5.59l3.3 3.29a1 1 0 0 1-1.42 1.42L13 13.41V19a1 1 0 1 1-2 0v-5.59l-3.29 3.3a1 1 0 0 1-1.42-1.42L9.59 12H4a1 1 0 1 1 0-2h5.59L6.29 6.71a1 1 0 0 1 1.42-1.42L11 8.59V3c0-.55.45-1 1-1z"
-      />
-    )
-  },
-  codex: {
-    bg: '#0F8A6B',
-    path: (
-      <g fill="none" stroke="#fff" strokeWidth={1.9} strokeLinejoin="round">
-        <path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" />
-        <path d="M12 8.2l3.3 1.9v3.8L12 15.8l-3.3-1.9v-3.8z" />
-      </g>
-    )
-  },
-  antigravity: {
-    bg: '#5B3FD6',
-    path: <path fill="#fff" d="M12 2c0 5.52-4.48 10-10 10 5.52 0 10 4.48 10 10 0-5.52 4.48-10 10-10-5.52 0-10-4.48-10-10z" />
-  },
-  shell: {
-    bg: '#48484A',
-    path: (
-      <g fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 7l5 5-5 5M12.5 17.5H19" />
-      </g>
-    )
-  }
+const GLYPHS: Record<string, JSX.Element> = {
+  claude: (
+    <path
+      fill="currentColor"
+      d="M12 2c.55 0 1 .45 1 1v5.59l3.29-3.3a1 1 0 1 1 1.42 1.42L14.41 10H20a1 1 0 1 1 0 2h-5.59l3.3 3.29a1 1 0 0 1-1.42 1.42L13 13.41V19a1 1 0 1 1-2 0v-5.59l-3.29 3.3a1 1 0 0 1-1.42-1.42L9.59 12H4a1 1 0 1 1 0-2h5.59L6.29 6.71a1 1 0 0 1 1.42-1.42L11 8.59V3c0-.55.45-1 1-1z"
+    />
+  ),
+  codex: (
+    <g fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round">
+      <path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" />
+      <path d="M12 8.2l3.3 1.9v3.8L12 15.8l-3.3-1.9v-3.8z" />
+    </g>
+  ),
+  agy: <path fill="currentColor" d="M12 2c0 5.52-4.48 10-10 10 5.52 0 10 4.48 10 10 0-5.52 4.48-10 10-10-5.52 0-10-4.48-10-10z" />,
+  shell: (
+    <g fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 7l5 5-5 5M12.5 17.5H19" />
+    </g>
+  )
 }
 
-export function AgentMark({ launcherKey, size = 30 }: { launcherKey: string; size?: number }): JSX.Element {
+export function agentKind(launcherKey: string): 'claude' | 'codex' | 'agy' | 'shell' {
   const k = launcherKey.toLowerCase()
-  const m = k.includes('claude')
-    ? MARKS.claude
-    : k.includes('codex')
-      ? MARKS.codex
-      : k.includes('antigravity') || k.includes('agy')
-        ? MARKS.antigravity
-        : MARKS.shell
+  if (k.includes('claude')) return 'claude'
+  if (k.includes('codex')) return 'codex'
+  if (k.includes('antigravity') || k.includes('agy')) return 'agy'
+  return 'shell'
+}
+
+export function AgentMark({ launcherKey, size = 44 }: { launcherKey: string; size?: number }): JSX.Element {
+  const kind = agentKind(launcherKey)
   return (
-    <span className="mark" style={{ width: size, height: size, background: m.bg }} aria-hidden="true">
-      <svg viewBox="0 0 24 24" width={size * 0.62} height={size * 0.62} focusable="false">
-        {m.path}
+    <span className={`mark ${kind}`} style={{ width: size, height: size }} aria-hidden="true">
+      <svg viewBox="0 0 24 24" width={size * 0.5} height={size * 0.5} focusable="false">
+        {GLYPHS[kind]}
       </svg>
+    </span>
+  )
+}
+
+/** 一般圖示放進染色方圓塊（交接筆記、Git、確認對話框等） */
+export function IconMark({ children, tone = 'accent', size = 40 }: { children: React.ReactNode; tone?: string; size?: number }): JSX.Element {
+  return (
+    <span className={`mark ${tone}`} style={{ width: size, height: size }} aria-hidden="true">
+      {children}
     </span>
   )
 }

@@ -41,15 +41,15 @@ function render(size) {
         for (let sx = 0; sx < SS; sx++) {
           const u = (x + (sx + 0.5) / SS) / size
           const v = (y + (sy + 0.5) / SS) / size
-          // 背景：左上靛藍 → 右下紫
+          // 背景：莫蘭迪鼠尾草青（與桌面 light-morandi 的 accent #486a6d 同色系），左上亮 → 右下深
           const tt = (u + v) / 2
-          let cr = 55 + (124 - 55) * tt, cg = 48 + (58 - 48) * tt, cb = 163 + (237 - 163) * tt
+          let cr = 0x6a + (0x3f - 0x6a) * tt, cg = 0x90 + (0x5d - 0x90) * tt, cb = 0x92 + (0x60 - 0x92) * tt
           const d = Math.min(
             distSeg(u, v, 0.27, 0.33, 0.47, 0.5),
             distSeg(u, v, 0.47, 0.5, 0.27, 0.67),
             distSeg(u, v, 0.55, 0.68, 0.74, 0.68)
           )
-          if (d < stroke / 2) (cr = 255), (cg = 255), (cb = 255)
+          if (d < stroke / 2) (cr = 0xf6), (cg = 0xf4), (cb = 0xee) // 象牙白（莫蘭迪 surface）
           r += cr; g += cg; b += cb
         }
       }

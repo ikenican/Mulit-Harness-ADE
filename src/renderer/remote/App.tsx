@@ -17,7 +17,7 @@ import {
 import TerminalView from './TerminalView'
 import { ago, t } from './i18n'
 import { questionPreview } from './prompt'
-import { AgentMark, IBranch, IChevronRight, IDesktop, IDoc, IGear, IHand, IPlus, IShare, IWarning } from './icons'
+import { AgentMark, IBranch, IChevronRight, IconMark, IDesktop, IDoc, IGear, IPhone, IPlus, IShare, IWarning } from './icons'
 import { ConfirmSheet, ConnCapsule, NavBar, Sheet, Switch, useScrolled } from './ui'
 
 type View =
@@ -107,7 +107,7 @@ function PairScreen({ notice, onPaired }: { notice: string | null; onPaired: (to
       </div>
 
       <div className="section">
-        <div className="list">
+        <div className="bubble form-card">
           <div className="field">
             <label htmlFor="code">{t('pairCode')}</label>
             <input
@@ -138,7 +138,7 @@ function PairScreen({ notice, onPaired }: { notice: string | null; onPaired: (to
       </div>
 
       {!isStandalone() && (
-        <div className="notice neutral">
+        <div className="notice neutral bubble">
           <IShare size={22} />
           <div>
             <b>{t('addToHomeTitle')}</b>
@@ -148,7 +148,7 @@ function PairScreen({ notice, onPaired }: { notice: string | null; onPaired: (to
       )}
 
       <div className="pair-actions">
-        <button className="btn prominent" disabled={!ready || busy}>
+        <button className="btn prominent press" disabled={!ready || busy}>
           {busy ? t('pairing') : t('pair')}
         </button>
       </div>
@@ -298,6 +298,17 @@ function useNow(ms = 2000): number {
   return now
 }
 
+/** 狀態膠囊：文字 + 點，等你回覆的點會呼吸 */
+function StatusPill({ status }: { status: 'waiting' | 'running' | 'idle' }): JSX.Element {
+  const cls = status === 'waiting' ? 'wait' : status === 'running' ? 'run' : 'idle'
+  return (
+    <span className={`pill ${cls}`}>
+      <span className="dot" aria-hidden="true" />
+      {t(status)}
+    </span>
+  )
+}
+
 function Home({
   host,
   connState,
@@ -331,26 +342,29 @@ function Home({
     <div className="home">
       <NavBar
         title={host}
+        clear
         scrolled={scrolled}
         trailing={
-          <button className="icon-btn" aria-label={t('settings')} onClick={onSettings}>
-            <IGear size={24} />
+          <button className="circle-btn press" aria-label={t('settings')} onClick={onSettings}>
+            <IGear size={22} />
           </button>
         }
       />
       <main className="content">
         <header className="large-header">
           <h1 className="t-large">{host}</h1>
-          <p className="status-line t-sub">
-            <span className={`dot ${connState === 'open' ? 'run' : ''}`} aria-hidden="true" />
-            {connState === 'open' ? t('connected') : t('connecting')}
+          <div className="header-pills">
+            <span className={`pill ${connState === 'open' ? 'run' : 'idle'}`}>
+              <span className="dot" aria-hidden="true" />
+              {connState === 'open' ? t('connected') : t('connecting')}
+            </span>
             {connState === 'open' && loaded && (
-              <>
-                <span aria-hidden="true">·</span>
-                {waiting.length > 0 ? <strong>{t('waitingCount', { n: waiting.length })}</strong> : t('allQuiet')}
-              </>
+              <span className={`pill ${waiting.length ? 'wait' : 'idle'}`}>
+                {waiting.length > 0 && <span className="dot" aria-hidden="true" />}
+                {waiting.length > 0 ? t('waitingCount', { n: waiting.length }) : t('allQuiet')}
+              </span>
             )}
-          </p>
+          </div>
         </header>
 
         {bypass && (
@@ -365,39 +379,38 @@ function Home({
 
         {waiting.length > 0 && (
           <section className="section" aria-labelledby="waiting-h">
-            <h2 className="section-header" id="waiting-h">
-              {t('needsYou')}
-            </h2>
-            {waiting.map((s) => (
-              <button key={s.id} className="wait-card" onClick={() => onOpen({ kind: 'session', id: s.id })}>
-                <div className="wait-head">
-                  <AgentMark launcherKey={s.launcherKey} />
-                  <div className="row-main">
-                    <span className="row-title t-headline">{s.title}</span>
-                    <span className="row-sub">{s.workspaceName}</span>
-                  </div>
-                  <span className="pill">
-                    <IHand size={14} />
-                    {t('waiting')}
-                  </span>
-                </div>
-                {(() => {
-                  const q = questionPreview(tails[s.id] || s.approvalTail || '')
-                  return q ? <p className="wait-q">{q}</p> : null
-                })()}
-                <div className="wait-foot">
-                  {t('reply')}
-                  <IChevronRight size={18} />
-                </div>
-              </button>
-            ))}
+            <div className="section-head">
+              <h2 id="waiting-h">{t('needsYou')}</h2>
+            </div>
+            <div className="stack">
+              {waiting.map((s) => {
+                const q = questionPreview(tails[s.id] || s.approvalTail || '')
+                return (
+                  <button key={s.id} className="bubble wait-card press" onClick={() => onOpen({ kind: 'session', id: s.id })}>
+                    <div className="wait-head">
+                      <AgentMark launcherKey={s.launcherKey} />
+                      <div className="card-main">
+                        <span className="card-title">{s.title}</span>
+                        <span className="card-sub">{s.workspaceName}</span>
+                      </div>
+                      <StatusPill status="waiting" />
+                    </div>
+                    {q && <p className="wait-q">{q}</p>}
+                    <div className="wait-cta" style={q ? undefined : { marginTop: 14 }}>
+                      {t('reply')}
+                      <IChevronRight size={18} />
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
           </section>
         )}
 
         {loaded && windows.length === 0 && (
           <div className="empty">
-            <IDesktop size={40} />
-            <p style={{ marginTop: 12 }}>{t('noWindows')}</p>
+            <IDesktop size={44} />
+            <p>{t('noWindows')}</p>
           </div>
         )}
 
@@ -405,65 +418,43 @@ function Home({
           const list = (byWindow.get(w.id) || []).sort((a, b) => a.startTime - b.startTime)
           return (
             <section key={w.id} className="section" aria-label={w.workspaceName}>
-              <h2 className="section-header">{w.workspaceName}</h2>
-              <ul className="list">
-                {list.map((s) => {
-                  const st = statusOf(s, now)
-                  return (
-                    <li key={s.id}>
-                      <button className="row with-mark" onClick={() => onOpen({ kind: 'session', id: s.id })}>
-                        <AgentMark launcherKey={s.launcherKey} />
-                        <span className="row-main">
-                          <span className="row-title">{s.title}</span>
-                          <span className="row-sub">
-                            {ago(s.startTime) === t('justNow') ? t('justNow') : t('startedAgo', { t: ago(s.startTime) })}
-                          </span>
-                        </span>
-                        {st === 'waiting' ? (
-                          <span className="pill">
-                            <IHand size={14} />
-                            {t('waiting')}
-                          </span>
-                        ) : (
-                          <span className={`state ${st === 'running' ? 'run' : ''}`}>
-                            <span className={`dot ${st === 'running' ? 'run' : ''}`} aria-hidden="true" />
-                            {t(st)}
-                          </span>
-                        )}
-                        <IChevronRight size={18} className="chev" />
-                      </button>
-                    </li>
-                  )
-                })}
-                <li>
-                  <button className="row action with-icon" onClick={() => onNew(w.id)}>
-                    <span className="row-icon">
-                      <IPlus size={22} />
+              <div className="section-head">
+                <h2>{w.workspaceName}</h2>
+                {list.length > 0 && <span className="count">{list.length}</span>}
+              </div>
+              <div className="stack">
+                {list.map((s) => (
+                  <button key={s.id} className="bubble session-card press" onClick={() => onOpen({ kind: 'session', id: s.id })}>
+                    <AgentMark launcherKey={s.launcherKey} />
+                    <span className="card-main">
+                      <span className="card-title">{s.title}</span>
+                      <span className="card-sub">
+                        {ago(s.startTime) === t('justNow') ? t('justNow') : t('startedAgo', { t: ago(s.startTime) })}
+                      </span>
                     </span>
-                    <span className="row-main">{t('newTerminal')}</span>
-                  </button>
-                </li>
-              </ul>
-              <ul className="list">
-                <li>
-                  <button className="row with-icon" onClick={() => onOpen({ kind: 'handoff', windowId: w.id })}>
-                    <span className="row-icon">
-                      <IDoc size={22} />
-                    </span>
-                    <span className="row-main row-title">{t('handoff')}</span>
+                    <StatusPill status={statusOf(s, now)} />
                     <IChevronRight size={18} className="chev" />
                   </button>
-                </li>
-                <li>
-                  <button className="row with-icon" onClick={() => onOpen({ kind: 'git', windowId: w.id })}>
-                    <span className="row-icon">
-                      <IBranch size={22} />
-                    </span>
-                    <span className="row-main row-title">{t('git')}</span>
-                    <IChevronRight size={18} className="chev" />
-                  </button>
-                </li>
-              </ul>
+                ))}
+                <button className="add-card press" onClick={() => onNew(w.id)}>
+                  <IPlus size={20} />
+                  {t('newTerminal')}
+                </button>
+              </div>
+              <div className="tiles">
+                <button className="bubble tile press" onClick={() => onOpen({ kind: 'handoff', windowId: w.id })}>
+                  <IconMark tone="accent">
+                    <IDoc size={20} />
+                  </IconMark>
+                  {t('handoff')}
+                </button>
+                <button className="bubble tile press" onClick={() => onOpen({ kind: 'git', windowId: w.id })}>
+                  <IconMark tone="blue">
+                    <IBranch size={20} />
+                  </IconMark>
+                  {t('git')}
+                </button>
+              </div>
             </section>
           )
         })}
@@ -485,47 +476,46 @@ function NewTerminalSheet({
 }): JSX.Element {
   const agents = launchers.filter((l) => l.kind !== 'shell')
   const shells = launchers.filter((l) => l.kind === 'shell')
-  const group = (list: RemoteLauncher[]): JSX.Element => (
-    <ul className="list">
+  const grid = (list: RemoteLauncher[]): JSX.Element => (
+    <div className="launcher-grid">
       {list.map((l) => (
-        <li key={l.key}>
-          <button className="row with-mark" onClick={() => onPick(l.key)}>
-            <AgentMark launcherKey={l.key} />
-            <span className="row-main row-title">{l.title}</span>
-          </button>
-        </li>
+        <button key={l.key} className="bubble launcher press" onClick={() => onPick(l.key)}>
+          <AgentMark launcherKey={l.key} />
+          {l.title}
+        </button>
       ))}
-    </ul>
+    </div>
   )
   return (
     <Sheet
       title={t('newTerminal')}
       onClose={onClose}
       leading={
-        <button className="text-btn lead" onClick={onClose}>
+        <button className="text-btn" onClick={onClose}>
           {t('cancel')}
         </button>
       }
     >
+      {bypass && (
+        <div className="notice" role="note">
+          <IWarning size={20} />
+          <div className="t-sub">
+            <b>{t('bypassTitle')}</b>
+            {t('bypass')}
+          </div>
+        </div>
+      )}
       {agents.length > 0 && (
-        <section className="section">
-          <h3 className="section-header">{t('agents')}</h3>
-          {group(agents)}
-          {bypass && (
-            <p className="section-footer" style={{ display: 'flex', gap: 6, color: 'var(--wait)' }}>
-              <IWarning size={16} />
-              <span>
-                {t('bypassTitle')}：{t('bypass')}
-              </span>
-            </p>
-          )}
-        </section>
+        <>
+          <h3 className="sheet-label">{t('agents')}</h3>
+          {grid(agents)}
+        </>
       )}
       {shells.length > 0 && (
-        <section className="section">
-          <h3 className="section-header">{t('shells')}</h3>
-          {group(shells)}
-        </section>
+        <>
+          <h3 className="sheet-label">{t('shells')}</h3>
+          {grid(shells)}
+        </>
       )}
     </Sheet>
   )
@@ -578,24 +568,33 @@ function SettingsSheet({
         title={t('settings')}
         onClose={onClose}
         trailing={
-          <button className="text-btn trail strong" onClick={onClose}>
+          <button className="text-btn strong" onClick={onClose}>
             {t('done')}
           </button>
         }
       >
-        <section className="section">
+        <div className="bubble stack-gap">
           <ul className="list">
             <li className="row">
+              <IconMark tone="accent" size={32}>
+                <IDesktop size={18} />
+              </IconMark>
               <span className="row-main">{t('computer')}</span>
               <span className="row-value">{host}</span>
             </li>
             <li className="row">
+              <IconMark tone="blue" size={32}>
+                <IPhone size={18} />
+              </IconMark>
               <span className="row-main">{t('thisPhone')}</span>
-              <span className="row-value">{connState === 'open' ? t('connected') : t('connecting')}</span>
+              <span className={`pill ${connState === 'open' ? 'run' : 'idle'}`}>
+                <span className="dot" aria-hidden="true" />
+                {connState === 'open' ? t('connected') : t('connecting')}
+              </span>
             </li>
           </ul>
-        </section>
-        <section className="section">
+        </div>
+        <div className="bubble">
           <ul className="list">
             <li className="row">
               <span className="row-main">{t('notifications')}</span>
@@ -607,20 +606,16 @@ function SettingsSheet({
               />
             </li>
           </ul>
-          <p className="section-footer">{footer}</p>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-        </section>
-        <section className="section">
-          <div className="list">
-            <button className="row destructive" onClick={() => setConfirm(true)}>
-              {t('unpair')}
-            </button>
-          </div>
-        </section>
+        </div>
+        <p className="footnote stack-gap">{footer}</p>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="btn press" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(true)}>
+          {t('unpair')}
+        </button>
       </Sheet>
       {confirm && (
         <ConfirmSheet
@@ -676,6 +671,7 @@ function DetailView({
         backLabel={hostName}
         onBack={onBack}
         scrolled={scrolled}
+        clear
       />
       <main className="content detail-body">
         {view.kind === 'handoff' &&
@@ -683,11 +679,11 @@ function DetailView({
             <p className="empty">{t('loading')}</p>
           ) : handoff === null ? (
             <div className="empty">
-              <IDoc size={40} />
-              <p style={{ marginTop: 12 }}>{t('noHandoff')}</p>
+              <IDoc size={44} />
+              <p>{t('noHandoff')}</p>
             </div>
           ) : (
-            <article className="markdown">
+            <article className="bubble markdown">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{handoff}</ReactMarkdown>
             </article>
           ))}
@@ -701,39 +697,30 @@ function DetailView({
             </p>
           ) : (
             <>
-              <section className="section">
-                <ul className="list">
-                  <li className="row with-icon">
-                    <span className="row-icon">
-                      <IBranch size={22} />
-                    </span>
-                    <span className="row-main row-title t-headline">{git.branch}</span>
-                    {(git.ahead > 0 || git.behind > 0) && (
-                      <span className="row-value t-sub">
-                        {git.ahead > 0 && `↑${git.ahead} `}
-                        {git.behind > 0 && `↓${git.behind}`}
-                      </span>
-                    )}
-                  </li>
-                </ul>
-              </section>
-              <section className="section">
-                <h2 className="section-header">{git.files.length ? t('changes', { n: git.files.length }) : t('clean')}</h2>
-                {git.files.length > 0 && (
-                  <ul className="list">
-                    {git.files.map((f) => {
-                      const staged = !!f.index.trim() && f.index !== '?'
-                      const flag = (staged ? f.index : f.workingDir).trim() || '?'
-                      return (
-                        <li key={f.path} className="row with-icon">
-                          <span className={`git-flag ${staged ? 'staged' : ''}`}>{flag}</span>
-                          <span className="git-path">{f.path}</span>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                )}
-              </section>
+              <div className="bubble branch-card">
+                <IconMark tone="blue">
+                  <IBranch size={20} />
+                </IconMark>
+                <span className="card-main card-title">{git.branch}</span>
+                {git.ahead > 0 && <span className="pill run">↑ {git.ahead}</span>}
+                {git.behind > 0 && <span className="pill wait">↓ {git.behind}</span>}
+              </div>
+              <div className="section-head">
+                <h2>{git.files.length ? t('changes', { n: git.files.length }) : t('clean')}</h2>
+              </div>
+              <div className="files">
+                {git.files.map((f) => {
+                  const untracked = f.index === '?' || f.workingDir === '?'
+                  const staged = !untracked && !!f.index.trim()
+                  const flag = untracked ? '?' : (staged ? f.index : f.workingDir).trim() || '•'
+                  return (
+                    <div key={f.path} className="bubble file">
+                      <span className={`git-flag ${staged ? 'staged' : untracked ? 'untracked' : ''}`}>{flag}</span>
+                      <span className="git-path">{f.path}</span>
+                    </div>
+                  )
+                })}
+              </div>
             </>
           ))}
       </main>
