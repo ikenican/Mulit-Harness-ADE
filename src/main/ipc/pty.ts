@@ -46,6 +46,8 @@ interface PtyEntry {
   subs: Map<string, PtySubscriber>
   needsApproval: boolean
   lastOutputAt: number
+  /** 被使用者關掉（而不是自己結束）：遠端不必推播「任務結束」 */
+  killed: boolean
 }
 
 const SCROLLBACK_LIMIT = 256 * 1024
@@ -146,18 +148,26 @@ export function resizePty(id: string, cols: number, rows: number): void {
 export function killPty(id: string): void {
   const e = entries.get(id)
   if (!e) return
+  e.killed = true
   hardKill(e.proc)
-  entries.delete(id)
-  ptyEvents.emit('changed')
+  finish(id, e, -1)
 }
 
 export function cleanupPtyForWindow(webContentsId: number): void {
   for (const [id, e] of Array.from(entries.entries())) {
     if (e.ownerId === webContentsId) {
+      e.killed = true
       hardKill(e.proc)
-      entries.delete(id)
+      finish(id, e, -1)
     }
   }
+}
+
+/** 從表中移除並發出 exit 事件；onExit 與視窗關閉都可能呼叫，只處理一次 */
+function finish(id: string, e: PtyEntry, code: number): void {
+  if (entries.get(id) !== e) return
+  entries.delete(id)
+  ptyEvents.emit('exit', id, code, e.title, e.killed)
   ptyEvents.emit('changed')
 }
 
@@ -478,7 +488,8 @@ export function spawnPty(
     scrollback: '',
     subs: new Map(),
     needsApproval: false,
-    lastOutputAt: Date.now()
+    lastOutputAt: Date.now(),
+    killed: false
   }
   if (ctx.subscribeOwner) entry.subs.set(`wc:${ctx.owner.id}`, webContentsSubscriber(ctx.owner))
   entries.set(id, entry)
@@ -505,12 +516,7 @@ export function spawnPty(
 
   ptyProcess.onExit(({ exitCode }) => {
     for (const sub of entry.subs.values()) sub.exit(id, exitCode)
-    // killPty 已經移除過就不重複發事件
-    if (entries.get(id) === entry) {
-      entries.delete(id)
-      ptyEvents.emit('exit', id, exitCode, entry.title)
-      ptyEvents.emit('changed')
-    }
+    finish(id, entry, exitCode)
   })
 
   ptyEvents.emit('changed')

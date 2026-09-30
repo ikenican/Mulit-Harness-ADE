@@ -20,6 +20,7 @@
   },
   "include": [
     "src/renderer/src/**/*",
+    "src/renderer/remote/**/*",
     "src/preload/**/*",
     "src/shared/**/*"
   ]

@@ -676,8 +676,10 @@ export class RemoteBridge {
     })
   }
 
-  private onExit = (id: string, code: number, title: string): void => {
+  private onExit = (id: string, code: number, title: string, killed: boolean): void => {
     this.broadcast({ t: 'exit', id, code, title })
+    // 使用者自己關掉的終端不用通知
+    if (killed) return
     this.push(id, 'exit', { title: `✓ ${title} 已結束`, body: `exit code ${code}`, tag: `exit-${id}`, url: '/' })
   }
 
