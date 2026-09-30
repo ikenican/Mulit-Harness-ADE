@@ -156,6 +156,14 @@ const api = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id: string): void => ipcRenderer.send('pty:kill', id),
+    // 接上一個已在 main 跑著的 pty（手機遠端開的終端），回傳目前畫面
+    attach: (id: string): Promise<{ snapshot: string } | null> => ipcRenderer.invoke('pty:attach', id),
+    // 手機遠端在這個視窗的工作區開了新終端，renderer 收到後開分頁並 attach
+    onRemoteSpawned: (cb: (info: RemoteSpawnedPty) => void): (() => void) => {
+      const listener = (_e: unknown, info: RemoteSpawnedPty): void => cb(info)
+      ipcRenderer.on('pty:remoteSpawned', listener)
+      return () => ipcRenderer.removeListener('pty:remoteSpawned', listener)
+    },
     onData: (id: string, cb: (data: string) => void): (() => void) => {
       const ch = `pty:data:${id}`
       const listener = (_e: unknown, data: string): void => cb(data)
@@ -497,6 +505,12 @@ export interface ConnectionInfo {
   usedBy: string[]
 }
 
+export interface RemoteSpawnedPty {
+  ptyId: string
+  /** 與 renderer 的 launcherKey 相同：claude / codex / antigravity / powershell / cmd 或自訂 launcher id */
+  launcherKey: string
+  title: string
+}
 export interface PtySpawnOptions {
   launcherId?: string
   command?: string
@@ -505,4 +519,6 @@ export interface PtySpawnOptions {
   cols?: number
   rows?: number
   sessionId?: string
+  /** 分頁顯示名稱；遠端控制的 session 清單也用這個名字 */
+  title?: string
 }
