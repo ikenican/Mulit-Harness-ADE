@@ -32,8 +32,8 @@ const FONT = "ui-monospace, 'SF Mono', Menlo, monospace"
 function termTheme(): Record<string, string> {
   const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
   return dark
-    ? { background: '#16191c', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
-    : { background: '#fbfaf7', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
+    ? { background: '#00000000', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
+    : { background: '#00000000', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
 }
 
 let charRatio = 0
@@ -153,6 +153,7 @@ export default function TerminalView({
       disableStdin: true,
       cursorBlink: false,
       scrollback: 5000,
+      allowTransparency: true, // 讓後面的玻璃透出來
       theme: termTheme()
     })
     termRef.current = term
