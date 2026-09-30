@@ -673,7 +673,7 @@ function SettingsSheet({
             {error}
           </p>
         )}
-        <button className="btn press" style={{ color: 'var(--danger)' }} onClick={() => setConfirm(true)}>
+        <button className="btn danger press" onClick={() => setConfirm(true)}>
           {t('unpair')}
         </button>
       </Sheet>

@@ -37,6 +37,7 @@
   --run-hue: #486c4e;
   --run-ink: #3f5f45; /* 5.41:1 on tint */
   --danger: #9e4644; /* 5.59:1 */
+  --danger-ink: #9e4644; /* 4.60:1 on tint */
 
   --claude: #a86b40;
   --codex: #486c4e;
@@ -102,6 +103,7 @@
     --run-hue: #76a481;
     --run-ink: #8fbb9a; /* 5.23:1 on tint */
     --danger: #d47772; /* 4.66:1 */
+    --danger-ink: #e8a39e; /* 染色底上 */
 
     --claude: #ce946b;
     --codex: #76a481;
@@ -1459,4 +1461,121 @@ p {
   color: var(--on-accent);
   font-weight: 600;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 6px 16px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* ── 控制項：跟圖示一樣的染色圓角方塊 ──
+ * 選項、按鈕、按鍵、狀態標籤一律用同一種做法：色彩 14% 的底 + 28% 的細邊 + 同色系文字，
+ * 不加光澤、不加陰影。玻璃感只留給卡片與面板本身。
+ */
+.pill,
+.choice,
+.lang-option,
+.key,
+.btn,
+.wait-cta,
+.send,
+.action-btns button,
+.circle-btn {
+  --hue: var(--accent);
+  --ink: var(--accent-ink);
+  background: color-mix(in srgb, var(--hue) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--hue) 28%, transparent);
+  color: var(--ink);
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+/* 一般（未選取）的選項與按鍵：中性灰染色 */
+.choice,
+.lang-option,
+.key,
+.action-btns .cancel,
+.circle-btn,
+.pill.idle {
+  --hue: var(--label-3);
+  --ink: var(--label);
+  background: color-mix(in srgb, var(--hue) 10%, var(--surface));
+}
+.pill.idle {
+  --ink: var(--label-2);
+}
+/* 主要／選取中：主色染得深一點（仍是淺底深字，不是實心色塊） */
+.choice.prominent,
+.lang-option.on,
+.btn.prominent,
+.wait-cta,
+.send {
+  --hue: var(--accent);
+  --ink: var(--accent-ink);
+  background: color-mix(in srgb, var(--hue) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--hue) 45%, transparent);
+  color: var(--ink); /* 蓋掉舊的實心主色白字 */
+  box-shadow: none;
+  font-weight: 600;
+}
+.action-btns .destructive,
+.btn.danger,
+.pill.danger {
+  --hue: var(--danger);
+  --ink: var(--danger-ink);
+}
+.pill.wait {
+  --hue: var(--wait-hue);
+  --ink: var(--wait-ink);
+}
+.pill.run {
+  --hue: var(--run-hue);
+  --ink: var(--run-ink);
+}
+.conn.idle {
+  background: color-mix(in srgb, var(--label-3) 10%, var(--surface));
+}
+/* 形狀跟圖示一致：圓角方塊，不是膠囊 */
+.choice,
+.btn,
+.wait-cta,
+.action-btns button {
+  border-radius: var(--r-mark);
+}
+.lang-option,
+.key {
+  border-radius: 12px;
+}
+.pill {
+  border-radius: 10px;
+}
+.send,
+.circle-btn {
+  border-radius: 14px;
+}
+.choice kbd,
+.choice.prominent kbd {
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hue) 16%, var(--surface));
+}
+/* 分段控制的滑塊也用主色染色 */
+.segmented {
+  border-radius: 12px;
+}
+.segmented::before {
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.segmented button {
+  border-radius: 10px;
+}
+.segmented button[aria-pressed='true'] {
+  color: var(--accent-ink);
+}
+.composer {
+  border-radius: 18px;
+}
+.add-card {
+  border-radius: var(--r-mark);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .circle-btn {
+    background: color-mix(in srgb, var(--label-3) 10%, var(--surface)) !important;
+  }
 }
