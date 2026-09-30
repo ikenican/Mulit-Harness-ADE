@@ -20,6 +20,8 @@
   },
   "include": [
     "src/renderer/src/**/*",
-    "src/preload/**/*"
+    "src/renderer/remote/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*"
   ]
 }

@@ -82,7 +82,13 @@ const api = {
     testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string; resolvedPath?: string }> =>
       ipcRenderer.invoke('settings:testCliPath', path),
     testDocToolPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
-      ipcRenderer.invoke('settings:testDocToolPath', path)
+      ipcRenderer.invoke('settings:testDocToolPath', path),
+    // 設定被別處改了（例如手機遠端切換 Bypass 模式）
+    onChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('settings:changed', listener)
+      return () => ipcRenderer.removeListener('settings:changed', listener)
+    }
   },
   // 自動更新與版本管理 —— main/ipc/updater.ts
   updater: {
@@ -156,6 +162,14 @@ const api = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id: string): void => ipcRenderer.send('pty:kill', id),
+    // 接上一個已在 main 跑著的 pty（手機遠端開的終端），回傳目前畫面
+    attach: (id: string): Promise<{ snapshot: string } | null> => ipcRenderer.invoke('pty:attach', id),
+    // 手機遠端在這個視窗的工作區開了新終端，renderer 收到後開分頁並 attach
+    onRemoteSpawned: (cb: (info: RemoteSpawnedPty) => void): (() => void) => {
+      const listener = (_e: unknown, info: RemoteSpawnedPty): void => cb(info)
+      ipcRenderer.on('pty:remoteSpawned', listener)
+      return () => ipcRenderer.removeListener('pty:remoteSpawned', listener)
+    },
     onData: (id: string, cb: (data: string) => void): (() => void) => {
       const ch = `pty:data:${id}`
       const listener = (_e: unknown, data: string): void => cb(data)
@@ -170,6 +184,22 @@ const api = {
     },
     // 讀取 agents/*.yaml launcher 定義
     launchers: (): Promise<CliLauncher[]> => ipcRenderer.invoke('pty:launchers')
+  },
+  // 手機遠端控制（區網 Remote Bridge）—— main/remote/index.ts
+  remote: {
+    status: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
+    setEnabled: (enabled: boolean): Promise<RemoteStatus> => ipcRenderer.invoke('remote:setEnabled', enabled),
+    setPort: (port: number): Promise<RemoteStatus> => ipcRenderer.invoke('remote:setPort', port),
+    qr: (text: string): Promise<string> => ipcRenderer.invoke('remote:qr', text),
+    createPairing: (): Promise<RemotePairingInfo | null> => ipcRenderer.invoke('remote:createPairing'),
+    devices: (): Promise<RemoteDeviceInfo[]> => ipcRenderer.invoke('remote:devices'),
+    revokeDevice: (id: string): Promise<boolean> => ipcRenderer.invoke('remote:revokeDevice', id),
+    resetTrust: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:resetTrust'),
+    onStatusChange: (cb: (status: RemoteStatus) => void): (() => void) => {
+      const listener = (_e: unknown, status: RemoteStatus): void => cb(status)
+      ipcRenderer.on('remote:status', listener)
+      return () => ipcRenderer.removeListener('remote:status', listener)
+    }
   },
   // 視窗管理（獨立彈出終端等）
   window: {
@@ -497,6 +527,39 @@ export interface ConnectionInfo {
   usedBy: string[]
 }
 
+export interface RemoteStatus {
+  enabled: boolean
+  running: boolean
+  port: number
+  addresses: string[]
+  /** 手機 PWA 網址（https） */
+  appUrl: string | null
+  /** 安裝 CA 憑證的設定頁（http） */
+  setupUrl: string | null
+  caFingerprint: string | null
+  connectedDevices: string[]
+  error: string | null
+}
+export interface RemotePairingInfo {
+  code: string
+  expiresAt: number
+  pairUrl: string | null
+  pairQr: string | null
+}
+export interface RemoteDeviceInfo {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  pushEnabled: boolean
+  online: boolean
+}
+export interface RemoteSpawnedPty {
+  ptyId: string
+  /** 與 renderer 的 launcherKey 相同：claude / codex / antigravity / powershell / cmd 或自訂 launcher id */
+  launcherKey: string
+  title: string
+}
 export interface PtySpawnOptions {
   launcherId?: string
   command?: string
@@ -505,4 +568,6 @@ export interface PtySpawnOptions {
   cols?: number
   rows?: number
   sessionId?: string
+  /** 分頁顯示名稱；遠端控制的 session 清單也用這個名字 */
+  title?: string
 }

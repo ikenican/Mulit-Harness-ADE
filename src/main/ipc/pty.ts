@@ -1,16 +1,15 @@
-import { ipcMain, app, BrowserWindow } from 'electron'
+import { ipcMain, app, type WebContents } from 'electron'
+import { EventEmitter } from 'events'
 import * as pty from '@lydell/node-pty'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as yaml from 'js-yaml'
 import * as crypto from 'crypto'
 import { execFileSync } from 'child_process'
-import { workspace, getWorkspaceForEvent } from '../index'
+import { getWorkspaceForEvent } from '../index'
+import { looksLikeApprovalPrompt } from '../../shared/approvalDetect'
 import { resolveConnectionEnv } from './conn'
 import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
-
-const ptySessions = new Map<string, pty.IPty>()
-const ptyWindowSenders = new Map<string, number>() // ptyId -> webContents.id
 
 export interface ActiveSessionMeta {
   id: string
@@ -22,22 +21,174 @@ export interface ActiveSessionMeta {
   cwd?: string
   args?: string[]
 }
-const ptySessionMetas = new Map<string, ActiveSessionMeta>()
+
+/**
+ * 訂閱某個 pty 輸出的一方。桌面視窗是一個 subscriber，遠端控制的手機也是；
+ * pty 不再只綁死一個 webContents，才能同時被桌面與手機看到。
+ */
+export interface PtySubscriber {
+  data: (ptyId: string, chunk: string) => void
+  exit: (ptyId: string, code: number) => void
+}
+
+interface PtyEntry {
+  proc: pty.IPty
+  meta: ActiveSessionMeta
+  /** 顯示名稱（Claude Code / Codex / 自訂 launcher 名稱…） */
+  title: string
+  /** 擁有者視窗的 webContents id：視窗關掉時連帶收掉 pty（沿用原本語意） */
+  ownerId: number
+  workspace: string
+  cols: number
+  rows: number
+  /** 最後一段輸出，給中途接上的 subscriber（例如手機）補畫面 */
+  scrollback: string
+  subs: Map<string, PtySubscriber>
+  needsApproval: boolean
+  lastOutputAt: number
+  /** 被使用者關掉（而不是自己結束）：遠端不必推播「任務結束」 */
+  killed: boolean
+}
+
+const SCROLLBACK_LIMIT = 256 * 1024
+
+const entries = new Map<string, PtyEntry>()
+
+/** pty 生命週期事件：遠端控制橋接層靠這個推播「待審批」與 session 清單變化 */
+export const ptyEvents = new EventEmitter()
+ptyEvents.setMaxListeners(50)
+
+export interface PtySessionInfo {
+  id: string
+  title: string
+  command: string
+  launcherId?: string
+  workspace: string
+  ownerId: number
+  cwd?: string
+  startTime: number
+  cols: number
+  rows: number
+  needsApproval: boolean
+  lastOutputAt: number
+}
+
+function toInfo(id: string, e: PtyEntry): PtySessionInfo {
+  return {
+    id,
+    title: e.title,
+    command: e.meta.command,
+    launcherId: e.meta.launcherId,
+    workspace: e.workspace,
+    ownerId: e.ownerId,
+    cwd: e.meta.cwd,
+    startTime: e.meta.startTime,
+    cols: e.cols,
+    rows: e.rows,
+    needsApproval: e.needsApproval,
+    lastOutputAt: e.lastOutputAt
+  }
+}
 
 export function getActiveSessionMetas(): ActiveSessionMeta[] {
-  return Array.from(ptySessionMetas.values())
+  return Array.from(entries.values()).map((e) => e.meta)
+}
+
+export function listPtySessions(): PtySessionInfo[] {
+  return Array.from(entries.entries()).map(([id, e]) => toInfo(id, e))
+}
+
+export function getPtySession(id: string): PtySessionInfo | null {
+  const e = entries.get(id)
+  return e ? toInfo(id, e) : null
+}
+
+/** 訂閱 pty 輸出；回傳目前的 scrollback 讓呼叫端先補畫面。找不到 pty 回 null。 */
+export function subscribePty(id: string, key: string, sub: PtySubscriber): string | null {
+  const e = entries.get(id)
+  if (!e) return null
+  e.subs.set(key, sub)
+  return e.scrollback
+}
+
+/** 目前的 scrollback（不訂閱），給審批卡片擷取提示文字用 */
+export function getPtyScrollback(id: string): string | null {
+  return entries.get(id)?.scrollback ?? null
+}
+
+export function unsubscribePty(id: string, key: string): void {
+  entries.get(id)?.subs.delete(key)
+}
+
+export function writePty(id: string, data: string): boolean {
+  const e = entries.get(id)
+  if (!e) return false
+  e.proc.write(data)
+  // 有人輸入就代表在回應提示，清掉待審批狀態
+  if (e.needsApproval) {
+    e.needsApproval = false
+    ptyEvents.emit('changed')
+  }
+  return true
+}
+
+export function resizePty(id: string, cols: number, rows: number): void {
+  const e = entries.get(id)
+  if (!e || cols < 2 || rows < 2) return
+  try {
+    e.proc.resize(cols, rows)
+    e.cols = cols
+    e.rows = rows
+    ptyEvents.emit('resized', id, cols, rows)
+  } catch {
+    // ignore
+  }
+}
+
+export function killPty(id: string): void {
+  const e = entries.get(id)
+  if (!e) return
+  e.killed = true
+  hardKill(e.proc)
+  finish(id, e, -1)
 }
 
 export function cleanupPtyForWindow(webContentsId: number): void {
-  for (const [id, senderId] of Array.from(ptyWindowSenders.entries())) {
-    if (senderId === webContentsId) {
-      const session = ptySessions.get(id)
-      if (session) {
-        hardKill(session)
+  for (const [id, e] of Array.from(entries.entries())) {
+    if (e.ownerId === webContentsId) {
+      e.killed = true
+      hardKill(e.proc)
+      finish(id, e, -1)
+    }
+  }
+}
+
+/** 從表中移除並發出 exit 事件；onExit 與視窗關閉都可能呼叫，只處理一次 */
+function finish(id: string, e: PtyEntry, code: number): void {
+  if (entries.get(id) !== e) return
+  entries.delete(id)
+  ptyEvents.emit('exit', id, code, e.title, e.killed)
+  ptyEvents.emit('changed')
+}
+
+/** 桌面視窗當 subscriber：送到 `pty:data:<id>` / `pty:exit:<id>` 頻道（renderer 端契約不變） */
+function webContentsSubscriber(wc: WebContents): PtySubscriber {
+  // 視窗被關掉後 pty 不一定跟著結束（例如彈出的終端視窗），
+  // 對已銷毀的 webContents 呼叫 .send() 會讓整個 main process 崩潰，所以一律先檢查。
+  return {
+    data: (id, chunk) => {
+      try {
+        if (!wc.isDestroyed()) wc.send(`pty:data:${id}`, chunk)
+      } catch {
+        // ignore destroyed sender
       }
-      ptySessions.delete(id)
-      ptySessionMetas.delete(id)
-      ptyWindowSenders.delete(id)
+    },
+    exit: (id, code) => {
+      try {
+        if (!wc.isDestroyed()) wc.send(`pty:exit:${id}`, code)
+      } catch {
+        // ignore destroyed sender
+      }
     }
   }
 }
@@ -175,224 +326,241 @@ function resolveCommand(name: string): { cmd: string; extraArgs: string[] } {
 }
 
 app.on('before-quit', () => {
-  for (const session of ptySessions.values()) hardKill(session)
-  ptySessions.clear()
+  for (const e of entries.values()) hardKill(e.proc)
+  entries.clear()
 })
+
+const BUILTIN_TITLES: Record<string, string> = {
+  claude: 'Claude Code',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
+  powershell: 'PowerShell',
+  pwsh: 'PowerShell',
+  cmd: 'Command Prompt',
+  bash: 'Bash'
+}
+
+/** 讀取工作區 agents/*.yaml 的 launcher 定義（原始 yaml 物件） */
+function readLauncherDefs(ws: string): any[] {
+  const agentsDir = path.join(ws, 'agents')
+  if (!ws || !fs.existsSync(agentsDir)) return []
+  const out: any[] = []
+  try {
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (file.endsWith('.yaml') || file.endsWith('.yml')) {
+        const content = fs.readFileSync(path.join(agentsDir, file), 'utf8')
+        const parsed = yaml.load(content) as any
+        if (parsed && parsed.launcher) out.push(parsed.launcher)
+      }
+    }
+  } catch (e) {
+    console.error('Error reading launchers:', e)
+  }
+  return out
+}
+
+export function listLaunchers(ws: string): CliLauncher[] {
+  return readLauncherDefs(ws).map((l) => {
+    const r = resolveCommand(l.cli)
+    let launcherArgs = [...r.extraArgs, ...(l.args || [])]
+    if (isCliBypassPermissions()) {
+      launcherArgs = applyAgentBypassArgs(l.cli, launcherArgs)
+    }
+    return {
+      id: l.id,
+      name: l.name,
+      cli: l.cli,
+      command: r.cmd,
+      args: launcherArgs,
+      env: l.env || {}
+    }
+  })
+}
+
+/**
+ * 啟動一個 pty 並登記到共用表。桌面 renderer（pty:spawn）與遠端控制（手機開新終端）共用這一條路。
+ * owner 是擁有者視窗的 webContents：視窗關閉時 pty 跟著收掉。
+ */
+export function spawnPty(
+  opts: PtySpawnOptions,
+  ctx: { workspace: string; owner: WebContents; subscribeOwner: boolean }
+): string {
+  let resolved = opts.command ? resolveCommand(opts.command) : { cmd: isWin ? 'cmd.exe' : 'bash', extraArgs: [] }
+  let command = resolved.cmd
+  let args = [...resolved.extraArgs, ...(opts.args || [])]
+  let env = { ...process.env }
+  let targetAgent: AgentId | null = null
+  let title = opts.title || (opts.command ? BUILTIN_TITLES[opts.command] || opts.command : 'Shell')
+
+  if (opts.command === 'claude' || opts.command === 'antigravity' || opts.command === 'codex') {
+    targetAgent = opts.command as AgentId
+  }
+
+  if (opts.launcherId) {
+    const l = readLauncherDefs(ctx.workspace).find((x) => x.id === opts.launcherId)
+    if (l) {
+      const r = resolveCommand(l.cli)
+      command = r.cmd
+      // opts.args 要留著：resume 用的 --resume/--conversation 是從這裡進來的，
+      // 覆蓋掉的話自訂 launcher 開的會話永遠是全新對話。
+      args = [...r.extraArgs, ...(l.args || []), ...(opts.args || [])]
+      env = { ...env, ...(l.env || {}) }
+      if (l.cli === 'claude' || l.cli === 'antigravity' || l.cli === 'codex') {
+        targetAgent = l.cli as AgentId
+      }
+      if (!opts.title && l.name) title = l.name
+    }
+  }
+
+  // 若啟用 CLI 略過權限模式 (Bypass Permissions Mode)，依據 Agent 類別自動注入 bypass 參數
+  if (isCliBypassPermissions()) {
+    if (targetAgent) {
+      args = applyAgentBypassArgs(targetAgent, args)
+    } else {
+      const cmdLower = (opts.command || command).toLowerCase()
+      if (cmdLower.includes('claude')) {
+        args = applyAgentBypassArgs('claude', args)
+      } else if (cmdLower.includes('codex')) {
+        args = applyAgentBypassArgs('codex', args)
+      } else if (cmdLower.includes('antigravity') || cmdLower.includes('agy')) {
+        args = applyAgentBypassArgs('antigravity', args)
+      }
+    }
+  }
+
+  // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
+  // 因此不需要（也不該）把明文寫進任何 agent 設定檔。
+  env = { ...env, ...resolveConnectionEnv() }
+
+  // 防禦處理：若呼叫 agy / antigravity CLI 且帶有 --conversation <id>，
+  // 檢查該 session 是否在 CLI 本地資料庫 (~/.gemini/antigravity-cli/conversations/) 中。
+  // 若為 IDE 專屬 session 或不存在的 CLI 紀錄，過濾掉 --conversation 避免 agy 印出 'warning: conversation "<id>" not found'
+  const cmdLower = command.toLowerCase()
+  if (cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity') {
+    const convIdx = args.indexOf('--conversation')
+    if (convIdx !== -1 && args[convIdx + 1]) {
+      const targetId = args[convIdx + 1]
+      const H = process.env.USERPROFILE || process.env.HOME || ''
+      const cliDb = path.join(H, '.gemini', 'antigravity-cli', 'conversations', `${targetId}.db`)
+      if (!fs.existsSync(cliDb)) {
+        // 移除 --conversation 及該 ID
+        args.splice(convIdx, 2)
+      }
+    }
+  }
+
+  const id = crypto.randomUUID()
+  const cols = opts.cols || 80
+  const rows = opts.rows || 24
+
+  const ws = ctx.workspace
+  const spawnCwd =
+    opts.cwd && fs.existsSync(opts.cwd)
+      ? opts.cwd
+      : ws && fs.existsSync(ws)
+        ? ws
+        : process.env.USERPROFILE || process.env.HOME || process.cwd()
+  const ptyProcess = pty.spawn(command, args, {
+    name: 'xterm-color',
+    cols,
+    rows,
+    cwd: spawnCwd,
+    env: env as Record<string, string>
+  })
+
+  const entry: PtyEntry = {
+    proc: ptyProcess,
+    meta: {
+      id,
+      command: opts.command || opts.launcherId || 'shell',
+      launcherId: opts.launcherId,
+      startTime: Date.now(),
+      pid: ptyProcess.pid,
+      sessionId: opts.sessionId,
+      cwd: spawnCwd,
+      args
+    },
+    title,
+    ownerId: ctx.owner.id,
+    workspace: ws,
+    cols,
+    rows,
+    scrollback: '',
+    subs: new Map(),
+    needsApproval: false,
+    lastOutputAt: Date.now(),
+    killed: false
+  }
+  if (ctx.subscribeOwner) entry.subs.set(`wc:${ctx.owner.id}`, webContentsSubscriber(ctx.owner))
+  entries.set(id, entry)
+
+  ptyProcess.onData((data) => {
+    entry.lastOutputAt = Date.now()
+    entry.scrollback += data
+    if (entry.scrollback.length > SCROLLBACK_LIMIT) {
+      // 從換行處切，減少把 ANSI 序列切一半造成的亂碼
+      let cut = entry.scrollback.length - SCROLLBACK_LIMIT
+      const nl = entry.scrollback.indexOf('\n', cut)
+      if (nl !== -1 && nl - cut < 4096) cut = nl + 1
+      entry.scrollback = entry.scrollback.slice(cut)
+    }
+    for (const sub of entry.subs.values()) sub.data(id, data)
+
+    // 待審批偵測：false→true 才發事件，避免同一個提示連發推播
+    if (!entry.needsApproval && looksLikeApprovalPrompt(data)) {
+      entry.needsApproval = true
+      ptyEvents.emit('approval', id)
+      ptyEvents.emit('changed')
+    }
+  })
+
+  ptyProcess.onExit(({ exitCode }) => {
+    for (const sub of entry.subs.values()) sub.exit(id, exitCode)
+    finish(id, entry, exitCode)
+  })
+
+  ptyEvents.emit('changed')
+  return id
+}
 
 export function registerPtyHandlers(): void {
   ipcMain.handle('pty:launchers', async (event) => {
-    const ws = getWorkspaceForEvent(event)
-    const agentsDir = path.join(ws, 'agents')
-    const launchers: CliLauncher[] = []
-    
-    if (!fs.existsSync(agentsDir)) {
-      return launchers
-    }
-
-    try {
-      const files = fs.readdirSync(agentsDir)
-      for (const file of files) {
-        if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-          const content = fs.readFileSync(path.join(agentsDir, file), 'utf8')
-          const parsed = yaml.load(content) as any
-          if (parsed && parsed.launcher) {
-            const l = parsed.launcher
-            const r = resolveCommand(l.cli)
-            let launcherArgs = [...r.extraArgs, ...(l.args || [])]
-            if (isCliBypassPermissions()) {
-              launcherArgs = applyAgentBypassArgs(l.cli, launcherArgs)
-            }
-            launchers.push({
-              id: l.id,
-              name: l.name,
-              cli: l.cli,
-              command: r.cmd,
-              args: launcherArgs,
-              env: l.env || {}
-            })
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Error reading launchers:', e)
-    }
-    
-    return launchers
+    return listLaunchers(getWorkspaceForEvent(event))
   })
 
   ipcMain.handle('pty:spawn', async (event, opts: PtySpawnOptions) => {
-    let resolved = opts.command ? resolveCommand(opts.command) : { cmd: isWin ? 'cmd.exe' : 'bash', extraArgs: [] }
-    let command = resolved.cmd
-    let args = [...resolved.extraArgs, ...(opts.args || [])]
-    let env = { ...process.env }
-    let targetAgent: AgentId | null = null
-
-    if (opts.command === 'claude' || opts.command === 'antigravity' || opts.command === 'codex') {
-      targetAgent = opts.command as AgentId
-    }
-    
-    if (opts.launcherId) {
-      const ws = getWorkspaceForEvent(event)
-      const agentsDir = path.join(ws, 'agents')
-      if (fs.existsSync(agentsDir)) {
-        const files = fs.readdirSync(agentsDir)
-        for (const file of files) {
-          if (file.endsWith('.yaml') || file.endsWith('.yml')) {
-            const content = fs.readFileSync(path.join(agentsDir, file), 'utf8')
-            const parsed = yaml.load(content) as any
-            if (parsed && parsed.launcher && parsed.launcher.id === opts.launcherId) {
-              const l = parsed.launcher
-              const r = resolveCommand(l.cli)
-              command = r.cmd
-              // opts.args 要留著：resume 用的 --resume/--conversation 是從這裡進來的，
-              // 覆蓋掉的話自訂 launcher 開的會話永遠是全新對話。
-              args = [...r.extraArgs, ...(l.args || []), ...(opts.args || [])]
-              env = { ...env, ...(l.env || {}) }
-              if (l.cli === 'claude' || l.cli === 'antigravity' || l.cli === 'codex') {
-                targetAgent = l.cli as AgentId
-              }
-              break
-            }
-          }
-        }
-      }
-    }
-    
-    // 若啟用 CLI 略過權限模式 (Bypass Permissions Mode)，依據 Agent 類別自動注入 bypass 參數
-    if (isCliBypassPermissions()) {
-      if (targetAgent) {
-        args = applyAgentBypassArgs(targetAgent, args)
-      } else {
-        const cmdLower = (opts.command || command).toLowerCase()
-        if (cmdLower.includes('claude')) {
-          args = applyAgentBypassArgs('claude', args)
-        } else if (cmdLower.includes('codex')) {
-          args = applyAgentBypassArgs('codex', args)
-        } else if (cmdLower.includes('antigravity') || cmdLower.includes('agy')) {
-          args = applyAgentBypassArgs('antigravity', args)
-        }
-      }
-    }
-
-    // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
-    // 因此不需要（也不該）把明文寫進任何 agent 設定檔。
-    env = { ...env, ...resolveConnectionEnv() }
-
-    // 防禦處理：若呼叫 agy / antigravity CLI 且帶有 --conversation <id>，
-    // 檢查該 session 是否在 CLI 本地資料庫 (~/.gemini/antigravity-cli/conversations/) 中。
-    // 若為 IDE 專屬 session 或不存在的 CLI 紀錄，過濾掉 --conversation 避免 agy 印出 'warning: conversation "<id>" not found'
-    const cmdLower = command.toLowerCase()
-    if (cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity') {
-      const convIdx = args.indexOf('--conversation')
-      if (convIdx !== -1 && args[convIdx + 1]) {
-        const targetId = args[convIdx + 1]
-        const H = process.env.USERPROFILE || process.env.HOME || ''
-        const cliDb = path.join(H, '.gemini', 'antigravity-cli', 'conversations', `${targetId}.db`)
-        if (!fs.existsSync(cliDb)) {
-          // 移除 --conversation 及該 ID
-          args.splice(convIdx, 2)
-        }
-      }
-    }
-
-    const id = crypto.randomUUID()
-    const cols = opts.cols || 80
-    const rows = opts.rows || 24
-    
     try {
-      const ws = getWorkspaceForEvent(event)
-      const spawnCwd =
-        opts.cwd && fs.existsSync(opts.cwd)
-          ? opts.cwd
-          : ws && fs.existsSync(ws)
-            ? ws
-            : process.env.USERPROFILE || process.env.HOME || process.cwd()
-      const ptyProcess = pty.spawn(command, args, {
-        name: 'xterm-color',
-        cols,
-        rows,
-        cwd: spawnCwd,
-        env: env as Record<string, string>
+      return spawnPty(opts, {
+        workspace: getWorkspaceForEvent(event),
+        owner: event.sender,
+        subscribeOwner: true
       })
-      
-      ptySessions.set(id, ptyProcess)
-      ptyWindowSenders.set(id, event.sender.id)
-      ptySessionMetas.set(id, {
-        id,
-        command: opts.command || opts.launcherId || 'shell',
-        launcherId: opts.launcherId,
-        startTime: Date.now(),
-        pid: ptyProcess.pid,
-        sessionId: opts.sessionId,
-        cwd: spawnCwd,
-        args
-      })
-      
-      // event.sender 是 spawn 當下那個視窗的 webContents。如果之後那個視窗被關掉
-      // （例如把終端彈出成獨立視窗後又關掉它），pty 本身不會跟著結束——它活在
-      // 共用的 ptySessions，繼續吐 data/exit 事件。這時候再對已銷毀的 webContents
-      // 呼叫 .send() 會丟出未捕捉例外，直接讓整個 main process 崩潰。
-      ptyProcess.onData((data) => {
-        try {
-          if (event.sender.isDestroyed()) return
-          event.sender.send(`pty:data:${id}`, data)
-        } catch {
-          // ignore destroyed sender
-        }
-      })
-
-      ptyProcess.onExit(({ exitCode }) => {
-        try {
-          if (!event.sender.isDestroyed()) {
-            event.sender.send(`pty:exit:${id}`, exitCode)
-          }
-        } catch {
-          // ignore destroyed sender
-        }
-        ptySessions.delete(id)
-        ptySessionMetas.delete(id)
-        ptyWindowSenders.delete(id)
-      })
-      
-      return id
     } catch (e: any) {
       throw new Error(`Failed to spawn terminal: ${e.message}`)
     }
   })
 
-  ipcMain.on('pty:write', (event, id: string, data: string) => {
-    const session = ptySessions.get(id)
-    if (session) {
-      session.write(data)
-    }
+  // 接上一個已存在的 pty（例如手機開的終端要出現在桌面分頁）：回傳 scrollback 並開始轉送輸出
+  ipcMain.handle('pty:attach', async (event, id: string) => {
+    const wc = event.sender
+    const snapshot = subscribePty(id, `wc:${wc.id}`, webContentsSubscriber(wc))
+    return snapshot === null ? null : { snapshot }
   })
 
-  ipcMain.on('pty:resize', (event, id: string, cols: number, rows: number) => {
-    const session = ptySessions.get(id)
-    if (session) {
-      try {
-        session.resize(cols, rows)
-      } catch (e) {
-        // ignore
-      }
-    }
+  ipcMain.on('pty:write', (_event, id: string, data: string) => {
+    writePty(id, data)
   })
 
-  ipcMain.handle('pty:pipe', async (_event, fromId: string, toId: string, text: string): Promise<boolean> => {
-    const target = ptySessions.get(toId)
-    if (!target) return false
+  ipcMain.on('pty:resize', (_event, id: string, cols: number, rows: number) => {
+    resizePty(id, cols, rows)
+  })
+
+  ipcMain.handle('pty:pipe', async (_event, _fromId: string, toId: string, text: string): Promise<boolean> => {
     const msg = text.endsWith('\r') || text.endsWith('\n') ? text : `${text}\r\n`
-    target.write(msg)
-    return true
+    return writePty(toId, msg)
   })
 
   ipcMain.on('pty:kill', (_event, id: string) => {
-    const session = ptySessions.get(id)
-    if (session) {
-      hardKill(session)
-      ptySessions.delete(id)
-      ptySessionMetas.delete(id)
-      ptyWindowSenders.delete(id)
-    }
+    killPty(id)
   })
 }

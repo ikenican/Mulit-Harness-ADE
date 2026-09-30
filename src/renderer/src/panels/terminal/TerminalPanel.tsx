@@ -63,6 +63,8 @@ interface TerminalSession {
    * onData——之後每敲一個字會送進兩個 pty、兩邊都回顯，畫面上就是每個字重複兩次。
    */
   bootstrapped?: boolean
+  /** 手機遠端開的終端：pty 已在 main 跑著，只要 attach、不要再 spawn */
+  attachPtyId?: string
 }
 
 export interface AgentDefinition {
@@ -527,7 +529,8 @@ export default function TerminalPanel(): JSX.Element {
       args?: string[],
       titleOverride?: string,
       associatedSessionId?: string,
-      cwd?: string
+      cwd?: string,
+      attachPtyId?: string
     ): string => {
       let key = launcherOverride || selectedLauncher
       if (!key || (DIRECT_IDS.includes(key) && !isCliEnabled(key))) {
@@ -601,7 +604,8 @@ export default function TerminalPanel(): JSX.Element {
           isExited: false,
           needsApproval: false,
           associatedSessionId,
-          cwd
+          cwd,
+          attachPtyId
         }
       ])
       setMru((prev) => [sessionId, ...prev])
@@ -610,6 +614,15 @@ export default function TerminalPanel(): JSX.Element {
     },
     [selectedLauncher, isCliEnabled, enabledAgents, enabledShells, launchers, termTheme, minContrast]
   )
+
+  // 手機遠端開的終端：在這個視窗開一個分頁 attach 上去，桌面與手機看到同一個 CLI
+  const handleNewTerminalRef = useRef(handleNewTerminal)
+  handleNewTerminalRef.current = handleNewTerminal
+  useEffect(() => {
+    return window.api.pty.onRemoteSpawned((info) => {
+      handleNewTerminalRef.current(info.launcherKey, undefined, info.title, undefined, undefined, info.ptyId)
+    })
+  }, [])
 
   /** 開啟或切換至特定 session 的 CLI 終端（點選或拖曳時共用） */
   const openOrResumeSession = useCallback(
@@ -1975,7 +1988,8 @@ function TerminalInstance({
       rows: session.term.rows,
       args: session.args,
       cwd: session.cwd,
-      sessionId: session.associatedSessionId
+      sessionId: session.associatedSessionId,
+      title: session.title
     }
     if (DIRECT_IDS.includes(launcherKey)) {
       opts.command = launcherKey
@@ -1983,8 +1997,18 @@ function TerminalInstance({
       opts.launcherId = launcherKey
     }
 
-    window.api.pty
-      .spawn(opts)
+    // 手機遠端開的終端已經在跑：接上去、先補目前畫面，再照一般流程掛 handler
+    const attachId = session.attachPtyId
+    const ready: Promise<string> = attachId
+      ? window.api.pty.attach(attachId).then((res) => {
+          if (!res) throw new Error('remote terminal is no longer running')
+          session.term.write(res.snapshot)
+          window.api.pty.resize(attachId, session.term.cols, session.term.rows)
+          return attachId
+        })
+      : window.api.pty.spawn(opts)
+
+    ready
       .then((ptyId) => {
         ptyIdRef.current = ptyId
         setSessions((prev) => prev.map((s) => (s.id === session.id ? { ...s, ptyId } : s)))

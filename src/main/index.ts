@@ -15,6 +15,7 @@ import { registerConnHandlers } from './ipc/conn'
 import { registerSettingsHandlers, getLastWorkspace, isProtectedPath, saveLastWorkspace, addRecentWorkspace } from './ipc/settings'
 import { registerDashboardHandlers, loadDashboardState } from './ipc/dashboard'
 import { registerUpdaterHandlers } from './ipc/updater'
+import { registerRemoteHandlers, stopRemote } from './remote'
 import { initJumpList, parseCommandLineArgs } from './jumplist'
 
 // 在 Windows 最早期設定 Application User Model ID，確保工作列 Jump List 與釘選關聯正確
@@ -421,6 +422,7 @@ if (!gotTheLock) {
     registerDashboardHandlers()
     registerUpdaterHandlers()
     registerWindowHandlers()
+    registerRemoteHandlers()
 
     // 檢查冷啟動命令列是否帶有目標專案路徑
     const { targetPath } = parseCommandLineArgs(process.argv)
@@ -436,6 +438,10 @@ if (!gotTheLock) {
     app.on('activate', () => {
       if (projectWindows.size === 0) createWindow()
     })
+  })
+
+  app.on('before-quit', () => {
+    void stopRemote()
   })
 
   app.on('window-all-closed', () => {

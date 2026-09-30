@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useWorkbench, setTheme, bumpSettings, setUiMode } from '@/store'
 import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
+import RemoteSettings from './RemoteSettings'
 import {
   IconSun,
   IconMoon,
@@ -19,7 +20,8 @@ import {
   IconDownload,
   IconSpark,
   IconRefresh,
-  IconAppLogo
+  IconAppLogo,
+  IconPhone
 } from './Icons'
 import './settingsModal.css'
 import type { WorkbenchSettings, DocToolPaths, UpdaterStatus, AgentInstallInfo, CliTestRecord } from '../../../preload/index'
@@ -831,6 +833,17 @@ export default function SettingsModal({
 
             <button
               type="button"
+              className={`macos-sidebar-item ${tab === 'remote' ? 'active' : ''}`}
+              onClick={() => setTab('remote')}
+            >
+              <div className="macos-icon-squircle" style={{ background: 'var(--morandi-green)' }}>
+                <IconPhone size={14} />
+              </div>
+              <span className="macos-sidebar-item-text">{t('remote.tab')}</span>
+            </button>
+
+            <button
+              type="button"
               className={`macos-sidebar-item ${tab === 'about' ? 'active' : ''}`}
               onClick={() => setTab('about')}
             >
@@ -1526,6 +1539,23 @@ export default function SettingsModal({
               <div className="macos-settings-body-customized">
                 <CustomizedPanel />
               </div>
+            </>
+          )}
+
+          {tab === 'remote' && (
+            <>
+              <div className="macos-settings-header">
+                <div className="macos-settings-header-top">
+                  <div>
+                    <h2 className="macos-settings-title">{t('remote.title')}</h2>
+                    <p className="macos-settings-desc">{t('remote.desc')}</p>
+                  </div>
+                  <button type="button" className="macos-close-btn" onClick={onClose} title="Close (Esc)">
+                    <IconClose size={12} />
+                  </button>
+                </div>
+              </div>
+              <RemoteSettings bypassActive={!!settings.cliBypassPermissions} />
             </>
           )}
 

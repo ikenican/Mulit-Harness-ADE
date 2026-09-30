@@ -29,6 +29,7 @@ React + Vite.
 - **Fast Startup & Mount-on-Demand** — 42x accelerated cold startup powered by disk-persisted session caches and lazy-loaded sidebar/central panels.
 - **Bilingual i18n** — full interface localization supporting seamless toggling between Strict English and Traditional Chinese.
 - **CLI Permissions & Bypass Mode** — toggleable bypass mode skipping interactive approval prompts for Claude Code (`--permission-mode bypassPermissions`), Codex (`--dangerously-bypass-approvals-and-sandbox`), and Antigravity (`--dangerously-skip-permissions`).
+- **iPhone Remote Control (LAN)** — watch and answer your CLI agents from an iPhone on the same Wi-Fi: a Home Screen web app lists every terminal, mirrors its output, shows an approval card with one-tap answers, lets you type or start new agents, and sends a notification when an agent needs you. See [iPhone remote control](#iphone-remote-control).
 
 ## Installation
 
@@ -102,6 +103,45 @@ src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
 .project-memory  shared cross-agent memory (handoff, protocol, decisions)
 ```
 
+## iPhone remote control
+
+Settings → **Remote Control** turns on a small HTTPS server inside the app that only
+accepts connections from private LAN addresses (10/8, 172.16/12, 192.168/16).
+On Windows, allow **Private networks** when the firewall asks the first time.
+
+1. **Trust this computer (once).** Scan the first QR code with the iPhone Camera and open
+   it in Safari. Download the profile, install it (Settings → General → VPN & Device
+   Management), then enable it under Settings → General → About → Certificate Trust
+   Settings. iOS only allows Home Screen web apps, service workers and push
+   notifications over a trusted HTTPS connection, which is why this step exists.
+2. **Install the app.** Open the app URL in Safari → Share → **Add to Home Screen**.
+3. **Pair.** Open it from the Home Screen, press *Generate pairing code* on the computer,
+   and type the code (or scan the pairing QR code). Home Screen apps don't share storage
+   with Safari, so pair from the Home Screen app.
+4. Optional: in the app's settings, turn on notifications to get an alert when an agent
+   is waiting for approval or a task finishes.
+
+Security model:
+
+- The local CA carries critical X.509 Name Constraints: it can only sign certificates for
+  private IPv4 addresses and `*.local`, so even if its key leaked it could not impersonate
+  public websites on your phone. Its private key is encrypted with the OS keychain
+  (Electron `safeStorage`). *Reset certificate and devices* creates a new CA.
+- Pairing codes are single-use, expire after 5 minutes, and are invalidated after 10 wrong
+  attempts. Devices get a random token; only its SHA-256 is stored. Revoking a device
+  disconnects it immediately.
+- A paired phone has full terminal control, including starting new agents (which honour
+  Bypass Mode) and turning Bypass Mode on or off. Turning it on from the phone asks for
+  confirmation and shows a notification on the computer. The title bar shows a phone badge whenever a device is connected, and
+  pair / connect / spawn / kill events are written to `remote/audit.log` in the app's
+  user-data folder (keystrokes are never logged).
+- Push notifications are end-to-end encrypted to the phone (RFC 8291) and relayed by
+  Apple's push service, so the computer needs internet access for them; everything else
+  stays on the LAN.
+
+In development, the phone client is served from the build output: run `npm run build`
+once before testing it with `npm run dev`.
+
 ## Configuration notes
 
 - `src/preload/index.ts` is the **single IPC contract** between main and renderer.
@@ -138,11 +178,12 @@ user has installed.
 
 ## Third-party software
 
-All bundled runtime dependencies are permissively licensed (MIT), including
+All bundled runtime dependencies are permissively licensed, including (MIT)
 `monaco-editor`, `@monaco-editor/react`, `@xterm/xterm`, `react`, `react-dom`,
 `react-markdown`, `rehype-highlight`, `remark-gfm`, `mermaid`, `simple-git`,
-`js-yaml`, and `@lydell/node-pty`. Their license terms continue to apply to those
-components.
+`js-yaml`, `@lydell/node-pty`, `ws`, and `qrcode`, plus `node-forge` (BSD-3-Clause,
+used to create the remote-control certificates). Their license terms continue to
+apply to those components.
 
 The terminal dev-server URL detection (`src/renderer/src/panels/terminal/portDetect.ts`)
 is adapted from [AgentsDock](https://github.com/ZhengyiLuo/AgentsDock), licensed under
@@ -173,6 +214,7 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **極速啟動與按需掛載**——檔案 mtime 持久化快取與面板按需載入（Mount-on-Demand），開機掃描效能大幅提升 42 倍。
 - **雙語系支援**——全系統支援嚴謹英文與繁體中文介面即時無縫切換。
 - **CLI 啟動權限與略過模式**——全域開關支援切換 AI 代理（Claude Code、Codex、Antigravity）略過互動式審批確認模式，提升自動化執行流暢度。
+- **iPhone 遠端控制（區網）**——在同一個 Wi-Fi 下用 iPhone 查看並回覆 CLI agent：加入主畫面的 App 會列出所有終端、同步顯示輸出、用審批卡片一鍵回覆、可以輸入或開新的 agent，agent 等你回覆時會推播通知。詳見下方〈iPhone 遠端控制〉。
 
 ## 安裝指南
 
@@ -244,6 +286,24 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 .project-memory  跨 agent 共享記憶（handoff、protocol、decisions）
 ```
 
+## iPhone 遠端控制
+
+設定 → **遠端控制** 會在 app 內啟動一個小型 HTTPS 伺服器，只接受私有區網位址（10/8、172.16/12、192.168/16）連線。Windows 第一次開啟時防火牆會詢問，請允許「私人網路」。
+
+1. **信任這台電腦（只需一次）**：用 iPhone 相機掃第一個 QR code，在 Safari 開啟。下載描述檔並安裝（設定 → 一般 → VPN 與裝置管理），再到 設定 → 一般 → 關於本機 → 憑證信任設定 打開完全信任。iOS 只允許在「可信任的 HTTPS」下使用主畫面 App、Service Worker 與推播，所以需要這一步。
+2. **安裝 App**：用 Safari 開啟 App 網址 → 分享 → **加入主畫面**。
+3. **配對**：從主畫面開啟，在電腦上按「產生配對碼」後輸入（或掃配對 QR code）。主畫面 App 與 Safari 不共用儲存空間，請在主畫面 App 內配對。
+4. 選用：在 App 的設定開啟通知，agent 等待審批或任務結束時會收到提醒。
+
+安全設計：
+
+- 本機 CA 帶 critical 的 X.509 Name Constraints，只能簽私有 IPv4 與 `*.local`；即使私鑰外洩也簽不出能在手機上冒充公開網站的憑證。私鑰以 OS 金鑰（Electron `safeStorage`）加密。「重設憑證與所有裝置」會產生新的 CA。
+- 配對碼一次性、5 分鐘失效、錯 10 次作廢。裝置取得隨機 token，本機只存 SHA-256；撤銷裝置會立即斷線。
+- 已配對的手機擁有完整終端控制權，包括開新的 agent（會套用 Bypass 模式）與開關 Bypass 模式；從手機開啟 Bypass 需先確認，電腦上會跳出通知。有裝置連線時標題列會顯示手機標示；配對、連線、開關終端等事件記錄在 app 使用者資料夾的 `remote/audit.log`（不記錄任何輸入內容）。
+- 推播內容以 RFC 8291 端對端加密給手機，經 Apple 推播服務轉送，因此推播需要電腦能連網；其餘流量都只在區網內。
+
+開發模式下，手機端頁面取自 build 產物：用 `npm run dev` 測試前請先執行一次 `npm run build`。
+
 ## 設定備註
 
 - `src/preload/index.ts` 是主行程與 renderer 之間的**唯一 IPC 契約**。
@@ -274,7 +334,8 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 
 所有捆綁的 runtime 依賴皆為寬鬆授權（MIT），包含 `monaco-editor`、`@monaco-editor/react`、
 `@xterm/xterm`、`react`、`react-dom`、`react-markdown`、`rehype-highlight`、`remark-gfm`、
-`mermaid`、`simple-git`、`js-yaml`、`@lydell/node-pty`。這些元件仍受其各自授權條款約束。
+`mermaid`、`simple-git`、`js-yaml`、`@lydell/node-pty`、`ws`、`qrcode`，以及 `node-forge`（BSD-3-Clause，
+用於產生遠端控制憑證）。這些元件仍受其各自授權條款約束。
 
 終端 dev server 網址偵測（`src/renderer/src/panels/terminal/portDetect.ts`）改寫自
 [AgentsDock](https://github.com/ZhengyiLuo/AgentsDock)，採 Apache License 2.0 授權。

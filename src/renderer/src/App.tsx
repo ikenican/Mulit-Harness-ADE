@@ -11,6 +11,7 @@ import SettingsModal from '@/components/SettingsModal'
 import Splitter from '@/components/Splitter'
 import VibeRail from '@/components/VibeRail'
 import VibeUsageBar from '@/components/VibeUsageBar'
+import RemoteIndicator from '@/components/RemoteIndicator'
 import {
   IconSidebarCollapse,
   IconSidebarExpand,
@@ -28,7 +29,8 @@ import {
   closeSettings,
   setSidebarTab,
   setWorkspaceRoot,
-  openInBrowser
+  openInBrowser,
+  bumpSettings
 } from '@/store'
 import { useTranslation } from '@/i18n'
 import {
@@ -77,6 +79,9 @@ export default function App(): JSX.Element {
   const { t } = useTranslation()
 
   // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
+  // 設定被別處改了（手機遠端切換 Bypass 等）→ 讓各面板重新讀取
+  useEffect(() => window.api.settings.onChanged(() => bumpSettings()), [])
+
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const wsParam = urlParams.get('workspace')
@@ -332,6 +337,8 @@ export default function App(): JSX.Element {
             </button>
           </div>
           )}
+
+          <RemoteIndicator />
 
           {/* Vibe 模式的設定鈕在左側圖示列最下方 */}
           {!isVibe && (
