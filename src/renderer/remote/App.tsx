@@ -35,17 +35,7 @@ function formatCode(raw: string): string {
   return s.length > 4 ? `${s.slice(0, 4)}-${s.slice(4)}` : s
 }
 
-// 背景層：莫蘭迪色暈 + 往上飄的肥皂泡。位置與速度固定，每次開啟看到的畫面一致
-const ORBS = [
-  { s: 64, x: '8%', d: 26, delay: 0, sway: '18px', hue: 'var(--blob-2)' },
-  { s: 28, x: '22%', d: 19, delay: 6, sway: '-12px', hue: 'var(--blob-5)' },
-  { s: 96, x: '64%', d: 34, delay: 3, sway: '-24px', hue: 'var(--blob-3)' },
-  { s: 40, x: '82%', d: 23, delay: 11, sway: '14px', hue: 'var(--blob-1)' },
-  { s: 20, x: '46%', d: 17, delay: 15, sway: '10px', hue: 'var(--blob-4)' },
-  { s: 52, x: '34%', d: 29, delay: 20, sway: '-16px', hue: 'var(--blob-2)' },
-  { s: 34, x: '90%', d: 21, delay: 24, sway: '-10px', hue: 'var(--blob-5)' }
-]
-
+// 背景層：莫蘭迪色暈，讓上面的磨砂玻璃有顏色可以透
 function Backdrop(): JSX.Element {
   return (
     <div className="backdrop" aria-hidden="true">
@@ -54,22 +44,6 @@ function Backdrop(): JSX.Element {
       <div className="blob b3" />
       <div className="blob b4" />
       <div className="blob b5" />
-      {ORBS.map((o, i) => (
-        <span
-          key={i}
-          className="orb"
-          style={
-            {
-              '--s': `${o.s}px`,
-              '--x': o.x,
-              '--d': `${o.d}s`,
-              '--delay': `-${o.delay}s`,
-              '--sway': o.sway,
-              '--hue': o.hue
-            } as React.CSSProperties
-          }
-        />
-      ))}
     </div>
   )
 }

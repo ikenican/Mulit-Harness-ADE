@@ -276,16 +276,9 @@ p {
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
-  border-radius: 50%;
-  /* 立體泡泡：左上高光點 + 染色本體 + 右下內陰影 */
-  background:
-    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.95) 0 7%, rgba(255, 255, 255, 0.35) 16%, transparent 34%),
-    radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--hue) 10%, var(--surface)) 40%, color-mix(in srgb, var(--hue) 28%, var(--surface)) 100%);
-  border: 1px solid color-mix(in srgb, var(--hue) 30%, rgba(255, 255, 255, 0.5));
-  box-shadow:
-    inset -3px -5px 10px color-mix(in srgb, var(--hue) 22%, transparent),
-    inset 2px 3px 6px rgba(255, 255, 255, 0.55),
-    0 6px 14px color-mix(in srgb, var(--hue) 22%, transparent);
+  border-radius: var(--r-mark);
+  background: color-mix(in srgb, var(--hue) 16%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--hue) 28%, transparent);
   color: var(--hue);
 }
 .mark.claude {
@@ -1377,7 +1370,7 @@ p {
   }
 }
 
-/* ── 背景層：莫蘭迪色暈 + 飄浮的肥皂泡（玻璃需要背後有東西才看得出透明感） ── */
+/* ── 背景層：莫蘭迪色暈（玻璃需要背後有顏色才看得出透明感） ── */
 .backdrop {
   position: fixed;
   inset: 0;
@@ -1429,54 +1422,13 @@ p {
   height: 40vmax;
   animation-duration: 36s;
 }
-/* 肥皂泡：透明的圓 + 左上高光 + 彩虹邊，慢慢往上飄 */
-.orb {
-  --hue: var(--blob-2);
-  position: absolute;
-  bottom: -140px;
-  width: var(--s);
-  height: var(--s);
-  left: var(--x);
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 32% 27%, rgba(255, 255, 255, 0.95) 0 5%, rgba(255, 255, 255, 0.3) 13%, transparent 30%),
-    radial-gradient(circle at 70% 76%, rgba(255, 255, 255, 0.4) 0 4%, transparent 14%),
-    radial-gradient(circle at 50% 50%, transparent 55%, color-mix(in srgb, var(--hue) 40%, transparent) 76%, rgba(255, 255, 255, 0.6) 100%);
-  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.35), 0 4px 16px color-mix(in srgb, var(--hue) 20%, transparent);
-  opacity: 0;
-  animation: rise-orb var(--d) linear var(--delay) infinite;
-}
 @keyframes drift {
   to {
     transform: translate(6vmax, 8vmax) scale(1.08);
   }
 }
-@keyframes rise-orb {
-  0% {
-    transform: translate(0, 0);
-    opacity: 0;
-  }
-  8% {
-    opacity: 0.9;
-  }
-  50% {
-    transform: translate(var(--sway), -60vh);
-  }
-  92% {
-    opacity: 0.8;
-  }
-  100% {
-    transform: translate(0, -125vh);
-    opacity: 0;
-  }
-}
 @media (prefers-reduced-transparency: reduce) {
   .backdrop {
-    display: none;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .orb {
     display: none;
   }
 }
