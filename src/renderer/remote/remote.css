@@ -12,7 +12,7 @@
  */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* 晨霧暖調 */
   --bg: #ece7df;
@@ -78,57 +78,57 @@
   --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* 暮靄冷調 */
-    --bg: #1c2023;
-    --surface: #25292d;
-    --surface-2: #2b3035;
-    --line: rgba(226, 222, 214, 0.1);
-    --line-strong: rgba(226, 222, 214, 0.18);
-    --fill: rgba(226, 222, 214, 0.07);
-    --scrim: rgba(0, 0, 0, 0.5);
-    --glass: rgba(37, 41, 45, 0.72);
+/* 淺色／深色由 App 設定決定（跟隨系統、淺色、深色），main.tsx 啟動時就把結果寫進 data-theme */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  /* 暮靄冷調 */
+  --bg: #1c2023;
+  --surface: #25292d;
+  --surface-2: #2b3035;
+  --line: rgba(226, 222, 214, 0.1);
+  --line-strong: rgba(226, 222, 214, 0.18);
+  --fill: rgba(226, 222, 214, 0.07);
+  --scrim: rgba(0, 0, 0, 0.5);
+  --glass: rgba(37, 41, 45, 0.72);
 
-    --label: #e2ded6; /* 10.9:1 */
-    --label-2: #9aa1a8; /* 5.61:1 */
-    --label-3: #737c84;
+  --label: #e2ded6; /* 10.9:1 */
+  --label-2: #9aa1a8; /* 5.61:1 */
+  --label-3: #737c84;
 
-    --accent: #79a3a3; /* 5.29:1 */
-    --accent-ink: #93bcbc; /* 5.63:1 on tint */
-    --on-accent: #1c2023; /* 5.92:1 */
+  --accent: #79a3a3; /* 5.29:1 */
+  --accent-ink: #93bcbc; /* 5.63:1 on tint */
+  --on-accent: #1c2023; /* 5.92:1 */
 
-    --wait-hue: #ce946b;
-    --wait-ink: #dcaa86; /* 5.40:1 on tint */
-    --run-hue: #76a481;
-    --run-ink: #8fbb9a; /* 5.23:1 on tint */
-    --danger: #d47772; /* 4.66:1 */
-    --danger-ink: #e8a39e; /* 染色底上 */
+  --wait-hue: #ce946b;
+  --wait-ink: #dcaa86; /* 5.40:1 on tint */
+  --run-hue: #76a481;
+  --run-ink: #8fbb9a; /* 5.23:1 on tint */
+  --danger: #d47772; /* 4.66:1 */
+  --danger-ink: #e8a39e; /* 染色底上 */
 
-    --claude: #ce946b;
-    --codex: #76a481;
-    --agy: #9f8ca9;
-    --shell: #6f92a2;
+  --claude: #ce946b;
+  --codex: #76a481;
+  --agy: #9f8ca9;
+  --shell: #6f92a2;
 
-    --term-bg: #16191c;
-    --term-fg: #e2ded6;
+  --term-bg: #16191c;
+  --term-fg: #e2ded6;
 
-    --shadow-bubble: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.35);
-    --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.4), 0 20px 48px rgba(0, 0, 0, 0.5);
+  --shadow-bubble: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 28px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.4), 0 20px 48px rgba(0, 0, 0, 0.5);
 
-    --glass-fill: linear-gradient(150deg, rgba(43, 48, 53, 0.74) 0%, rgba(43, 48, 53, 0.62) 100%);
-    --glass-strong: rgba(37, 41, 45, 0.86);
-    --glass-soft: rgba(255, 255, 255, 0.06);
-    --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-    --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 55%);
+  --glass-fill: linear-gradient(150deg, rgba(43, 48, 53, 0.74) 0%, rgba(43, 48, 53, 0.62) 100%);
+  --glass-strong: rgba(37, 41, 45, 0.86);
+  --glass-soft: rgba(255, 255, 255, 0.06);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 55%);
 
-    --blob-1: #5a4a44;
-    --blob-2: #4a5c5e;
-    --blob-3: #4d4656;
-    --blob-4: #3f5160;
-    --blob-5: #574448;
-    --blob-alpha: 0.6;
-  }
+  --blob-1: #5a4a44;
+  --blob-2: #4a5c5e;
+  --blob-3: #4d4656;
+  --blob-4: #3f5160;
+  --blob-5: #574448;
+  --blob-alpha: 0.6;
 }
 
 /* 增強對比：次要字加深、邊線加粗 */
@@ -139,8 +139,8 @@
     --line: rgba(32, 36, 40, 0.3);
   }
 }
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root {
+@media (prefers-contrast: more) {
+  :root[data-theme='dark'] {
     --label-2: #c9ced3;
     --label-3: #9aa1a8;
     --line: rgba(226, 222, 214, 0.3);

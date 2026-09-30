@@ -23,7 +23,7 @@ import {
   listLaunchers,
   type PtySessionInfo
 } from '../ipc/pty'
-import { isCliBypassPermissions, isCliEnabled } from '../ipc/settings'
+import { isCliBypassPermissions, isCliEnabled, setCliBypassPermissions } from '../ipc/settings'
 import { stripAnsi } from '../../shared/approvalDetect'
 import {
   BUILTIN_LAUNCHERS,
@@ -536,6 +536,20 @@ export class RemoteBridge {
       case 'visibility':
         c.visible = !!msg.visible
         return
+      case 'setBypass': {
+        const enabled = !!msg.enabled
+        setCliBypassPermissions(enabled)
+        audit(enabled ? 'bypass.enable' : 'bypass.disable', { deviceId: c.device?.id })
+        // 從手機打開 Bypass 是高風險變更：桌面一定要看得到
+        if (enabled && Notification.isSupported()) {
+          new Notification({
+            title: 'Bypass mode enabled',
+            body: `「${c.device?.name}」開啟了 Bypass 模式：之後啟動的 agent 不會再詢問就執行指令`
+          }).show()
+        }
+        this.broadcast(this.buildState())
+        return
+      }
       case 'attach': {
         const info = getPtySession(msg.id)
         const snapshot = subscribePty(msg.id, subKey, {

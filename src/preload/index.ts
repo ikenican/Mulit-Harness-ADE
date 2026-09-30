@@ -82,7 +82,13 @@ const api = {
     testCliPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string; resolvedPath?: string }> =>
       ipcRenderer.invoke('settings:testCliPath', path),
     testDocToolPath: (path: string): Promise<{ ok: boolean; version?: string; error?: string }> =>
-      ipcRenderer.invoke('settings:testDocToolPath', path)
+      ipcRenderer.invoke('settings:testDocToolPath', path),
+    // 設定被別處改了（例如手機遠端切換 Bypass 模式）
+    onChanged: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('settings:changed', listener)
+      return () => ipcRenderer.removeListener('settings:changed', listener)
+    }
   },
   // 自動更新與版本管理 —— main/ipc/updater.ts
   updater: {

@@ -1,4 +1,4 @@
-import { ipcMain, app } from 'electron'
+import { ipcMain, app, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import { join, dirname, resolve, basename } from 'path'
 import { execFile, exec } from 'child_process'
@@ -424,6 +424,17 @@ export function isCliEnabled(id: string): boolean {
 export function isCliBypassPermissions(): boolean {
   const s = loadSettings()
   return !!s.cliBypassPermissions
+}
+
+/**
+ * 切換 Bypass 模式（手機遠端設定用）。寫入設定後通知所有桌面視窗重新讀取，
+ * 讓桌面的設定畫面與終端面板立刻反映。只影響之後啟動的 agent。
+ */
+export function setCliBypassPermissions(enabled: boolean): void {
+  saveSettings({ ...loadSettings(), cliBypassPermissions: enabled })
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('settings:changed')
+  }
 }
 
 export function registerSettingsHandlers(): void {

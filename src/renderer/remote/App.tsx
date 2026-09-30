@@ -16,6 +16,7 @@ import {
 } from './api'
 import TerminalView from './TerminalView'
 import { ago, getLangPref, onLangChange, setLangPref, t, type LangPref } from './i18n'
+import { getThemePref, setThemePref, type ThemePref } from './theme'
 import { questionPreview } from './prompt'
 import { AgentMark, IBranch, IChevronRight, IconMark, IDesktop, IDoc, IGear, IPhone, IPlus, IShare, IWarning } from './icons'
 import { ConfirmSheet, ConnCapsule, NavBar, Sheet, Switch, useScrolled } from './ui'
@@ -299,6 +300,8 @@ function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => 
           token={token}
           host={hostName}
           connState={connState}
+          bypass={bypass}
+          onSetBypass={(enabled) => conn.send({ t: 'setBypass', enabled })}
           onClose={() => setSheet(null)}
           onUnpair={() => {
             conn.stop()
@@ -546,28 +549,35 @@ function NewTerminalSheet({
   )
 }
 
-/** 語言：三顆膠囊（跟隨系統／繁體中文／English），語言名稱用各自的語言寫，切錯了也認得回來 */
-function LanguagePicker(): JSX.Element {
-  const [value, setValue] = useState<LangPref>(getLangPref())
-  const options: Array<{ v: LangPref; label: string }> = [
-    { v: 'auto', label: t('langAuto') },
-    { v: 'zh-TW', label: '繁體中文' },
-    { v: 'en', label: 'English' }
-  ]
+/** 三選一的設定卡（語言、外觀）：選項名稱各自清楚，選中的用主色染色 */
+function OptionCard<T extends string>({
+  title,
+  footer,
+  value,
+  options,
+  onChange
+}: {
+  title: string
+  footer: string
+  value: T
+  options: Array<{ v: T; label: string }>
+  onChange: (v: T) => void
+}): JSX.Element {
+  const [current, setCurrent] = useState<T>(value)
   return (
     <>
       <div className="bubble lang-card">
-        <span className="row-main">{t('language')}</span>
-        <div className="lang-options" role="radiogroup" aria-label={t('language')}>
+        <span className="row-main">{title}</span>
+        <div className="lang-options" role="radiogroup" aria-label={title}>
           {options.map((o) => (
             <button
               key={o.v}
               role="radio"
-              aria-checked={value === o.v}
-              className={`lang-option press ${value === o.v ? 'on' : ''}`}
+              aria-checked={current === o.v}
+              className={`lang-option press ${current === o.v ? 'on' : ''}`}
               onClick={() => {
-                setValue(o.v)
-                setLangPref(o.v)
+                setCurrent(o.v)
+                onChange(o.v)
               }}
             >
               {o.label}
@@ -575,7 +585,7 @@ function LanguagePicker(): JSX.Element {
           ))}
         </div>
       </div>
-      <p className="footnote stack-gap">{t('langFooter')}</p>
+      <p className="footnote stack-gap">{footer}</p>
     </>
   )
 }
@@ -584,15 +594,20 @@ function SettingsSheet({
   token,
   host,
   connState,
+  bypass,
+  onSetBypass,
   onClose,
   onUnpair
 }: {
   token: string
   host: string
   connState: ConnState
+  bypass: boolean
+  onSetBypass: (enabled: boolean) => void
   onClose: () => void
   onUnpair: () => void
 }): JSX.Element {
+  const [confirmBypass, setConfirmBypass] = useState(false)
   const [push, setPush] = useState<'unsupported' | 'denied' | 'on' | 'off'>('off')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -667,7 +682,46 @@ function SettingsSheet({
           </ul>
         </div>
         <p className="footnote stack-gap">{footer}</p>
-        <LanguagePicker />
+        <OptionCard<ThemePref>
+          title={t('appearance')}
+          footer={t('themeFooter')}
+          value={getThemePref()}
+          options={[
+            { v: 'auto', label: t('langAuto') },
+            { v: 'light', label: t('themeLight') },
+            { v: 'dark', label: t('themeDark') }
+          ]}
+          onChange={setThemePref}
+        />
+        {/* 語言名稱用各自的語言寫，切錯了也認得回來 */}
+        <OptionCard<LangPref>
+          title={t('language')}
+          footer={t('langFooter')}
+          value={getLangPref()}
+          options={[
+            { v: 'auto', label: t('langAuto') },
+            { v: 'zh-TW', label: '繁體中文' },
+            { v: 'en', label: 'English' }
+          ]}
+          onChange={setLangPref}
+        />
+        <div className="bubble">
+          <ul className="list">
+            <li className="row">
+              <IconMark tone="danger-mark" size={32}>
+                <IWarning size={18} />
+              </IconMark>
+              <span className="row-main">{t('bypassMode')}</span>
+              <Switch
+                label={t('bypassMode')}
+                checked={bypass}
+                disabled={connState !== 'open'}
+                onChange={(v) => (v ? setConfirmBypass(true) : onSetBypass(false))}
+              />
+            </li>
+          </ul>
+        </div>
+        <p className="footnote stack-gap">{t('bypassFooter')}</p>
         {error && (
           <p className="form-error" role="alert">
             {error}
@@ -677,6 +731,18 @@ function SettingsSheet({
           {t('unpair')}
         </button>
       </Sheet>
+      {confirmBypass && (
+        <ConfirmSheet
+          title={t('bypassConfirmTitle')}
+          message={t('bypassConfirmBody')}
+          action={t('bypassEnable')}
+          onCancel={() => setConfirmBypass(false)}
+          onConfirm={() => {
+            setConfirmBypass(false)
+            onSetBypass(true)
+          }}
+        />
+      )}
       {confirm && (
         <ConfirmSheet
           title={t('unpairTitle')}

@@ -7,6 +7,7 @@ import { t } from './i18n'
 import { parsePrompt, type ParsedPrompt } from './prompt'
 import { IArrowUp, IMore, IStop } from './icons'
 import { ConfirmSheet, Menu, NavBar } from './ui'
+import { currentTheme, onThemeChange } from './theme'
 
 // 手機上的終端畫面。
 //
@@ -30,7 +31,7 @@ const KEYS: Array<{ label: string; name: string; seq: string }> = [
 const FONT = "ui-monospace, 'SF Mono', Menlo, monospace"
 
 function termTheme(): Record<string, string> {
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  const dark = currentTheme() === 'dark'
   return dark
     ? { background: '#00000000', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
     : { background: '#00000000', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
@@ -178,11 +179,15 @@ export default function TerminalView({
     })
     if (conn.state === 'open') conn.send({ t: 'attach', id })
     window.addEventListener('resize', fitFont)
+    const offTheme = onThemeChange(() => {
+      term.options.theme = termTheme()
+    })
 
     return () => {
       off()
       offState()
       window.removeEventListener('resize', fitFont)
+      offTheme()
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       conn.send({ t: 'detach', id })
       // 接管過尺寸就還給電腦

@@ -75,7 +75,16 @@ const zh = {
   hours: '{n} 小時',
   language: '語言',
   langAuto: '跟隨系統',
-  langFooter: '「跟隨系統」會依 iPhone 的語言設定自動選擇。'
+  langFooter: '「跟隨系統」會依 iPhone 的語言設定自動選擇。',
+  appearance: '外觀',
+  themeLight: '淺色',
+  themeDark: '深色',
+  themeFooter: '「跟隨系統」會隨 iPhone 的淺色／深色模式自動切換。',
+  bypassMode: 'Bypass 模式',
+  bypassFooter: '開啟後，之後啟動的 Claude Code、Codex、Antigravity 會直接執行指令，不再詢問。已經在跑的 agent 不受影響。這個設定和電腦上的「CLI 工具與 Agent → Bypass」是同一個。',
+  bypassConfirmTitle: '開啟 Bypass 模式？',
+  bypassConfirmBody: 'Agent 將不經你同意就修改檔案、執行指令。電腦上會跳出通知。',
+  bypassEnable: '開啟 Bypass 模式'
 }
 
 const en: typeof zh = {
@@ -145,7 +154,16 @@ const en: typeof zh = {
   hours: '{n} hr',
   language: 'Language',
   langAuto: 'System',
-  langFooter: 'System follows your iPhone’s language setting.'
+  langFooter: 'System follows your iPhone’s language setting.',
+  appearance: 'Appearance',
+  themeLight: 'Light',
+  themeDark: 'Dark',
+  themeFooter: 'System switches with your iPhone’s Light/Dark mode.',
+  bypassMode: 'Bypass Mode',
+  bypassFooter: 'When on, Claude Code, Codex and Antigravity started from now on run commands without asking. Agents already running aren’t affected. This is the same setting as CLI & Agents → Bypass on your computer.',
+  bypassConfirmTitle: 'Turn on Bypass Mode?',
+  bypassConfirmBody: 'Agents will edit files and run commands without your approval. Your computer will show a notification.',
+  bypassEnable: 'Turn On Bypass Mode'
 }
 
 // 語言：跟隨系統（預設）、繁中或英文，存在這支手機的 localStorage

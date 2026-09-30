@@ -48,6 +48,8 @@ export type ClientMessage =
   | { t: 'handoff'; windowId: number }
   | { t: 'git'; windowId: number }
   | { t: 'visibility'; visible: boolean }
+  /** 手機切換 Bypass 模式（只影響之後啟動的 agent） */
+  | { t: 'setBypass'; enabled: boolean }
   | { t: 'ping' }
 
 export type ServerMessage =

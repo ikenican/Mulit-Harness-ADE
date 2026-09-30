@@ -131,7 +131,8 @@ Security model:
   attempts. Devices get a random token; only its SHA-256 is stored. Revoking a device
   disconnects it immediately.
 - A paired phone has full terminal control, including starting new agents (which honour
-  Bypass Mode). The title bar shows a phone badge whenever a device is connected, and
+  Bypass Mode) and turning Bypass Mode on or off. Turning it on from the phone asks for
+  confirmation and shows a notification on the computer. The title bar shows a phone badge whenever a device is connected, and
   pair / connect / spawn / kill events are written to `remote/audit.log` in the app's
   user-data folder (keystrokes are never logged).
 - Push notifications are end-to-end encrypted to the phone (RFC 8291) and relayed by
@@ -298,7 +299,7 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 
 - 本機 CA 帶 critical 的 X.509 Name Constraints，只能簽私有 IPv4 與 `*.local`；即使私鑰外洩也簽不出能在手機上冒充公開網站的憑證。私鑰以 OS 金鑰（Electron `safeStorage`）加密。「重設憑證與所有裝置」會產生新的 CA。
 - 配對碼一次性、5 分鐘失效、錯 10 次作廢。裝置取得隨機 token，本機只存 SHA-256；撤銷裝置會立即斷線。
-- 已配對的手機擁有完整終端控制權，包括開新的 agent（會套用 Bypass 模式）。有裝置連線時標題列會顯示手機標示；配對、連線、開關終端等事件記錄在 app 使用者資料夾的 `remote/audit.log`（不記錄任何輸入內容）。
+- 已配對的手機擁有完整終端控制權，包括開新的 agent（會套用 Bypass 模式）與開關 Bypass 模式；從手機開啟 Bypass 需先確認，電腦上會跳出通知。有裝置連線時標題列會顯示手機標示；配對、連線、開關終端等事件記錄在 app 使用者資料夾的 `remote/audit.log`（不記錄任何輸入內容）。
 - 推播內容以 RFC 8291 端對端加密給手機，經 Apple 推播服務轉送，因此推播需要電腦能連網；其餘流量都只在區網內。
 
 開發模式下，手機端頁面取自 build 產物：用 `npm run dev` 測試前請先執行一次 `npm run build`。
