@@ -649,7 +649,8 @@ export class RemoteBridge {
         cols: s.cols,
         rows: s.rows,
         needsApproval: s.needsApproval,
-        lastOutputAt: s.lastOutputAt
+        lastOutputAt: s.lastOutputAt,
+        approvalTail: s.needsApproval ? stripAnsi((getPtyScrollback(s.id) || '').slice(-2000)) : undefined
       }))
     const remoteWindows: RemoteWindow[] = windows.map((e) => ({
       id: e.window.id,

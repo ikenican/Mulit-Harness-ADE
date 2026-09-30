@@ -1,60 +1,87 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
 import type { RemoteConnection } from './conn'
 import { t } from './i18n'
+import { parsePrompt, type ParsedPrompt } from './prompt'
+import { IArrowUp, IEllipsis, IHand, IStop } from './icons'
+import { ConfirmSheet, Menu, NavBar } from './ui'
 
 // 手機上的終端畫面。
 //
-// 預設「鏡像」：xterm 的欄列數跟桌面 pty 一致，只把字縮小到塞得進螢幕寬度，
-// 桌面畫面完全不受影響。按「符合螢幕」才會真的把 pty resize 成手機尺寸（桌面會跟著變窄），
-// 離開畫面或再按一次就還原成原本的大小。
+// 「閱讀」（預設）：從 xterm 的畫面緩衝讀出文字，依手機寬度換行、用正常字級顯示——
+//   電腦上的終端是 100 多欄，硬縮到手機寬度字會小到 6px，讀不了。
+// 「終端」：原樣鏡像（字縮小塞進螢幕寬），要看表格、進度條等排版時用。
 //
-// 輸入不直接打進 xterm（iOS 軟鍵盤對 xterm 的隱藏 textarea 很不穩），改用下方輸入框 + 特殊鍵列。
+// 輸入不直接打進 xterm（iOS 軟鍵盤對 xterm 的隱藏 textarea 很不穩），改用下方輸入框與按鍵列。
 
-const KEYS: Array<{ label: string; seq: string }> = [
-  { label: 'esc', seq: '\x1b' },
-  { label: 'tab', seq: '\t' },
-  { label: '⇧tab', seq: '\x1b[Z' },
-  { label: '^C', seq: '\x03' },
-  { label: '↑', seq: '\x1b[A' },
-  { label: '↓', seq: '\x1b[B' },
-  { label: '←', seq: '\x1b[D' },
-  { label: '→', seq: '\x1b[C' },
-  { label: 'y', seq: 'y' },
-  { label: 'n', seq: 'n' },
-  { label: '^D', seq: '\x04' },
-  { label: '/', seq: '/' }
+const KEYS: Array<{ label: string; name: string; seq: string }> = [
+  { label: 'esc', name: 'Escape', seq: '\x1b' },
+  { label: 'tab', name: 'Tab', seq: '\t' },
+  { label: '⇧tab', name: 'Shift Tab', seq: '\x1b[Z' },
+  { label: '⌃C', name: 'Control C', seq: '\x03' },
+  { label: '↑', name: 'Up', seq: '\x1b[A' },
+  { label: '↓', name: 'Down', seq: '\x1b[B' },
+  { label: '←', name: 'Left', seq: '\x1b[D' },
+  { label: '→', name: 'Right', seq: '\x1b[C' }
 ]
+
+const FONT = "ui-monospace, 'SF Mono', Menlo, monospace"
 
 function termTheme(): Record<string, string> {
   const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
   return dark
-    ? { background: '#000000', foreground: '#e5e5ea', cursor: '#e5e5ea', selectionBackground: '#3a3a3c' }
-    : { background: '#ffffff', foreground: '#1c1c1e', cursor: '#1c1c1e', selectionBackground: '#d1d1d6' }
+    ? { background: '#0b0b0f', foreground: '#e5e5ea', cursor: '#e5e5ea', selectionBackground: '#3a3a3c' }
+    : { background: '#fbfbfd', foreground: '#1c1c1e', cursor: '#1c1c1e', selectionBackground: '#d1d1d6' }
 }
 
-/** 等寬字的「字寬 / 字級」比例，用來算要多小的字才塞得進 cols 欄 */
 let charRatio = 0
-function monoCharRatio(fontFamily: string): number {
+function monoCharRatio(): number {
   if (charRatio) return charRatio
   const ctx = document.createElement('canvas').getContext('2d')
   if (!ctx) return 0.6
-  ctx.font = `100px ${fontFamily}`
+  ctx.font = `100px ${FONT}`
   charRatio = ctx.measureText('W'.repeat(10)).width / 1000 || 0.6
   return charRatio
 }
 
-const FONT = "ui-monospace, 'SF Mono', Menlo, monospace"
+type Line = { kind: 'text'; text: string } | { kind: 'rule' }
 
-/** 從 xterm 畫面讀最後幾行非空白文字，給審批卡片顯示提示內容 */
-function screenTail(term: Terminal, lines: number): string {
+const BOX_ONLY = /^[\s│┃║╭╮╰╯┌┐└┘├┤┬┴┼─━═┏┓┗┛▔▁]+$/
+const EDGE = /^[\s│┃║]+|[\s│┃║]+$/g
+
+/** 讀出 xterm 緩衝的最後 N 行邏輯行：接回自動折行、去掉框線、多個空行合併 */
+function readBuffer(term: Terminal, max = 600): Line[] {
+  const buf = term.buffer.active
+  const raw: string[] = []
+  for (let y = 0; y < buf.length; y++) {
+    const line = buf.getLine(y)
+    if (!line) continue
+    const s = line.translateToString(true)
+    if (line.isWrapped && raw.length) raw[raw.length - 1] += s
+    else raw.push(s)
+  }
+  while (raw.length && !raw[raw.length - 1].trim()) raw.pop()
+  const out: Line[] = []
+  for (const r of raw.slice(-max)) {
+    if (r.trim() && BOX_ONLY.test(r)) {
+      if (out[out.length - 1]?.kind !== 'rule') out.push({ kind: 'rule' })
+      continue
+    }
+    const text = r.replace(EDGE, '')
+    const prev = out[out.length - 1]
+    if (!text && (!prev || (prev.kind === 'text' && !prev.text) || prev.kind === 'rule')) continue
+    out.push({ kind: 'text', text })
+  }
+  return out
+}
+
+function screenText(term: Terminal, lines = 24): string {
   const buf = term.buffer.active
   const out: string[] = []
-  for (let y = buf.baseY + buf.cursorY; y >= 0 && out.length < lines; y--) {
-    const line = buf.getLine(y)?.translateToString(true).trimEnd()
-    if (line) out.unshift(line)
+  for (let y = Math.max(0, buf.baseY + buf.cursorY - lines); y <= buf.baseY + buf.cursorY; y++) {
+    out.push(buf.getLine(y)?.translateToString(true) ?? '')
   }
   return out.join('\n')
 }
@@ -62,38 +89,60 @@ function screenTail(term: Terminal, lines: number): string {
 export default function TerminalView({
   conn,
   session,
+  hostName,
   exitCode,
   onBack
 }: {
   conn: RemoteConnection
   session: RemoteSession
+  hostName: string
   exitCode: number | undefined
   onBack: () => void
 }): JSX.Element {
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const hostRef = useRef<HTMLDivElement>(null)
-  const termRef = useRef<Terminal | null>(null)
-  const originalSize = useRef<{ cols: number; rows: number } | null>(null)
-  const stickBottom = useRef(true)
-  const [fit, setFit] = useState(false)
-  const [text, setText] = useState('')
-  const [tail, setTail] = useState('')
   const id = session.id
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const xtermHost = useRef<HTMLDivElement>(null)
+  const termRef = useRef<Terminal | null>(null)
+  const opened = useRef(false)
+  const originalSize = useRef<{ cols: number; rows: number } | null>(null)
+  const stick = useRef(true)
+  const [mode, setMode] = useState<'read' | 'term'>('read')
+  const [lines, setLines] = useState<Line[]>([])
+  const [prompt, setPrompt] = useState<ParsedPrompt | null>(null)
+  const [answered, setAnswered] = useState(false)
+  const [fit, setFit] = useState(false)
+  const [menu, setMenu] = useState(false)
+  const [confirmEnd, setConfirmEnd] = useState(false)
+  const [text, setText] = useState('')
+  const modeRef = useRef(mode)
+  modeRef.current = mode
 
-  // 依目前 pty 欄數把字縮到剛好塞進螢幕寬
-  const fitFont = (): void => {
+  const fitFont = useCallback((): void => {
     const term = termRef.current
-    const wrap = wrapRef.current
-    if (!term || !wrap) return
-    const width = wrap.clientWidth - 8
-    const size = Math.max(5, Math.min(13, Math.floor((width / (term.cols * monoCharRatio(FONT))) * 10) / 10))
+    const body = bodyRef.current
+    if (!term || !body || !opened.current) return
+    const size = Math.max(6, Math.min(14, Math.floor(((body.clientWidth - 12) / (term.cols * monoCharRatio())) * 10) / 10))
     if (term.options.fontSize !== size) term.options.fontSize = size
+  }, [])
+
+  const toBottom = (): void => {
+    const b = bodyRef.current
+    if (b && stick.current) b.scrollTop = b.scrollHeight
   }
 
-  const scrollToBottom = (): void => {
-    const wrap = wrapRef.current
-    if (wrap && stickBottom.current) wrap.scrollTop = wrap.scrollHeight
-  }
+  // 輸出很密時合併成每 120ms 重畫一次
+  const refreshTimer = useRef<number | null>(null)
+  const refresh = useCallback((): void => {
+    if (refreshTimer.current) return
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = null
+      const term = termRef.current
+      if (!term) return
+      if (modeRef.current === 'read') setLines(readBuffer(term))
+      setPrompt(parsePrompt(screenText(term)))
+      requestAnimationFrame(toBottom)
+    }, 120)
+  }, [])
 
   useEffect(() => {
     const term = new Terminal({
@@ -107,63 +156,92 @@ export default function TerminalView({
       theme: termTheme()
     })
     termRef.current = term
-    term.open(hostRef.current!)
-    fitFont()
-
-    const refreshTail = (): void => setTail(screenTail(term, 8))
 
     const off = conn.onMessage((m: ServerMessage) => {
       if (m.t === 'snapshot' && m.id === id) {
         term.reset()
         term.resize(m.cols, m.rows)
         fitFont()
-        term.write(m.data, () => {
-          refreshTail()
-          scrollToBottom()
-        })
+        term.write(m.data, refresh)
       } else if (m.t === 'data' && m.id === id) {
-        term.write(m.d, () => {
-          refreshTail()
-          scrollToBottom()
-        })
+        term.write(m.d, refresh)
       } else if (m.t === 'resized' && m.id === id) {
         term.resize(m.cols, m.rows)
         fitFont()
+        refresh()
       }
     })
-    // 連上（或背景回來重連）就重新 attach：伺服器會重送 snapshot
+    // 連上（或從背景回來重連）就重新 attach：伺服器會重送 snapshot
     const offState = conn.onState((s) => {
       if (s === 'open') conn.send({ t: 'attach', id })
     })
     if (conn.state === 'open') conn.send({ t: 'attach', id })
-
-    const onResize = (): void => fitFont()
-    window.addEventListener('resize', onResize)
+    window.addEventListener('resize', fitFont)
 
     return () => {
       off()
       offState()
-      window.removeEventListener('resize', onResize)
+      window.removeEventListener('resize', fitFont)
+      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       conn.send({ t: 'detach', id })
-      // 有接管尺寸就還給桌面
-      if (originalSize.current) {
-        conn.send({ t: 'resize', id, ...originalSize.current })
-        originalSize.current = null
-      }
+      // 接管過尺寸就還給電腦
+      if (originalSize.current) conn.send({ t: 'resize', id, ...originalSize.current })
       term.dispose()
       termRef.current = null
+      opened.current = false
     }
   }, [id])
 
+  // 第一次切到「終端」才真的把 xterm 掛上 DOM（在隱藏狀態下 open 會量不到字寬）
+  useEffect(() => {
+    const term = termRef.current
+    if (mode === 'term' && term && xtermHost.current && !opened.current) {
+      term.open(xtermHost.current)
+      opened.current = true
+      fitFont()
+    }
+    if (mode === 'read' && term) setLines(readBuffer(term))
+    stick.current = true
+    requestAnimationFrame(toBottom)
+  }, [mode])
+
+  // 新的審批出現就重新可以按
+  useEffect(() => {
+    if (session.needsApproval) setAnswered(false)
+  }, [session.needsApproval])
+
+  const send = (seq: string): void => {
+    stick.current = true
+    conn.send({ t: 'input', id, data: seq })
+  }
+
+  // 文字與 Enter 分兩次送：Claude Code 會把同一批到達的「文字＋換行」當成貼上，變成插入換行而不是送出。
+  // 多行文字用 bracketed paste 包起來。
+  const submit = (): void => {
+    const value = text
+    setText('')
+    if (!value) return send('\r')
+    send(value.includes('\n') ? `\x1b[200~${value}\x1b[201~` : value)
+    window.setTimeout(() => send('\r'), 60)
+  }
+
+  const answer = (key: string): void => {
+    setAnswered(true)
+    send(key)
+  }
+
   const toggleFit = (): void => {
-    const wrap = wrapRef.current
-    if (!wrap) return
+    const body = bodyRef.current
+    if (!body) return
     if (!fit) {
       originalSize.current = { cols: session.cols, rows: session.rows }
-      const fontSize = 11
-      const cols = Math.floor((wrap.clientWidth - 8) / (fontSize * monoCharRatio(FONT)))
-      const rows = Math.floor((wrap.clientHeight - 8) / (fontSize * 1.2))
-      conn.send({ t: 'resize', id, cols, rows })
+      const px = 12 * monoCharRatio()
+      conn.send({
+        t: 'resize',
+        id,
+        cols: Math.max(40, Math.floor((body.clientWidth - 32) / px)),
+        rows: Math.max(12, Math.floor((body.clientHeight - 12) / 17))
+      })
       setFit(true)
     } else {
       if (originalSize.current) conn.send({ t: 'resize', id, ...originalSize.current })
@@ -172,126 +250,165 @@ export default function TerminalView({
     }
   }
 
-  const sendRaw = (seq: string): void => {
-    stickBottom.current = true
-    conn.send({ t: 'input', id, data: seq })
-  }
-
-  // 文字與 Enter 分兩次送：部分 CLI（例如 Claude Code）會把同一批到達的「文字+換行」當成貼上，
-  // 變成插入換行而不是送出。多行文字用 bracketed paste 包起來，避免每行都被當成一次送出。
-  const submit = (): void => {
-    const value = text
-    setText('')
-    if (!value) return sendRaw('\r')
-    const payload = value.includes('\n') ? `\x1b[200~${value}\x1b[201~` : value
-    sendRaw(payload)
-    window.setTimeout(() => sendRaw('\r'), 60)
-  }
-
-  const kill = (): void => {
-    if (window.confirm(t('killConfirm', { title: session.title }))) {
-      conn.send({ t: 'kill', id })
-      onBack()
-    }
-  }
-
   const exited = exitCode !== undefined
+  const showApproval = session.needsApproval && !exited && !answered
 
   return (
-    <div className="term-screen">
-      <header className="bar">
-        <button className="bar-btn" onClick={onBack} aria-label={t('back')}>
-          ‹ {t('back')}
-        </button>
-        <div className="bar-title">
-          <span>{session.title}</span>
-          <small>{session.workspaceName}</small>
-        </div>
-        <div className="bar-actions">
-          <button className={`chip ${fit ? 'on' : ''}`} onClick={toggleFit} disabled={exited}>
-            {t('fit')}
+    <div className="session">
+      <NavBar
+        title={session.title}
+        subtitle={session.workspaceName}
+        backLabel={hostName}
+        onBack={onBack}
+        trailing={
+          <button className="icon-btn" aria-label={t('more')} aria-haspopup="menu" onClick={() => setMenu(true)} disabled={exited}>
+            <IEllipsis size={24} />
           </button>
-          <button className="chip danger" onClick={kill} disabled={exited} aria-label={t('kill')}>
-            ✕
+        }
+      >
+        <div className="segmented" role="group">
+          <button aria-pressed={mode === 'read'} onClick={() => setMode('read')}>
+            {t('read')}
+          </button>
+          <button aria-pressed={mode === 'term'} onClick={() => setMode('term')}>
+            {t('terminal')}
           </button>
         </div>
-      </header>
+      </NavBar>
 
       <div
-        className="term-wrap"
-        ref={wrapRef}
+        className="session-body"
+        ref={bodyRef}
         onScroll={(e) => {
           const el = e.currentTarget
-          stickBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
         }}
       >
-        <div ref={hostRef} className="term-host" />
+        <div className="reader" hidden={mode !== 'read'} aria-live="off">
+          {lines.map((l, i) => (l.kind === 'rule' ? <div key={i} className="rule" /> : <div key={i} className="ln">{l.text}</div>))}
+        </div>
+        <div className="xterm-box" hidden={mode !== 'term'} ref={xtermHost} />
       </div>
 
-      {exited && <div className="exit-note">{t('exited', { code: exitCode })}</div>}
-
-      {session.needsApproval && !exited && (
-        <div className="approval-card" role="alert">
-          <div className="approval-head">⏳ {t('approvalTitle', { title: session.title })}</div>
-          <pre className="approval-tail">{tail}</pre>
-          <div className="approval-actions">
-            <button className="btn primary" onClick={() => sendRaw('1')}>
-              1
-            </button>
-            <button className="btn" onClick={() => sendRaw('2')}>
-              2
-            </button>
-            <button className="btn" onClick={() => sendRaw('3')}>
-              3
-            </button>
-            <button className="btn" onClick={() => sendRaw('\r')}>
-              ⏎
-            </button>
-            <button className="btn" onClick={() => sendRaw('\x1b')}>
-              esc
-            </button>
+      {exited ? (
+        <div className="ended" role="status">
+          <IStop size={18} /> {t('exited', { code: exitCode })}
+        </div>
+      ) : (
+        <div className="dock glass">
+          <div className="dock-inner">
+            {showApproval && <Approval title={session.title} prompt={prompt} onAnswer={answer} />}
+            <div className="keys" role="toolbar" aria-label={t('otherKeys')}>
+              {KEYS.map((k) => (
+                <button key={k.label} className="key" aria-label={k.name} onClick={() => send(k.seq)}>
+                  {k.label}
+                </button>
+              ))}
+            </div>
+            <form
+              className="composer"
+              onSubmit={(e) => {
+                e.preventDefault()
+                submit()
+              }}
+            >
+              <div className="composer-field">
+                <textarea
+                  value={text}
+                  rows={1}
+                  aria-label={t('composer')}
+                  placeholder={t('composer')}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint="send"
+                  onChange={(e) => {
+                    setText(e.target.value)
+                    e.target.style.height = 'auto'
+                    e.target.style.height = `${e.target.scrollHeight}px`
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault()
+                      submit()
+                    }
+                  }}
+                />
+                <button type="submit" className="send" aria-label={t('send')}>
+                  <span>
+                    <IArrowUp size={18} />
+                  </span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {!exited && (
-        <div className="input-dock">
-          <div className="keys" role="toolbar">
-            {KEYS.map((k) => (
-              <button key={k.label} className="key" onClick={() => sendRaw(k.seq)}>
-                {k.label}
-              </button>
-            ))}
-          </div>
-          <form
-            className="composer"
-            onSubmit={(e) => {
-              e.preventDefault()
-              submit()
-            }}
-          >
-            <textarea
-              value={text}
-              rows={1}
-              placeholder={t('composer')}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              enterKeyHint="send"
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault()
-                  submit()
-                }
-              }}
-            />
-            <button type="submit" className="send" aria-label={t('send')}>
-              ↑
-            </button>
-          </form>
-        </div>
+      {menu && (
+        <Menu
+          onClose={() => setMenu(false)}
+          items={[
+            { label: t('fitWidth'), note: t('fitWidthNote'), checked: fit, onSelect: toggleFit },
+            { label: t('endSession'), destructive: true, icon: <IStop size={20} />, onSelect: () => setConfirmEnd(true) }
+          ]}
+        />
+      )}
+      {confirmEnd && (
+        <ConfirmSheet
+          title={t('endConfirmTitle', { title: session.title })}
+          message={t('endConfirmBody')}
+          action={t('endSession')}
+          onCancel={() => setConfirmEnd(false)}
+          onConfirm={() => {
+            setConfirmEnd(false)
+            conn.send({ t: 'kill', id })
+            onBack()
+          }}
+        />
       )}
     </div>
+  )
+}
+
+/**
+ * 審批面板：這個 App 的招牌。把 CLI 畫面上的問題、要執行的內容、每個選項的原文
+ * 直接做成按鈕——在手機上一眼看懂要答應什麼，點一下就回覆。
+ * CLI 目前選取的預設選項用主要樣式；解析不出選項時退回數字鍵。
+ */
+function Approval({
+  title,
+  prompt,
+  onAnswer
+}: {
+  title: string
+  prompt: ParsedPrompt | null
+  onAnswer: (key: string) => void
+}): JSX.Element {
+  const options = prompt?.options.length
+    ? prompt.options
+    : ['1', '2', '3'].map((k, i) => ({ key: k, label: k, selected: i === 0 }))
+  const primary = options.findIndex((o) => o.selected)
+  return (
+    <section className="approval" role="alertdialog" aria-labelledby="approval-q">
+      <div className="approval-kicker">
+        <IHand size={16} />
+        {t('wants', { title })}
+      </div>
+      {prompt?.question && (
+        <p id="approval-q" className="approval-q">
+          {prompt.question}
+        </p>
+      )}
+      {prompt && prompt.details.length > 0 && <pre className="approval-details">{prompt.details.join('\n')}</pre>}
+      <div className="choices">
+        {options.map((o, i) => (
+          <button key={o.key + i} className={`choice ${i === (primary === -1 ? 0 : primary) ? 'prominent' : ''}`} onClick={() => onAnswer(o.key)}>
+            <kbd aria-hidden="true">{o.key === '\x1b' ? 'esc' : o.key}</kbd>
+            <span>{o.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
   )
 }

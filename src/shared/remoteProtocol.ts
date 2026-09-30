@@ -14,6 +14,8 @@ export interface RemoteSession {
   rows: number
   needsApproval: boolean
   lastOutputAt: number
+  /** 等待審批時附上畫面尾段（已去 ANSI），首頁卡片用來預覽問題 */
+  approvalTail?: string
 }
 
 export interface RemoteLauncher {

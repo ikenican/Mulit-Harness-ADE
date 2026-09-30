@@ -5,6 +5,7 @@ import * as crypto from 'node:crypto'
 import * as tls from 'node:tls'
 import { createCa, issueServerCert, certCovers, isPrivateIPv4 } from '../src/main/remote/certs.ts'
 import { encryptPayload, generateVapidKeys, vapidAuthHeader } from '../src/main/remote/webpush.ts'
+import { parsePrompt, questionPreview } from '../src/renderer/remote/prompt.ts'
 
 // —— 私有網段判斷 ——
 assert.ok(isPrivateIPv4('192.168.1.20'))
@@ -83,5 +84,41 @@ assert.ok(
   )
 )
 assert.equal(JSON.parse(Buffer.from(m[2], 'base64url').toString()).aud, 'https://web.push.apple.com')
+
+// —— 審批提示解析：手機把選項顯示成有文字的按鈕 ——
+const claudeScreen = [
+  '╭──────────────────────────────────────────────╮',
+  '│ Bash command                                  │',
+  '│                                               │',
+  '│   rm -rf build/                               │',
+  '│   Remove the build directory                  │',
+  '│                                               │',
+  '│ Do you want to proceed?                       │',
+  '│ ❯ 1. Yes                                      │',
+  "│   2. Yes, and don't ask again for rm commands │",
+  '│      in this project                          │',
+  '│   3. No, and tell Claude what to do           │',
+  '│      differently (esc)                        │',
+  '╰──────────────────────────────────────────────╯'
+].join('\n')
+const cp = parsePrompt(claudeScreen)!
+assert.equal(cp.question, 'Do you want to proceed?')
+assert.deepEqual(cp.details, ['rm -rf build/', 'Remove the build directory'])
+assert.deepEqual(
+  cp.options.map((o) => [o.key, o.label, o.selected]),
+  [
+    ['1', 'Yes', true],
+    ['2', "Yes, and don't ask again for rm commands in this project", false],
+    ['3', 'No, and tell Claude what to do differently', false]
+  ]
+)
+const codex = parsePrompt('Allow command?\n$ npm test\n› 1. Yes, proceed (y)\n  2. Always (a)\n  3. No (esc)')!
+assert.deepEqual(codex.options.map((o) => o.key), ['y', 'a', '3'])
+assert.equal(codex.options[2].label, 'No')
+assert.equal(codex.question, 'Allow command?')
+const yn = parsePrompt('some output\nOverwrite file? [y/N]')!
+assert.deepEqual(yn.options.map((o) => [o.key, o.selected]), [['y', false], ['n', true]])
+assert.equal(parsePrompt('just output\n1. not a menu'), null)
+assert.equal(questionPreview('foo\n│ Do you want to proceed? │\n│ ❯ 1. Yes │'), 'Do you want to proceed?')
 
 console.log('remote ok')
