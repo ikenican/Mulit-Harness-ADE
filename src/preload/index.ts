@@ -179,6 +179,22 @@ const api = {
     // 讀取 agents/*.yaml launcher 定義
     launchers: (): Promise<CliLauncher[]> => ipcRenderer.invoke('pty:launchers')
   },
+  // 手機遠端控制（區網 Remote Bridge）—— main/remote/index.ts
+  remote: {
+    status: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
+    setEnabled: (enabled: boolean): Promise<RemoteStatus> => ipcRenderer.invoke('remote:setEnabled', enabled),
+    setPort: (port: number): Promise<RemoteStatus> => ipcRenderer.invoke('remote:setPort', port),
+    qr: (text: string): Promise<string> => ipcRenderer.invoke('remote:qr', text),
+    createPairing: (): Promise<RemotePairingInfo | null> => ipcRenderer.invoke('remote:createPairing'),
+    devices: (): Promise<RemoteDeviceInfo[]> => ipcRenderer.invoke('remote:devices'),
+    revokeDevice: (id: string): Promise<boolean> => ipcRenderer.invoke('remote:revokeDevice', id),
+    resetTrust: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:resetTrust'),
+    onStatusChange: (cb: (status: RemoteStatus) => void): (() => void) => {
+      const listener = (_e: unknown, status: RemoteStatus): void => cb(status)
+      ipcRenderer.on('remote:status', listener)
+      return () => ipcRenderer.removeListener('remote:status', listener)
+    }
+  },
   // 視窗管理（獨立彈出終端等）
   window: {
     detachTerminal: (): Promise<boolean> => ipcRenderer.invoke('window:openTerminalWindow'),
@@ -505,6 +521,33 @@ export interface ConnectionInfo {
   usedBy: string[]
 }
 
+export interface RemoteStatus {
+  enabled: boolean
+  running: boolean
+  port: number
+  addresses: string[]
+  /** 手機 PWA 網址（https） */
+  appUrl: string | null
+  /** 安裝 CA 憑證的設定頁（http） */
+  setupUrl: string | null
+  caFingerprint: string | null
+  connectedDevices: string[]
+  error: string | null
+}
+export interface RemotePairingInfo {
+  code: string
+  expiresAt: number
+  pairUrl: string | null
+  pairQr: string | null
+}
+export interface RemoteDeviceInfo {
+  id: string
+  name: string
+  createdAt: number
+  lastSeenAt: number
+  pushEnabled: boolean
+  online: boolean
+}
 export interface RemoteSpawnedPty {
   ptyId: string
   /** 與 renderer 的 launcherKey 相同：claude / codex / antigravity / powershell / cmd 或自訂 launcher id */

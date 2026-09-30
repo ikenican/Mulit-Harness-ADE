@@ -109,6 +109,11 @@ export function subscribePty(id: string, key: string, sub: PtySubscriber): strin
   return e.scrollback
 }
 
+/** 目前的 scrollback（不訂閱），給審批卡片擷取提示文字用 */
+export function getPtyScrollback(id: string): string | null {
+  return entries.get(id)?.scrollback ?? null
+}
+
 export function unsubscribePty(id: string, key: string): void {
   entries.get(id)?.subs.delete(key)
 }
