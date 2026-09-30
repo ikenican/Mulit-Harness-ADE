@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added / 新增
+- **iPhone 遠端控制（區網）**（設定 → 遠端控制）：同一個 Wi-Fi 下用 iPhone 查看並操作 CLI 終端。
+  - 加入主畫面的 PWA：終端清單（依視窗分組、顯示「等待回覆／執行中／閒置」）、鏡像終端畫面、審批卡片（1／2／3／⏎／esc）、特殊鍵列與輸入框、Handoff 與 Git 狀態檢視。
+  - 可從手機開新的 Claude Code／Codex／Antigravity／Shell，桌面同步出現對應分頁並可接手。
+  - Web Push 通知：agent 等待審批或任務結束時推播，點通知直接開到該終端。
+  - 安全：本機 CA 帶 Name Constraints（只能簽私有 IP 與 `*.local`）、一次性配對碼、裝置 token 只存雜湊、可隨時撤銷、只接受區網來源、標題列顯示連線中的手機、audit log。
+
+### Changed / 變更
+- pty 輸出改為可多方訂閱（桌面視窗與手機同時接收），並保留最後 256KB 畫面供中途接上的裝置補畫面；待審批偵測移到 main process，桌面與手機共用同一份規則（`src/shared/approvalDetect.ts`）。
+
+---
+
 ## [0.1.22] - 2026-09-29
 
 ### Changed / 變更
