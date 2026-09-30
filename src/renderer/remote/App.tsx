@@ -15,7 +15,7 @@ import {
   setToken
 } from './api'
 import TerminalView from './TerminalView'
-import { ago, t } from './i18n'
+import { ago, getLangPref, onLangChange, setLangPref, t, type LangPref } from './i18n'
 import { questionPreview } from './prompt'
 import { AgentMark, IBranch, IChevronRight, IconMark, IDesktop, IDoc, IGear, IPhone, IPlus, IShare, IWarning } from './icons'
 import { ConfirmSheet, ConnCapsule, NavBar, Sheet, Switch, useScrolled } from './ui'
@@ -49,6 +49,9 @@ function Backdrop(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
+  // 切換語言時整棵樹重畫（不重新掛載，連線與目前畫面都保留）
+  const [, setLangTick] = useState(0)
+  useEffect(() => onLangChange(() => setLangTick((n) => n + 1)), [])
   return (
     <>
       <Backdrop />
@@ -543,6 +546,40 @@ function NewTerminalSheet({
   )
 }
 
+/** 語言：三顆膠囊（跟隨系統／繁體中文／English），語言名稱用各自的語言寫，切錯了也認得回來 */
+function LanguagePicker(): JSX.Element {
+  const [value, setValue] = useState<LangPref>(getLangPref())
+  const options: Array<{ v: LangPref; label: string }> = [
+    { v: 'auto', label: t('langAuto') },
+    { v: 'zh-TW', label: '繁體中文' },
+    { v: 'en', label: 'English' }
+  ]
+  return (
+    <>
+      <div className="bubble lang-card">
+        <span className="row-main">{t('language')}</span>
+        <div className="lang-options" role="radiogroup" aria-label={t('language')}>
+          {options.map((o) => (
+            <button
+              key={o.v}
+              role="radio"
+              aria-checked={value === o.v}
+              className={`lang-option press ${value === o.v ? 'on' : ''}`}
+              onClick={() => {
+                setValue(o.v)
+                setLangPref(o.v)
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="footnote stack-gap">{t('langFooter')}</p>
+    </>
+  )
+}
+
 function SettingsSheet({
   token,
   host,
@@ -630,6 +667,7 @@ function SettingsSheet({
           </ul>
         </div>
         <p className="footnote stack-gap">{footer}</p>
+        <LanguagePicker />
         {error && (
           <p className="form-error" role="alert">
             {error}

@@ -72,7 +72,10 @@ const zh = {
   unpairBody: '之後要在電腦上產生新的配對碼才能再連線。',
   justNow: '剛剛',
   minutes: '{n} 分鐘',
-  hours: '{n} 小時'
+  hours: '{n} 小時',
+  language: '語言',
+  langAuto: '跟隨系統',
+  langFooter: '「跟隨系統」會依 iPhone 的語言設定自動選擇。'
 }
 
 const en: typeof zh = {
@@ -139,10 +142,56 @@ const en: typeof zh = {
   unpairBody: 'You’ll need a new pairing code from your computer to connect again.',
   justNow: 'just now',
   minutes: '{n} min',
-  hours: '{n} hr'
+  hours: '{n} hr',
+  language: 'Language',
+  langAuto: 'System',
+  langFooter: 'System follows your iPhone’s language setting.'
 }
 
-const dict = /^zh/i.test(navigator.language) ? zh : en
+// 語言：跟隨系統（預設）、繁中或英文，存在這支手機的 localStorage
+export type LangPref = 'auto' | 'zh-TW' | 'en'
+const LANG_KEY = 'aw.remote.lang'
+
+function readPref(): LangPref {
+  try {
+    const v = localStorage.getItem(LANG_KEY)
+    return v === 'zh-TW' || v === 'en' ? v : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+
+let pref: LangPref = readPref()
+let dict = resolve(pref)
+const listeners = new Set<() => void>()
+
+function resolve(p: LangPref): typeof zh {
+  const zhOn = p === 'zh-TW' || (p === 'auto' && /^zh/i.test(navigator.language))
+  document.documentElement.lang = zhOn ? 'zh-Hant' : 'en'
+  return zhOn ? zh : en
+}
+
+export function getLangPref(): LangPref {
+  return pref
+}
+
+export function setLangPref(p: LangPref): void {
+  pref = p
+  dict = resolve(p)
+  try {
+    if (p === 'auto') localStorage.removeItem(LANG_KEY)
+    else localStorage.setItem(LANG_KEY, p)
+  } catch {
+    // 寫不進去就只在這次生效
+  }
+  for (const cb of listeners) cb()
+}
+
+/** 語言切換時讓整個畫面重畫 */
+export function onLangChange(cb: () => void): () => void {
+  listeners.add(cb)
+  return () => listeners.delete(cb)
+}
 
 export type Key = keyof typeof zh
 
