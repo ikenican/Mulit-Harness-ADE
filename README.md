@@ -107,6 +107,7 @@ src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
 
 Settings → **Remote Control** turns on a small HTTPS server inside the app that only
 accepts connections from private LAN addresses (10/8, 172.16/12, 192.168/16).
+On Windows, allow **Private networks** when the firewall asks the first time.
 
 1. **Trust this computer (once).** Scan the first QR code with the iPhone Camera and open
    it in Safari. Download the profile, install it (Settings → General → VPN & Device
@@ -286,7 +287,7 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 
 ## iPhone 遠端控制
 
-設定 → **遠端控制** 會在 app 內啟動一個小型 HTTPS 伺服器，只接受私有區網位址（10/8、172.16/12、192.168/16）連線。
+設定 → **遠端控制** 會在 app 內啟動一個小型 HTTPS 伺服器，只接受私有區網位址（10/8、172.16/12、192.168/16）連線。Windows 第一次開啟時防火牆會詢問，請允許「私人網路」。
 
 1. **信任這台電腦（只需一次）**：用 iPhone 相機掃第一個 QR code，在 Safari 開啟。下載描述檔並安裝（設定 → 一般 → VPN 與裝置管理），再到 設定 → 一般 → 關於本機 → 憑證信任設定 打開完全信任。iOS 只允許在「可信任的 HTTPS」下使用主畫面 App、Service Worker 與推播，所以需要這一步。
 2. **安裝 App**：用 Safari 開啟 App 網址 → 分享 → **加入主畫面**。

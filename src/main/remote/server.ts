@@ -61,6 +61,17 @@ const PAIR_MAX_FAILURES = 10
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // 去掉易混淆的 0/O、1/I/L
 const PUSH_SUBJECT = 'https://github.com/zkylek1212-k/Mulit-Harness-ADE'
 const DIRECT_KEYS = new Set(BUILTIN_LAUNCHERS.map((l) => l.key))
+// 只送推播到已知的推播服務，避免訂閱被拿來讓桌面對任意網址發請求
+const PUSH_HOSTS = [/^web\.push\.apple\.com$/, /^fcm\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /\.notify\.windows\.com$/]
+
+function isPushEndpoint(endpoint: unknown): boolean {
+  try {
+    const u = new URL(String(endpoint))
+    return u.protocol === 'https:' && PUSH_HOSTS.some((re) => re.test(u.hostname))
+  } catch {
+    return false
+  }
+}
 
 interface Client {
   connId: string
@@ -378,7 +389,7 @@ export class RemoteBridge {
       if (!device) return sendJson(res, 401, { error: 'unauthorized' })
       const body = await readBody(req)
       const sub = body.subscription as PushSubscriptionJSON | null
-      if (sub && (typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('https://') || !sub.keys?.p256dh || !sub.keys?.auth)) {
+      if (sub && (!isPushEndpoint(sub.endpoint) || !sub.keys?.p256dh || !sub.keys?.auth)) {
         return sendJson(res, 400, { error: 'bad subscription' })
       }
       updateDevice(device.id, { push: sub || undefined })
