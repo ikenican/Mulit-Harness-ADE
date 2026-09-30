@@ -11,6 +11,7 @@ import SettingsModal from '@/components/SettingsModal'
 import Splitter from '@/components/Splitter'
 import VibeRail from '@/components/VibeRail'
 import VibeUsageBar from '@/components/VibeUsageBar'
+import RemoteIndicator from '@/components/RemoteIndicator'
 import {
   IconSidebarCollapse,
   IconSidebarExpand,
@@ -332,6 +333,8 @@ export default function App(): JSX.Element {
             </button>
           </div>
           )}
+
+          <RemoteIndicator />
 
           {/* Vibe 模式的設定鈕在左側圖示列最下方 */}
           {!isVibe && (

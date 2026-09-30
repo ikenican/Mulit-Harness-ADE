@@ -1010,3 +1010,23 @@ export function IconServer({ size = 15, className, style }: IconProps): JSX.Elem
     </svg>
   )
 }
+
+export function IconPhone({ size = 15, className, style }: IconProps): JSX.Element {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={style}
+    >
+      <rect x="6" y="2" width="12" height="20" rx="2.5" ry="2.5" />
+      <line x1="11" y1="18" x2="13" y2="18" />
+    </svg>
+  )
+}
