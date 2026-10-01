@@ -69,7 +69,10 @@ export default function App(): JSX.Element {
     uiMode,
     browserRequest,
     detectedDevUrl,
-    agentBusy
+    agentBusy,
+    workspaceRoot,
+    liveAgentSessionIds,
+    agentModifiedFiles
   } = useWorkbench()
   const isVibe = uiMode === 'vibe'
   // Vibe 模式左欄只當任務看板（Dashboard）；Files / Git 收起，程式碼改由中欄「程式碼」分頁看 diff
@@ -77,6 +80,16 @@ export default function App(): JSX.Element {
   const [center, setCenter] = useState<CenterTab>(isVibe ? 'browser' : 'editor')
   const [browserOpened, setBrowserOpened] = useState(false)
   const { t } = useTranslation()
+
+  useEffect(() => {
+    window.api.remote.reportVibeStatus({
+      workspace: workspaceRoot,
+      agentBusy,
+      agentCount: liveAgentSessionIds.length,
+      devUrl: detectedDevUrl?.url || null,
+      changedFiles: [...agentModifiedFiles]
+    })
+  }, [workspaceRoot, agentBusy, liveAgentSessionIds, detectedDevUrl, agentModifiedFiles])
 
   // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
   // 設定被別處改了（手機遠端切換 Bypass 等）→ 讓各面板重新讀取

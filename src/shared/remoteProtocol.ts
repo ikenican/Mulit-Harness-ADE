@@ -1,6 +1,17 @@
 // 遠端控制（手機 ↔ 桌面 Remote Bridge）的 WebSocket 訊息格式。
 // 桌面 main（src/main/remote/server.ts）與手機端（src/renderer/remote/）共用這份型別。
 // 每則訊息都是 JSON，以 `t` 區分種類。
+import type { BgTask, FsEntry } from '../preload/index'
+
+export interface RemoteVibeStatus {
+  workspace: string
+  agentBusy: boolean
+  agentCount: number
+  devUrl: string | null
+  changedFiles: string[]
+}
+
+export type RemoteFileEntry = FsEntry
 
 export interface RemoteSession {
   id: string
@@ -59,6 +70,9 @@ export type ClientMessage =
   | { t: 'kill'; id: string }
   | { t: 'handoff'; windowId: number }
   | { t: 'git'; windowId: number }
+  | { t: 'status'; windowId: number }
+  | { t: 'files'; windowId: number; path: string }
+  | { t: 'file'; windowId: number; path: string }
   /** 請桌面開啟（或聚焦）某個最近用過的工作區，開起來才有視窗可以派 agent */
   | { t: 'openWorkspace'; path: string }
   /** 要一個預覽網址（桌面會發一次性 ticket，手機把它放進 iframe） */
@@ -90,6 +104,9 @@ export type ServerMessage =
   | { t: 'spawned'; id: string }
   | { t: 'handoff'; windowId: number; text: string | null }
   | { t: 'preview'; id: string; url: string | null; error?: string }
+  | { t: 'status'; windowId: number; status: RemoteVibeStatus | null; bgTasks: BgTask[]; error?: string }
+  | { t: 'files'; windowId: number; path: string; entries: RemoteFileEntry[]; error?: string }
+  | { t: 'file'; windowId: number; path: string; kind: 'markdown' | 'html' | 'pdf' | 'text'; text: string | null; url: string | null; error?: string }
   | {
       t: 'git'
       windowId: number

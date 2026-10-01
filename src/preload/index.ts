@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { RemoteVibeStatus } from '../shared/remoteProtocol'
 
 // ── Workbench IPC 契約（唯一整合縫合處）────────────────────────────────
 // 所有 renderer panel 一律透過 window.api.* 呼叫；main 端各 handler 檔各自實作。
@@ -188,6 +189,7 @@ const api = {
   },
   // 手機遠端控制（區網 Remote Bridge）—— main/remote/index.ts
   remote: {
+    reportVibeStatus: (status: RemoteVibeStatus): void => ipcRenderer.send('remote:vibeStatus', status),
     status: (): Promise<RemoteStatus> => ipcRenderer.invoke('remote:status'),
     setEnabled: (enabled: boolean): Promise<RemoteStatus> => ipcRenderer.invoke('remote:setEnabled', enabled),
     setPort: (port: number): Promise<RemoteStatus> => ipcRenderer.invoke('remote:setPort', port),
