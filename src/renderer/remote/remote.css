@@ -529,8 +529,12 @@ p {
 }
 .stack {
   display: grid;
+  width: 100%;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+}
+.stack > * {
+  min-width: 0;
 }
 
 /* 一個終端 = 一顆泡泡 */
@@ -1071,6 +1075,7 @@ p {
 }
 .session-body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -1104,12 +1109,14 @@ p {
   border-top: 1px dashed var(--line-strong);
 }
 .xterm-scroll {
-  overflow-x: auto;
+  width: 100%;
 }
 .xterm-box {
+  width: 100%;
+  min-width: 0;
+}
+.xterm-box .xterm {
   padding: 10px;
-  width: max-content;
-  min-width: 100%;
 }
 /* 成品預覽：iframe 吃滿剩下的高度，和輸出泡泡同一個圓角 */
 .preview-pane {

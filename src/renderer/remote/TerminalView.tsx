@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
 import type { RemoteConnection } from './conn'
@@ -13,7 +14,7 @@ import { currentTheme, onThemeChange } from './theme'
 //
 // 「閱讀」（預設）：從 xterm 的畫面緩衝讀出文字，依手機寬度換行、用正常字級顯示——
 //   電腦上的終端是 100 多欄，硬縮到手機寬度字會小到 6px，讀不了。
-// 「終端」：原樣鏡像（字縮小塞進螢幕寬），要看表格、進度條等排版時用。
+// 「終端」：依實際字元尺寸調整 PTY 欄數，讓 CLI 在手機寬度重新排版。
 //
 // 輸入不直接打進 xterm（iOS 軟鍵盤對 xterm 的隱藏 textarea 很不穩），改用下方輸入框與按鍵列。
 
@@ -35,16 +36,6 @@ function termTheme(): Record<string, string> {
   return dark
     ? { background: '#00000000', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
     : { background: '#00000000', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
-}
-
-let charRatio = 0
-function monoCharRatio(): number {
-  if (charRatio) return charRatio
-  const ctx = document.createElement('canvas').getContext('2d')
-  if (!ctx) return 0.6
-  ctx.font = `100px ${FONT}`
-  charRatio = ctx.measureText('W'.repeat(10)).width / 1000 || 0.6
-  return charRatio
 }
 
 type Line = { kind: 'text'; text: string } | { kind: 'rule' }
@@ -105,6 +96,7 @@ export default function TerminalView({
   const xtermHost = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const opened = useRef(false)
+  const fitAddon = useRef<FitAddon | null>(null)
   const originalSize = useRef<{ cols: number; rows: number } | null>(null)
   const stick = useRef(true)
   const [mode, setMode] = useState<'read' | 'term' | 'preview'>('read')
@@ -112,48 +104,26 @@ export default function TerminalView({
   const [lines, setLines] = useState<Line[]>([])
   const [prompt, setPrompt] = useState<ParsedPrompt | null>(null)
   const [answered, setAnswered] = useState(false)
-  const [fit, setFit] = useState(false)
   const [menu, setMenu] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [text, setText] = useState('')
   const modeRef = useRef(mode)
   modeRef.current = mode
-  const fitRef = useRef(false)
-  fitRef.current = fit
-  const autoFitDone = useRef(false)
-
-  const fitFont = useCallback((): void => {
+  const applyFit = useCallback((): void => {
     const term = termRef.current
     const body = bodyRef.current
-    if (!term || !body || !opened.current) return
-    const width = (xtermHost.current?.parentElement?.clientWidth || body.clientWidth - 24) - 20
-    const size = Math.max(6, Math.min(14, Math.floor((width / (term.cols * monoCharRatio())) * 10) / 10))
-    if (term.options.fontSize !== size) term.options.fontSize = size
-  }, [])
-
-  /**
-   * 把 pty 的欄數改成手機放得下的寬度。
-   * 只縮字級沒有用：桌面開的 session 是 120 欄，要塞進手機得用 5px 以下的字，
-   * 字級下限是 6px，所以畫面一定會超出去、只能左右拖。真正要改的是欄數。
-   * 回傳有沒有真的送出 resize（本來就放得下就不去動電腦的尺寸）。
-   */
-  const applyFit = useCallback((): boolean => {
-    const body = bodyRef.current
-    if (!body || !body.clientWidth) return false
-    const width = (xtermHost.current?.parentElement?.clientWidth || body.clientWidth - 24) - 20
-    const px = 12 * monoCharRatio()
-    const cols = Math.max(10, Math.floor(width / px))
-    const rows = Math.max(12, Math.floor((body.clientHeight - 12) / 17))
-    const current = termRef.current?.cols ?? session.cols
-    if (cols >= current) return false
-    if (!originalSize.current) originalSize.current = { cols: session.cols, rows: session.rows }
+    const host = xtermHost.current
+    if (!term || !body || !host || !opened.current || modeRef.current !== 'term') return
+    host.style.height = `${Math.max(80, body.clientHeight - 14)}px`
+    const size = fitAddon.current?.proposeDimensions()
+    if (!size) return
+    const cols = Math.min(500, Math.max(10, size.cols))
+    const rows = Math.min(200, Math.max(5, size.rows))
+    if (term.cols === cols && term.rows === rows) return
+    if (!originalSize.current) originalSize.current = { cols: term.cols, rows: term.rows }
+    // Fit locally immediately, even while reconnecting. The PTY reflows on resize.
+    term.resize(cols, rows)
     conn.send({ t: 'resize', id, cols, rows })
-    return true
-  }, [conn, id, session.cols, session.rows])
-
-  const restoreSize = useCallback((): void => {
-    if (originalSize.current) conn.send({ t: 'resize', id, ...originalSize.current })
-    originalSize.current = null
   }, [conn, id])
 
   const toBottom = (): void => {
@@ -180,7 +150,7 @@ export default function TerminalView({
       cols: session.cols,
       rows: session.rows,
       fontFamily: FONT,
-      fontSize: 9,
+      fontSize: 12,
       disableStdin: true,
       cursorBlink: false,
       scrollback: 5000,
@@ -188,18 +158,25 @@ export default function TerminalView({
       theme: termTheme()
     })
     termRef.current = term
+    const addon = new FitAddon()
+    term.loadAddon(addon)
+    fitAddon.current = addon
+    // Fonts and device pixel ratio can change xterm's measured cell after open.
+    const rendered = term.onRender(applyFit)
 
     const off = conn.onMessage((m: ServerMessage) => {
       if (m.t === 'snapshot' && m.id === id) {
         term.reset()
         term.resize(m.cols, m.rows)
-        fitFont()
-        term.write(m.data, refresh)
+        term.write(m.data, () => {
+          applyFit()
+          refresh()
+        })
       } else if (m.t === 'data' && m.id === id) {
         term.write(m.d, refresh)
       } else if (m.t === 'resized' && m.id === id) {
         term.resize(m.cols, m.rows)
-        fitFont()
+        applyFit()
         refresh()
       } else if (m.t === 'preview' && m.id === id) {
         setPreview({ url: m.url, error: m.url ? null : m.error || 'preview unavailable' })
@@ -210,7 +187,6 @@ export default function TerminalView({
       if (s === 'open') conn.send({ t: 'attach', id })
     })
     if (conn.state === 'open') conn.send({ t: 'attach', id })
-    window.addEventListener('resize', fitFont)
     const offTheme = onThemeChange(() => {
       term.options.theme = termTheme()
     })
@@ -218,7 +194,7 @@ export default function TerminalView({
     return () => {
       off()
       offState()
-      window.removeEventListener('resize', fitFont)
+      rendered.dispose()
       offTheme()
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       conn.send({ t: 'detach', id })
@@ -227,6 +203,7 @@ export default function TerminalView({
       originalSize.current = null
       term.dispose()
       termRef.current = null
+      fitAddon.current = null
       opened.current = false
     }
   }, [id])
@@ -237,35 +214,26 @@ export default function TerminalView({
     if (mode === 'term' && term && xtermHost.current && !opened.current) {
       term.open(xtermHost.current)
       opened.current = true
-      fitFont()
     }
-    // 進終端就自動配合手機寬度，不必先去選單按一次；使用者關掉後不再自動開回來
-    if (mode === 'term' && !autoFitDone.current) {
-      autoFitDone.current = true
-      if (applyFit()) setFit(true)
-    }
+    if (mode === 'term') applyFit()
     if (mode === 'read' && term) setLines(readBuffer(term))
     stick.current = true
     requestAnimationFrame(toBottom)
-  }, [mode, applyFit, fitFont])
+  }, [mode, applyFit])
 
-  // 轉向、鍵盤收合之後寬度變了：fit 開著就重算欄數（節流，避免連續 resize 洗 pty）
+  // The body changes on rotation and when the mobile keyboard/dock opens.
   useEffect(() => {
-    let timer: number | null = null
-    const onResize = (): void => {
-      if (!fitRef.current) return
-      if (timer) window.clearTimeout(timer)
-      timer = window.setTimeout(() => {
-        timer = null
-        applyFit()
-      }, 250)
-    }
-    window.addEventListener('resize', onResize)
-    window.addEventListener('orientationchange', onResize)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const observer = new ResizeObserver(() => {
+      clearTimeout(timer)
+      timer = setTimeout(applyFit, 100)
+    })
+    if (bodyRef.current) observer.observe(bodyRef.current)
+    document.fonts.addEventListener('loadingdone', applyFit)
     return () => {
-      if (timer) window.clearTimeout(timer)
-      window.removeEventListener('resize', onResize)
-      window.removeEventListener('orientationchange', onResize)
+      clearTimeout(timer)
+      observer.disconnect()
+      document.fonts.removeEventListener('loadingdone', applyFit)
     }
   }, [applyFit])
 
@@ -292,15 +260,6 @@ export default function TerminalView({
   const answer = (key: string): void => {
     setAnswered(true)
     send(key)
-  }
-
-  const toggleFit = (): void => {
-    if (fit) {
-      restoreSize()
-      setFit(false)
-    } else if (applyFit()) {
-      setFit(true)
-    }
   }
 
   const exited = exitCode !== undefined
@@ -434,7 +393,6 @@ export default function TerminalView({
         <Menu
           onClose={() => setMenu(false)}
           items={[
-            { label: t('fitWidth'), note: t('fitWidthNote'), checked: fit, onSelect: toggleFit },
             { label: t('endSession'), destructive: true, icon: <IStop size={20} />, onSelect: () => setConfirmEnd(true) }
           ]}
         />

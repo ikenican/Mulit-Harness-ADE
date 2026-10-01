@@ -15,7 +15,7 @@ import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
 import { looksLikeApprovalPrompt } from './approvalDetect'
 import { detectDevUrl } from './portDetect'
-import { focusTerm, isComposing, trackComposition } from './imeGuard'
+import { focusTerm, isComposing, isImeKey, trackComposition } from './imeGuard'
 import AgentMark from '@/components/AgentMark'
 import {
   IconPlus,
@@ -549,12 +549,8 @@ export default function TerminalPanel(): JSX.Element {
       term.loadAddon(fitAddon)
 
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-        // 1. IME 組字保護：正在組字（注音、拼音、倉頡…）就完全放行給瀏覽器／IME，切勿攔截。
-        // isComposing 在「開始組字的那一下」還是 false，所以要一起認輸入法的 keydown
-        // （Chromium 給 key='Process'、keyCode=229）；漏掉的話 xterm 的組字狀態機會被我們切斷。
-        if (isComposing(term) || e.isComposing || e.key === 'Process' || e.keyCode === 229) {
-          return true
-        }
+        // false skips xterm's key processing without preventing the browser/IME.
+        if (isImeKey(term, e)) return false
 
         // 2. Ctrl+C (Windows/Linux) 或 Cmd+C (macOS)：
         // 若終端有選取文字，執行複製到剪貼簿並阻止發送 SIGINT (\x03) 給 pty，避免中斷終端執行
@@ -2094,7 +2090,8 @@ function TerminalInstance({
   // 從隱藏變回顯示時（display:none 期間尺寸為 0），重新 fit 一次
   useEffect(() => {
     if (!isVisible || !mounted.current) return
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      if (isComposing(session.term)) return
       try {
         session.fitAddon.fit()
         const pid = ptyIdRef.current || session.ptyId
@@ -2106,6 +2103,7 @@ function TerminalInstance({
         /* 尺寸尚未穩定時忽略 */
       }
     }, 0)
+    return () => clearTimeout(timer)
   }, [isVisible, isActive])
 
   return (
