@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.26] - 2026-10-01
+
+### Fixed
+- Wrap Windows Claude Code MCP servers launched with `npx` in `cmd.exe /c` to prevent startup connection failures.
+
 All notable changes to the Agent Workbench project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
