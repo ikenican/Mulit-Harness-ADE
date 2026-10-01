@@ -123,7 +123,8 @@ const api = {
     deleteWorkspace: (workspacePath: string, sessionIds?: string[]): Promise<boolean> =>
       ipcRenderer.invoke('dashboard:deleteWorkspace', workspacePath, sessionIds),
     unmarkWorkspace: (workspacePath: string): Promise<boolean> =>
-      ipcRenderer.invoke('dashboard:unmarkWorkspace', workspacePath)
+      ipcRenderer.invoke('dashboard:unmarkWorkspace', workspacePath),
+    bgTasks: (workspacePath: string): Promise<BgTask[]> => ipcRenderer.invoke('dashboard:bgTasks', workspacePath)
   },
   // Git —— main/ipc/git.ts
   git: {
@@ -385,6 +386,17 @@ export interface WindowUsage {
 export type UsageRange = 'all' | '30d' | '7d' | '1d'
 
 /** input 含 cache 寫入；cacheRead 另計（Claude 計費約原價一成）；output 為模型輸出 */
+/** Agent 背景任務（背景指令／subagent）；status 為 running、completed、failed 或 Agent 回報的其他狀態 */
+export interface BgTask {
+  agent: AgentId
+  id: string
+  desc: string
+  startedAt: string
+  status: string
+  summary?: string
+  endedAt?: string
+}
+
 export interface UsageBucket {
   input: number
   cacheRead: number

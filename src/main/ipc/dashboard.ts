@@ -14,9 +14,10 @@ import {
   notifyJumpListUpdate,
   setOnRecentWorkspaceAdded
 } from './settings'
-import type { AgentId, DashboardData, AgentSessionInfo, DashboardWorkspaceInfo } from '../../preload/index'
+import type { AgentId, BgTask, DashboardData, AgentSessionInfo, DashboardWorkspaceInfo } from '../../preload/index'
 import { scanAllUsage, fileDays } from './usage'
 import { sumDays } from './usageParse'
+import { claudeBgTasks, codexBgTasks, antigravityBgTasks } from './bgTasksParse'
 
 const H = homedir()
 
@@ -1164,7 +1165,80 @@ setOnRecentWorkspaceAdded((dir) => {
   unmarkDeletedOrArchivedWorkspace(dir)
 })
 
+const bgCache = new Map<string, { mtimeMs: number; tasks: BgTask[] }>()
+/** 路徑比對用：斜線統一、小寫、去尾斜線（JSON 跳脫過的 \\\\ 也會收成一個 /） */
+const normPath = (s: string): string => s.replace(/[\\/]+/g, '/').toLowerCase().replace(/\/$/, '')
+
+function listFiles(dir: string, filter: (name: string) => boolean): string[] {
+  try {
+    return fs.readdirSync(dir).filter(filter).map((n) => join(dir, n))
+  } catch {
+    return []
+  }
+}
+
+/** 這個工作區 12 小時內有寫入的 Claude／Codex／Antigravity 會話裡的背景任務（新到舊） */
+function scanBgTasks(workspacePath: string): BgTask[] {
+  const root = normPath(workspacePath)
+  if (!root) return []
+  // ponytail: 會話中途被關掉的任務不會有結束通知，最多卡成「執行中」12 小時；要精準再比對 live 會話 id
+  const since = Date.now() - 12 * 3600_000
+  const sources: { files: string[]; parse: (text: string) => BgTask[]; belongs: (text: string) => boolean }[] = []
+
+  // Claude：~/.claude/projects/<工作區 slug>/*.jsonl，目錄本身就代表工作區
+  const projectsDir = join(H, '.claude', 'projects')
+  const slug = normalizeForClaude(workspacePath.replace(/[\\/]+$/, '')).toLowerCase()
+  const claudeDir = listFiles(projectsDir, (n) => n.toLowerCase() === slug)[0]
+  if (claudeDir) sources.push({ files: listFiles(claudeDir, (n) => n.endsWith('.jsonl')), parse: claudeBgTasks, belongs: () => true })
+
+  // Codex：第一行 session_meta 的 cwd
+  sources.push({
+    files: findCodexRolloutFiles(30).filter((f) => f.mtime >= since).map((f) => f.path),
+    parse: codexBgTasks,
+    belongs: (text) => {
+      try {
+        const cwd = normPath(JSON.parse(text.slice(0, text.indexOf('\n'))).payload?.cwd || '')
+        return cwd === root || cwd.startsWith(root + '/')
+      } catch {
+        return false
+      }
+    }
+  })
+
+  // Antigravity：沒有固定的 cwd 欄位，以工具參數裡出現過這個工作區路徑為準
+  sources.push({
+    files: ['antigravity-ide', 'antigravity-cli', 'antigravity'].flatMap((d) =>
+      listFiles(join(H, '.gemini', d, 'brain'), (n) => !n.startsWith('.')).map((p) =>
+        join(p, '.system_generated', 'logs', 'transcript.jsonl')
+      )
+    ),
+    parse: antigravityBgTasks,
+    belongs: (text) => normPath(text).includes(root)
+  })
+
+  const out: BgTask[] = []
+  for (const { files, parse, belongs } of sources) {
+    for (const p of files) {
+      try {
+        const { mtimeMs } = fs.statSync(p)
+        if (mtimeMs < since) continue
+        const key = `${root}|${p}`
+        let c = bgCache.get(key)
+        if (c?.mtimeMs !== mtimeMs) {
+          const text = fs.readFileSync(p, 'utf8')
+          bgCache.set(key, (c = { mtimeMs, tasks: belongs(text) ? parse(text) : [] }))
+        }
+        out.push(...c.tasks)
+      } catch {
+        // 不存在、寫入中或被刪，跳過
+      }
+    }
+  }
+  return out.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+}
+
 export function registerDashboardHandlers(): void {
+  ipcMain.handle('dashboard:bgTasks', (_e, workspacePath: string) => scanBgTasks(workspacePath || ''))
   // 只要 token 用量（Vibe 終端上方狀態列用），不跑整套 session 掃描
   ipcMain.handle('dashboard:usage', () => scanAllUsage())
 

@@ -122,6 +122,10 @@
   gap: var(--space-2);
   padding: var(--space-5) var(--space-6);
 }
+/* 子項不得被壓縮：.vibe-file 有 overflow:hidden，min-height 會變 0，檔案一多就被擠到看不見；改由外層捲動 */
+.vibe-card-body > * {
+  flex-shrink: 0;
+}
 
 .vibe-agent {
   margin-left: auto;
@@ -204,6 +208,38 @@
 }
 .vibe-file:hover {
   background: var(--bg3);
+}
+
+/* 背景任務列：running 綠點閃爍、completed 灰點、其他（failed/killed）紅點 */
+.vibe-bg {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 2px var(--space-3);
+  color: var(--fg-dim);
+}
+.vibe-bg.running {
+  color: var(--fg);
+}
+.vibe-bg.running .vibe-dot {
+  background: var(--green);
+  opacity: 1;
+  animation: vibe-pulse 1.2s ease-in-out infinite;
+}
+.vibe-bg:not(.running):not(.completed) .vibe-dot {
+  background: var(--red);
+  opacity: 1;
+}
+.vibe-bg-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vibe-bg-time {
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .vibe-task {
