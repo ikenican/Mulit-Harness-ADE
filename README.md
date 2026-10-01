@@ -29,7 +29,8 @@ React + Vite.
 - **Fast Startup & Mount-on-Demand** — 42x accelerated cold startup powered by disk-persisted session caches and lazy-loaded sidebar/central panels.
 - **Bilingual i18n** — full interface localization supporting seamless toggling between Strict English and Traditional Chinese.
 - **CLI Permissions & Bypass Mode** — toggleable bypass mode skipping interactive approval prompts for Claude Code (`--permission-mode bypassPermissions`), Codex (`--dangerously-bypass-approvals-and-sandbox`), and Antigravity (`--dangerously-skip-permissions`).
-- **iPhone Remote Control (LAN)** — watch and answer your CLI agents from an iPhone on the same Wi-Fi: a Home Screen web app lists every terminal, mirrors its output, shows an approval card with one-tap answers, lets you type or start new agents, and sends a notification when an agent needs you. See [iPhone remote control](#iphone-remote-control).
+- **iPhone Remote Control (LAN)** — watch and answer your CLI agents from an iPhone on the same Wi-Fi: a Home Screen web app lists every terminal, mirrors its output, shows an approval card with one-tap answers, lets you type or start new agents, and sends a notification when an agent needs you. It can also open one of your recent workspaces on the computer and start an agent inside it, fits the terminal to the phone's width automatically, previews the dev server a terminal printed, and remembers up to three computers to switch between. See [iPhone remote control](#iphone-remote-control).
+- **Architecture overview** — how the desktop app, the phone app and the remote bridge fit together: [`docs/architecture.html`](docs/architecture.html) (open it in a browser).
 
 ## Installation
 
@@ -97,9 +98,13 @@ Installer output goes to `release/`. Build config is in `electron-builder.yml`.
 ## Project layout
 
 ```
-src/main       Electron main process (IPC, git, pty, files, extensions)
-src/preload    the single IPC contract surface
-src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
+src/main         Electron main process (IPC, git, pty, files, extensions)
+src/main/remote  LAN remote bridge: HTTPS + WebSocket, local CA, web push, preview proxy
+src/preload      the single IPC contract surface
+src/renderer/src React UI (editor / git / terminal / preview / dashboard panels)
+src/renderer/remote  the iPhone web app (second Vite entry, served by the bridge)
+src/shared       types and logic both sides use (remote protocol, detectors)
+docs/architecture.html  end-to-end architecture overview
 .project-memory  shared cross-agent memory (handoff, protocol, decisions)
 ```
 
@@ -108,6 +113,10 @@ src/renderer   React UI (editor / git / terminal / preview / dashboard panels)
 Settings → **Remote Control** turns on a small HTTPS server inside the app that only
 accepts connections from private LAN addresses (10/8, 172.16/12, 192.168/16).
 On Windows, allow **Private networks** when the firewall asks the first time.
+
+Three ports are used, starting from the one in Settings (default `47600`): the port itself
+serves the phone app and its WebSocket, `port + 1` serves only the plain-HTTP page that
+installs the CA certificate, and `port + 2` serves the dev-server preview proxy.
 
 1. **Trust this computer (once).** Scan the first QR code with the iPhone Camera and open
    it in Safari. Download the profile, install it (Settings → General → VPN & Device
@@ -120,6 +129,29 @@ On Windows, allow **Private networks** when the firewall asks the first time.
    with Safari, so pair from the Home Screen app.
 4. Optional: in the app's settings, turn on notifications to get an alert when an agent
    is waiting for approval or a task finishes.
+
+What you can do from the phone:
+
+- **Per workspace.** Each project window on the computer is its own section, with its
+  terminals, its handoff notes (`.project-memory/handoff.md` of *that* workspace) and its
+  Git status. Recent workspaces that have no window appear under **Other Workspaces** —
+  tapping one opens it on the computer and goes straight to *New Terminal*.
+- **Read / Terminal / Preview.** *Read* reflows the terminal output for a phone screen
+  (soft wraps joined, TUI borders removed); *Terminal* is the real xterm you type into and
+  it fits itself to the phone's width by default — there is nothing to scroll sideways
+  (turn it off in the ⋯ menu to see the computer's own width); *Preview* appears when the
+  terminal printed a local dev-server URL and shows that site, proxied over HTTPS.
+- **Approval cards.** When an agent stops to ask, the question and its options become
+  buttons, and *Running / Waiting / Idle* is decided by the computer, not by the phone's
+  clock.
+- **Up to three computers, one at a time.** The phone remembers up to three computers. The
+  title on the home screen is a dropdown that switches between them **without reloading** —
+  the app just points its WebSocket at the computer you picked. Add one by its LAN address
+  (Settings → *Computers* → Add Computer, or from the pairing screen), pair with it once,
+  and rename or forget it from the same list. Two things to know: install each computer's
+  certificate on the phone once (the pairing screen links straight to that computer's
+  certificate page if it can't reach it), and notifications only arrive from the computer
+  that serves the app, because a Web Push subscription is tied to one address.
 
 Security model:
 
@@ -138,6 +170,16 @@ Security model:
 - Push notifications are end-to-end encrypted to the phone (RFC 8291) and relayed by
   Apple's push service, so the computer needs internet access for them; everything else
   stays on the LAN.
+- The preview proxy never exposes a dev server on its own. It only forwards to
+  `127.0.0.1`, only to a port that one of your terminals actually printed, and every
+  request needs a cookie that can only be obtained with a single-use ticket issued over
+  the authenticated WebSocket (60-second lifetime). Opening a workspace from the phone is
+  restricted to the computer's own recent-workspace list.
+- Because the phone can switch computers inside one app, the WebSocket handshake accepts
+  two kinds of origin: this computer's own app, and the same app served from another
+  private-LAN address. Passing that check only gets a socket — it is still dropped after
+  five seconds without a valid device token, and pairing over the socket has the same
+  single-use code, 5-minute expiry and 10-attempt lockout as before.
 
 In development, the phone client is served from the build output: run `npm run build`
 once before testing it with `npm run dev`.
@@ -214,7 +256,8 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **極速啟動與按需掛載**——檔案 mtime 持久化快取與面板按需載入（Mount-on-Demand），開機掃描效能大幅提升 42 倍。
 - **雙語系支援**——全系統支援嚴謹英文與繁體中文介面即時無縫切換。
 - **CLI 啟動權限與略過模式**——全域開關支援切換 AI 代理（Claude Code、Codex、Antigravity）略過互動式審批確認模式，提升自動化執行流暢度。
-- **iPhone 遠端控制（區網）**——在同一個 Wi-Fi 下用 iPhone 查看並回覆 CLI agent：加入主畫面的 App 會列出所有終端、同步顯示輸出、用審批卡片一鍵回覆、可以輸入或開新的 agent，agent 等你回覆時會推播通知。詳見下方〈iPhone 遠端控制〉。
+- **iPhone 遠端控制（區網）**——在同一個 Wi-Fi 下用 iPhone 查看並回覆 CLI agent：加入主畫面的 App 會列出所有終端、同步顯示輸出、用審批卡片一鍵回覆、可以輸入或開新的 agent，agent 等你回覆時會推播通知。也可以請電腦開啟最近用過的工作區並在裡面開 agent、終端會自動配合手機寬度、預覽終端印出的 dev server，並記住最多三台電腦切換。詳見下方〈iPhone 遠端控制〉。
+- **架構總覽**——桌面程式、手機程式與遠端橋接怎麼接在一起：[`docs/architecture.html`](docs/architecture.html)（用瀏覽器開啟）。
 
 ## 安裝指南
 
@@ -280,9 +323,13 @@ npm run release    # （僅限專案維護者）一鍵自動編譯、打包並�
 ## 專案結構
 
 ```
-src/main       Electron 主行程（IPC、git、pty、files、extensions）
-src/preload    唯一的 IPC 契約介面
-src/renderer   React UI（editor / git / terminal / preview / dashboard 面板）
+src/main         Electron 主行程（IPC、git、pty、files、extensions）
+src/main/remote  區網遠端橋接：HTTPS + WebSocket、本機 CA、Web Push、預覽代理
+src/preload      唯一的 IPC 契約介面
+src/renderer/src React UI（editor / git / terminal / preview / dashboard 面板）
+src/renderer/remote  iPhone 端網頁 App（第二個 Vite entry，由橋接層提供）
+src/shared       兩端共用的型別與邏輯（遠端協定、各種偵測）
+docs/architecture.html  端到端架構總覽
 .project-memory  跨 agent 共享記憶（handoff、protocol、decisions）
 ```
 
@@ -290,10 +337,19 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 
 設定 → **遠端控制** 會在 app 內啟動一個小型 HTTPS 伺服器，只接受私有區網位址（10/8、172.16/12、192.168/16）連線。Windows 第一次開啟時防火牆會詢問，請允許「私人網路」。
 
+會用到三個 port，從設定中的那個往上數（預設 `47600`）：該 port 本身提供手機 App 與 WebSocket，`port + 1` 只提供安裝 CA 憑證的純 HTTP 頁面，`port + 2` 提供 dev server 預覽代理。
+
 1. **信任這台電腦（只需一次）**：用 iPhone 相機掃第一個 QR code，在 Safari 開啟。下載描述檔並安裝（設定 → 一般 → VPN 與裝置管理），再到 設定 → 一般 → 關於本機 → 憑證信任設定 打開完全信任。iOS 只允許在「可信任的 HTTPS」下使用主畫面 App、Service Worker 與推播，所以需要這一步。
 2. **安裝 App**：用 Safari 開啟 App 網址 → 分享 → **加入主畫面**。
 3. **配對**：從主畫面開啟，在電腦上按「產生配對碼」後輸入（或掃配對 QR code）。主畫面 App 與 Safari 不共用儲存空間，請在主畫面 App 內配對。
 4. 選用：在 App 的設定開啟通知，agent 等待審批或任務結束時會收到提醒。
+
+手機上能做什麼：
+
+- **以工作區為單位**：電腦上每個專案視窗在手機上就是一個區塊，各自有自己的終端、交接筆記（**該工作區**的 `.project-memory/handoff.md`）與 Git 狀態。最近用過但目前沒有視窗的工作區列在**其他工作區**，點一下讓電腦開起來並直接跳到「新增終端」。
+- **閱讀／終端／預覽**：「閱讀」把終端輸出整理成手機讀得懂的樣子（接回軟換行、去掉 TUI 框線）；「終端」是真正可以打字的 xterm，預設自動配合手機寬度，不需要左右拖（在 ⋯ 選單關掉就回到電腦的寬度）；「預覽」在終端印出本機 dev server 網址時出現，把那個網站以 HTTPS 代理過來顯示。
+- **審批卡片**：agent 停下來問你時，問題與選項會變成按鈕；「執行中／等你回覆／閒置」由電腦判定，不是用手機的時鐘去猜。
+- **最多三台電腦、一次連一台**：手機會記住最多三台電腦，主畫面的標題就是切換用的下拉選單，**切換不會重新載入**——App 只是把 WebSocket 指向你選的那台。用區網位址新增（設定 →「電腦」→ 新增電腦，或在配對畫面直接加），各配對一次，同一份清單也能改名與移除。兩件要知道的事：每台電腦的憑證要在手機上各裝一次（連不到時配對畫面會直接給你那台的憑證安裝頁連結）；通知只會來自送來這個 App 的那台電腦，因為 Web Push 訂閱綁在單一網址上。
 
 安全設計：
 
@@ -301,6 +357,8 @@ src/renderer   React UI（editor / git / terminal / preview / dashboard 面板�
 - 配對碼一次性、5 分鐘失效、錯 10 次作廢。裝置取得隨機 token，本機只存 SHA-256；撤銷裝置會立即斷線。
 - 已配對的手機擁有完整終端控制權，包括開新的 agent（會套用 Bypass 模式）與開關 Bypass 模式；從手機開啟 Bypass 需先確認，電腦上會跳出通知。有裝置連線時標題列會顯示手機標示；配對、連線、開關終端等事件記錄在 app 使用者資料夾的 `remote/audit.log`（不記錄任何輸入內容）。
 - 推播內容以 RFC 8291 端對端加密給手機，經 Apple 推播服務轉送，因此推播需要電腦能連網；其餘流量都只在區網內。
+- 預覽代理本身不會把任何 dev server 曝露出去：它只連 `127.0.0.1`、只連「你的終端真的印出過」的 port，而且每個請求都需要 cookie，那個 cookie 只能用經認證的 WebSocket 發出的一次性 ticket（60 秒有效）換到。從手機開啟工作區也只限電腦自己的最近清單。
+- 因為手機能在同一個 App 裡切換電腦，WebSocket 握手接受兩種來源：這台電腦自己的 App，以及同一個 App 由區網上另一個私有位址提供。通過這關只是拿到一條連線——五秒內沒有有效的裝置 token 一樣會被斷開，而走連線的配對仍是一次性配對碼、5 分鐘失效、錯 10 次作廢。
 
 開發模式下，手機端頁面取自 build 產物：用 `npm run dev` 測試前請先執行一次 `npm run build`。
 
