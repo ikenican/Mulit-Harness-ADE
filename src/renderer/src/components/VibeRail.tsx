@@ -4,9 +4,11 @@ import remarkGfm from 'remark-gfm'
 import { useWorkbench, openDiff, openInBrowser, clearAllAgentModified, openSettings } from '@/store'
 import { useTranslation } from '@/i18n'
 import { IconZap, IconHandoff, IconFolder, IconGitClone, IconTerminalBox, IconSettings } from '@/components/Icons'
+import AgentMark from '@/components/AgentMark'
 import DashboardPanel from '@panels/dashboard/DashboardPanel'
 import FileTreePanel from '@panels/filetree/FileTreePanel'
 import GitPanel from '@panels/git/GitPanel'
+import type { BgTask } from '../../../preload/index'
 import './vibeRail.css'
 
 interface Props {
@@ -32,6 +34,15 @@ function parseHandoff(md: string): { meta: Record<string, string>; sections: [st
     if (title in HANDOFF_SECTIONS && body) sections.push([title, body])
   }
   return { meta, sections }
+}
+
+/** 開始到結束（或現在）經過多久：45s／3m／1h20m */
+function elapsed(from: string, to?: string): string {
+  const s = Math.round(((to ? Date.parse(to) : Date.now()) - Date.parse(from)) / 1000)
+  if (!(s >= 0)) return ''
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  return `${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m`
 }
 
 type PaneId = 'sessions' | 'status' | 'handoff' | 'files' | 'git'
@@ -64,6 +75,7 @@ export default function VibeRail({ onOpenCode }: Props): JSX.Element {
   const [pinned, setPinned] = useState(false)
   const [fading, setFading] = useState(false)
   const [handoff, setHandoff] = useState<string | null>(null)
+  const [bgTasks, setBgTasks] = useState<BgTask[]>([])
   const railRef = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -133,6 +145,24 @@ export default function VibeRail({ onOpenCode }: Props): JSX.Element {
     }
   }, [root, fileTreeTick, agentModifiedFiles])
 
+  // Status 面板開著才輪詢 Claude 背景任務（主程序依 mtime 快取，沒變就不重讀）
+  useEffect(() => {
+    if (openPane !== 'status' || !root) return
+    let alive = true
+    const load = (): void => {
+      window.api.dashboard
+        .bgTasks(root)
+        .then((list) => alive && setBgTasks(list))
+        .catch(() => {})
+    }
+    load()
+    const id = setInterval(load, 4000)
+    return () => {
+      alive = false
+      clearInterval(id)
+    }
+  }, [openPane, root])
+
   // 使用者在 Files / Git 窗格點了檔案才切到 Code 分頁；Agent 自動開檔（也會改 activeFilePath）不跳走
   const filesClickAt = useRef(0)
   useEffect(() => {
@@ -188,6 +218,19 @@ export default function VibeRail({ onOpenCode }: Props): JSX.Element {
                 </button>
               </div>
             )}
+            <div className="vibe-row">
+              <span className="vibe-label">
+                {t('vibe.bgTasks', { n: bgTasks.filter((b) => b.status === 'running').length })}
+              </span>
+            </div>
+            {bgTasks.slice(0, 8).map((b) => (
+              <div key={b.id} className={`vibe-bg ${b.status}`} title={b.summary || b.desc}>
+                <span className="vibe-dot" />
+                <AgentMark agent={b.agent} size={12} />
+                <span className="vibe-bg-desc">{b.desc}</span>
+                <span className="vibe-bg-time">{elapsed(b.startedAt, b.endedAt)}</span>
+              </div>
+            ))}
             <div className="vibe-row">
               <span className="vibe-label">{t('vibe.changedFiles', { n: changed.length })}</span>
               {changed.length > 0 && (
