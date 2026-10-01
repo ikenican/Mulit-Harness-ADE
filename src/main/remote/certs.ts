@@ -31,6 +31,25 @@ export function isPrivateIPv4(ip: string): boolean {
   return PRIVATE_V4.some(([net, mask]) => b.every((x, i) => (x & mask[i]) === net[i]))
 }
 
+/**
+ * 這個 Origin 是不是「我們自己的 App」？
+ * 兩種算：本機提供的 PWA，以及同一個 App 跑在區網上另一台電腦的 origin
+ * （手機要在一個畫面裡切換多台電腦，WebSocket 因此是跨 origin 的）。
+ * 通過這關只是拿到一條連線，五秒內沒有有效 token 一樣被斷開。
+ */
+export function isAllowedOrigin(origin: string | undefined, host: string): boolean {
+  if (!origin) return false
+  if (origin === `https://${host}`) return true
+  try {
+    const u = new URL(origin)
+    if (u.protocol !== 'https:') return false
+    const h = u.hostname.replace(/^\[|\]$/g, '')
+    return isPrivateIPv4(h) || /^[a-z0-9][a-z0-9-]*\.local$/i.test(h)
+  } catch {
+    return false
+  }
+}
+
 /** 本機所有私有 IPv4（192.168 優先，通常就是家用 Wi-Fi 那張網卡） */
 export function lanAddresses(): string[] {
   const out: string[] = []
@@ -137,8 +156,10 @@ export function certCovers(certPem: string, ips: string[], dnsNames: string[]): 
   try {
     const x = new crypto.X509Certificate(certPem)
     if (new Date(x.validTo).getTime() - Date.now() < 30 * 24 * 3600_000) return false
-    const san = x.subjectAltName || ''
-    return ips.every((ip) => san.includes(`IP Address:${ip}`)) && dnsNames.every((d) => san.includes(`DNS:${d}`))
+    // 逐項比對，不能用 includes：`IP Address:192.168.1.1` 會誤中 `...192.168.1.10`，
+    // 於是 IP 換成 .1 時以為憑證還涵蓋，不重簽，手機連進來就 TLS 名稱不符。
+    const entries = (x.subjectAltName || '').split(',').map((s) => s.trim())
+    return ips.every((ip) => entries.includes(`IP Address:${ip}`)) && dnsNames.every((d) => entries.includes(`DNS:${d}`))
   } catch {
     return false
   }

@@ -416,6 +416,59 @@ p {
 .large-header {
   padding: 0 4px 22px;
 }
+/* 標題兼「切換電腦」的下拉：看得出可以點，但不要搶走標題的份量 */
+.host-switch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  text-align: left;
+}
+.host-switch .t-large {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chev-down {
+  display: inline-flex;
+  transform: rotate(90deg);
+  color: var(--label-2);
+  flex: none;
+}
+/* 設定裡的電腦清單：名字可以直接改，點左邊的圖示就切過去 */
+.host-row {
+  align-items: center;
+}
+.host-pick {
+  flex: none;
+  border-radius: var(--r-mark);
+}
+.host-pick[aria-pressed='true'] {
+  cursor: default;
+}
+.host-main {
+  display: grid;
+  gap: 1px;
+}
+.host-name {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  font-weight: 500;
+  padding: 0;
+}
+.host-name:focus {
+  outline: none;
+  color: var(--accent);
+}
+.host-url {
+  font-size: 0.72rem;
+  color: var(--label-2);
+  font-variant-numeric: tabular-nums;
+}
 .header-pills {
   display: flex;
   flex-wrap: wrap;
@@ -967,7 +1020,8 @@ p {
 .segmented {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* --seg：幾個分頁（終端畫面在有 dev server 時是 3 個） */
+  grid-template-columns: repeat(var(--seg, 2), 1fr);
   padding: 3px;
   margin: 0 auto 10px;
   width: min(280px, calc(100% - 32px));
@@ -981,7 +1035,7 @@ p {
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc(50% - 3px);
+  width: calc((100% - 6px) / var(--seg, 2));
   border-radius: var(--pill);
   background: var(--surface);
   box-shadow: var(--shadow-bubble);
@@ -989,6 +1043,9 @@ p {
 }
 .segmented[data-index='1']::before {
   transform: translateX(100%);
+}
+.segmented[data-index='2']::before {
+  transform: translateX(200%);
 }
 .segmented button {
   position: relative;
@@ -1052,6 +1109,20 @@ p {
   padding: 10px;
   width: max-content;
   min-width: 100%;
+}
+/* 成品預覽：iframe 吃滿剩下的高度，和輸出泡泡同一個圓角 */
+.preview-pane {
+  flex: 1;
+  min-height: 0;
+  padding: 2px 12px 12px;
+}
+.preview-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: var(--r-bubble);
+  background: var(--surface);
+  box-shadow: var(--glass-edge), var(--shadow-bubble);
 }
 .xterm-box .xterm-helper-textarea {
   display: none;

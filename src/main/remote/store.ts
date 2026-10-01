@@ -82,7 +82,8 @@ export function loadConfig(): RemoteConfig {
   const port = Number(c.port)
   return {
     enabled: !!c.enabled,
-    port: Number.isInteger(port) && port > 1024 && port < 65535 ? port : DEFAULT_PORT
+    // bridge 會用到 port、port+1（CA 安裝頁）、port+2（手機預覽代理），所以上限留 3 個
+    port: Number.isInteger(port) && port > 1024 && port < 65533 ? port : DEFAULT_PORT
   }
 }
 

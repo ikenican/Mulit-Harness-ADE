@@ -14,6 +14,10 @@ export interface RemoteSession {
   rows: number
   needsApproval: boolean
   lastOutputAt: number
+  /** 近期還在吐輸出＝執行中。由桌面判定，手機不要拿自己的時鐘去比 lastOutputAt */
+  busy: boolean
+  /** 這個終端印出的本機 dev server port；有值手機才顯示「預覽」分頁 */
+  devPort?: number | null
   /** 等待審批時附上畫面尾段（已去 ANSI），首頁卡片用來預覽問題 */
   approvalTail?: string
 }
@@ -31,6 +35,12 @@ export interface RemoteWindow {
   launchers: RemoteLauncher[]
 }
 
+/** 桌面上「最近開啟過、但目前沒有視窗」的工作區：手機可以請桌面開起來 */
+export interface RemoteWorkspaceOption {
+  path: string
+  name: string
+}
+
 export interface RemoteGitFile {
   path: string
   index: string
@@ -39,6 +49,8 @@ export interface RemoteGitFile {
 
 export type ClientMessage =
   | { t: 'auth'; token: string }
+  /** 配對（跨 origin 的 fetch 會被 CORS 擋，所以配對也走 WebSocket） */
+  | { t: 'pairRequest'; code: string; name: string }
   | { t: 'attach'; id: string }
   | { t: 'detach'; id: string }
   | { t: 'input'; id: string; data: string }
@@ -47,17 +59,24 @@ export type ClientMessage =
   | { t: 'kill'; id: string }
   | { t: 'handoff'; windowId: number }
   | { t: 'git'; windowId: number }
+  /** 請桌面開啟（或聚焦）某個最近用過的工作區，開起來才有視窗可以派 agent */
+  | { t: 'openWorkspace'; path: string }
+  /** 要一個預覽網址（桌面會發一次性 ticket，手機把它放進 iframe） */
+  | { t: 'preview'; id: string }
   | { t: 'visibility'; visible: boolean }
   /** 手機切換 Bypass 模式（只影響之後啟動的 agent） */
   | { t: 'setBypass'; enabled: boolean }
   | { t: 'ping' }
 
 export type ServerMessage =
+  | { t: 'paired'; token: string; deviceId: string }
   | { t: 'authed'; deviceId: string; deviceName: string; hostName: string }
   | {
       t: 'state'
       sessions: RemoteSession[]
       windows: RemoteWindow[]
+      /** 最近開啟過但目前沒視窗的工作區，手機可以挑一個請桌面開起來 */
+      workspaces: RemoteWorkspaceOption[]
       /** Bypass 模式開著時，手機要明顯警示：agent 不會再問你就直接執行 */
       bypass: boolean
     }
@@ -65,9 +84,12 @@ export type ServerMessage =
   | { t: 'data'; id: string; d: string }
   | { t: 'resized'; id: string; cols: number; rows: number }
   | { t: 'exit'; id: string; code: number; title: string }
+  /** 執行中／閒置翻轉時才送一則（不是每次輸出都送） */
+  | { t: 'activity'; id: string; busy: boolean }
   | { t: 'approval'; id: string; title: string; tail: string }
   | { t: 'spawned'; id: string }
   | { t: 'handoff'; windowId: number; text: string | null }
+  | { t: 'preview'; id: string; url: string | null; error?: string }
   | {
       t: 'git'
       windowId: number
@@ -79,6 +101,19 @@ export type ServerMessage =
     }
   | { t: 'error'; message: string }
   | { t: 'pong' }
+
+/**
+ * 終端狀態：一律用桌面判定並廣播的 busy（state 帶初值，activity 帶翻轉），
+ * 不可以用「現在時間 − lastOutputAt」——那是拿手機時鐘比桌面時間，差一點就永遠顯示錯，
+ * 而且 state 不是每次有輸出都重送，會卡在舊值。
+ */
+export function sessionStatus(
+  s: Pick<RemoteSession, 'id' | 'needsApproval' | 'busy'>,
+  live: Record<string, boolean> = {}
+): 'waiting' | 'running' | 'idle' {
+  if (s.needsApproval) return 'waiting'
+  return (live[s.id] ?? s.busy) ? 'running' : 'idle'
+}
 
 /** HTTP API（配對與推播訂閱），不走 WebSocket */
 export interface PairRequest {
