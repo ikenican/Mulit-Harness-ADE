@@ -552,7 +552,7 @@ export default function TerminalPanel(): JSX.Element {
         // 1. IME 組字保護：正在組字（注音、拼音、倉頡…）就完全放行給瀏覽器／IME，切勿攔截。
         // isComposing 在「開始組字的那一下」還是 false，所以要一起認輸入法的 keydown
         // （Chromium 給 key='Process'、keyCode=229）；漏掉的話 xterm 的組字狀態機會被我們切斷。
-        if (e.isComposing || e.key === 'Process' || e.keyCode === 229) {
+        if (isComposing(term) || e.isComposing || e.key === 'Process' || e.keyCode === 229) {
           return true
         }
 

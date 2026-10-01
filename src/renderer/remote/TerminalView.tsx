@@ -126,7 +126,8 @@ export default function TerminalView({
     const term = termRef.current
     const body = bodyRef.current
     if (!term || !body || !opened.current) return
-    const size = Math.max(6, Math.min(14, Math.floor(((body.clientWidth - 12) / (term.cols * monoCharRatio())) * 10) / 10))
+    const width = (xtermHost.current?.parentElement?.clientWidth || body.clientWidth - 24) - 20
+    const size = Math.max(6, Math.min(14, Math.floor((width / (term.cols * monoCharRatio())) * 10) / 10))
     if (term.options.fontSize !== size) term.options.fontSize = size
   }, [])
 
@@ -139,8 +140,9 @@ export default function TerminalView({
   const applyFit = useCallback((): boolean => {
     const body = bodyRef.current
     if (!body || !body.clientWidth) return false
+    const width = (xtermHost.current?.parentElement?.clientWidth || body.clientWidth - 24) - 20
     const px = 12 * monoCharRatio()
-    const cols = Math.max(40, Math.floor((body.clientWidth - 32) / px))
+    const cols = Math.max(10, Math.floor(width / px))
     const rows = Math.max(12, Math.floor((body.clientHeight - 12) / 17))
     const current = termRef.current?.cols ?? session.cols
     if (cols >= current) return false
