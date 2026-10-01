@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.29] - 2026-10-01
+
+### Added / 新增
+- Vibe 模式 Status 面板顯示目前工作區的 Agent 背景任務（Claude、Codex、Antigravity），含執行中／完成／失敗／取消狀態與經過時間。
+
+### Fixed / 修復
+- 修復 Agent 修改的檔案一多，Status 面板每列被壓扁到看不見文字的問題（改為整個面板捲動）。
+
 ## [0.1.28] - 2026-10-01
 
 ### Fixed / 修復
