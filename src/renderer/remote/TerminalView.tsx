@@ -9,11 +9,10 @@ import { parsePrompt, type ParsedPrompt } from './prompt'
 import { IArrowUp, IMore, IStop } from './icons'
 import { ConfirmSheet, Menu, NavBar } from './ui'
 import { currentTheme, onThemeChange } from './theme'
+import { FilePane, StatusPane } from './WorkspacePanes'
 
 // 手機上的終端畫面。
 //
-// 「閱讀」（預設）：從 xterm 的畫面緩衝讀出文字，依手機寬度換行、用正常字級顯示——
-//   電腦上的終端是 100 多欄，硬縮到手機寬度字會小到 6px，讀不了。
 // 「終端」：依實際字元尺寸調整 PTY 欄數，讓 CLI 在手機寬度重新排版。
 //
 // 輸入不直接打進 xterm（iOS 軟鍵盤對 xterm 的隱藏 textarea 很不穩），改用下方輸入框與按鍵列。
@@ -36,37 +35,6 @@ function termTheme(): Record<string, string> {
   return dark
     ? { background: '#00000000', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
     : { background: '#00000000', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
-}
-
-type Line = { kind: 'text'; text: string } | { kind: 'rule' }
-
-const BOX_ONLY = /^[\s│┃║╭╮╰╯┌┐└┘├┤┬┴┼─━═┏┓┗┛▔▁]+$/
-const EDGE = /^[\s│┃║]+|[\s│┃║]+$/g
-
-/** 讀出 xterm 緩衝的最後 N 行邏輯行：接回自動折行、去掉框線、多個空行合併 */
-function readBuffer(term: Terminal, max = 600): Line[] {
-  const buf = term.buffer.active
-  const raw: string[] = []
-  for (let y = 0; y < buf.length; y++) {
-    const line = buf.getLine(y)
-    if (!line) continue
-    const s = line.translateToString(true)
-    if (line.isWrapped && raw.length) raw[raw.length - 1] += s
-    else raw.push(s)
-  }
-  while (raw.length && !raw[raw.length - 1].trim()) raw.pop()
-  const out: Line[] = []
-  for (const r of raw.slice(-max)) {
-    if (r.trim() && BOX_ONLY.test(r)) {
-      if (out[out.length - 1]?.kind !== 'rule') out.push({ kind: 'rule' })
-      continue
-    }
-    const text = r.replace(EDGE, '')
-    const prev = out[out.length - 1]
-    if (!text && (!prev || (prev.kind === 'text' && !prev.text) || prev.kind === 'rule')) continue
-    out.push({ kind: 'text', text })
-  }
-  return out
 }
 
 function screenText(term: Terminal, lines = 24): string {
@@ -98,10 +66,9 @@ export default function TerminalView({
   const opened = useRef(false)
   const fitAddon = useRef<FitAddon | null>(null)
   const originalSize = useRef<{ cols: number; rows: number } | null>(null)
-  const stick = useRef(true)
-  const [mode, setMode] = useState<'read' | 'term' | 'preview'>('read')
+  const [mode, setMode] = useState<'status' | 'term' | 'file' | 'preview'>('term')
+  const [filePath, setFilePath] = useState('')
   const [preview, setPreview] = useState<{ url: string | null; error: string | null }>({ url: null, error: null })
-  const [lines, setLines] = useState<Line[]>([])
   const [prompt, setPrompt] = useState<ParsedPrompt | null>(null)
   const [answered, setAnswered] = useState(false)
   const [menu, setMenu] = useState(false)
@@ -126,11 +93,6 @@ export default function TerminalView({
     conn.send({ t: 'resize', id, cols, rows })
   }, [conn, id])
 
-  const toBottom = (): void => {
-    const b = bodyRef.current
-    if (b && stick.current) b.scrollTop = b.scrollHeight
-  }
-
   // 輸出很密時合併成每 120ms 重畫一次
   const refreshTimer = useRef<number | null>(null)
   const refresh = useCallback((): void => {
@@ -139,9 +101,7 @@ export default function TerminalView({
       refreshTimer.current = null
       const term = termRef.current
       if (!term) return
-      if (modeRef.current === 'read') setLines(readBuffer(term))
       setPrompt(parsePrompt(screenText(term)))
-      requestAnimationFrame(toBottom)
     }, 120)
   }, [])
 
@@ -216,9 +176,6 @@ export default function TerminalView({
       opened.current = true
     }
     if (mode === 'term') applyFit()
-    if (mode === 'read' && term) setLines(readBuffer(term))
-    stick.current = true
-    requestAnimationFrame(toBottom)
   }, [mode, applyFit])
 
   // The body changes on rotation and when the mobile keyboard/dock opens.
@@ -243,7 +200,6 @@ export default function TerminalView({
   }, [session.needsApproval])
 
   const send = (seq: string): void => {
-    stick.current = true
     conn.send({ t: 'input', id, data: seq })
   }
 
@@ -289,14 +245,17 @@ export default function TerminalView({
         <div
           className="segmented"
           role="group"
-          data-index={mode === 'read' ? 0 : mode === 'term' ? 1 : 2}
-          style={{ '--seg': canPreview ? 3 : 2 } as React.CSSProperties}
+          data-index={mode === 'status' ? 0 : mode === 'term' ? 1 : mode === 'file' ? 2 : 3}
+          style={{ '--seg': canPreview ? 4 : 3 } as React.CSSProperties}
         >
-          <button aria-pressed={mode === 'read'} onClick={() => setMode('read')}>
-            {t('read')}
+          <button aria-pressed={mode === 'status'} onClick={() => setMode('status')}>
+            {t('status')}
           </button>
           <button aria-pressed={mode === 'term'} onClick={() => setMode('term')}>
             {t('terminal')}
+          </button>
+          <button aria-pressed={mode === 'file'} onClick={() => { setFilePath(''); setMode('file') }}>
+            {t('file')}
           </button>
           {canPreview && (
             <button aria-pressed={mode === 'preview'} onClick={openPreview}>
@@ -307,23 +266,26 @@ export default function TerminalView({
       </NavBar>
 
       <div
-        className="session-body"
-        hidden={mode === 'preview'}
+        className="session-body terminal-body"
+        hidden={mode !== 'term'}
         ref={bodyRef}
-        onScroll={(e) => {
-          const el = e.currentTarget
-          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
-        }}
       >
         <div className="output">
-          <div className="reader" hidden={mode !== 'read'} aria-live="off">
-            {lines.map((l, i) => (l.kind === 'rule' ? <div key={i} className="rule" /> : <div key={i} className="ln">{l.text}</div>))}
-          </div>
-          <div className="xterm-scroll" hidden={mode !== 'term'}>
-            <div className="xterm-box" ref={xtermHost} />
+          <div className="xterm-scroll">
+            <div
+              className="xterm-box"
+              ref={xtermHost}
+              // Let the browser scroll with inertia instead of xterm's touchmove handler.
+              onTouchStartCapture={(e) => e.stopPropagation()}
+              onTouchMoveCapture={(e) => e.stopPropagation()}
+            />
           </div>
         </div>
       </div>
+
+      {mode === 'status' && <div className="workspace-pane"><StatusPane conn={conn} windowId={session.windowId}
+        onFile={path => { setFilePath(path); setMode('file') }} onPreview={canPreview ? openPreview : undefined} /></div>}
+      {mode === 'file' && <div className="workspace-pane"><FilePane key={filePath} conn={conn} windowId={session.windowId} initialPath={filePath} /></div>}
 
       {/* 成品預覽：桌面把終端印出的 dev server 代理成 https 送過來，所以這裡放 iframe 就好 */}
       {canPreview && (

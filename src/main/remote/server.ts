@@ -32,6 +32,7 @@ import {
   type RemoteSession,
   type RemoteWindow,
   type RemoteWorkspaceOption,
+  type RemoteVibeStatus,
   type ServerMessage
 } from '../../shared/remoteProtocol'
 import { certCovers, certDer, createCa, isAllowedOrigin, isPrivateIPv4, issueServerCert, lanAddresses, localHostname } from './certs'
@@ -50,6 +51,8 @@ import {
 } from './store'
 import { generateVapidKeys, sendPush, type PushSubscriptionJSON, type VapidKeys } from './webpush'
 import { PreviewProxy } from './preview'
+import { RemoteFiles, listWorkspaceFiles, readWorkspaceText } from './files'
+import { scanBgTasks } from '../ipc/dashboard'
 
 // Remote Bridge：讓同一個區網的 iPhone 遠端操作桌面上的 CLI 終端。
 //
@@ -212,6 +215,15 @@ export class RemoteBridge {
   private onStatus: () => void
   // 只代理「目前真的有終端印出過」的 port，而且一律只連 127.0.0.1
   private preview = new PreviewProxy((p) => listPtySessions().some((s) => s.devPort === p))
+  private vibeStatuses = new Map<number, RemoteVibeStatus>()
+  private files = new RemoteFiles((deviceId, root) =>
+    loadDevices().some(d => d.id === deviceId) && getAllProjectWindows().some(e => e.workspaceRoot === root))
+
+  reportVibeStatus(ownerId: number, status: RemoteVibeStatus): void {
+    if (getAllProjectWindows().some(e => e.window.webContents.id === ownerId && e.workspaceRoot === status.workspace)) {
+      this.vibeStatuses.set(ownerId, status)
+    }
+  }
 
   constructor(onStatus: () => void) {
     this.onStatus = onStatus
@@ -311,6 +323,7 @@ export class RemoteBridge {
     this.server = null
     this.setupServer = null
     this.pairing = null
+    this.files.clear()
     closing.push(this.preview.stop())
     await Promise.all(closing)
     this.onStatus()
@@ -418,6 +431,7 @@ export class RemoteBridge {
   private async handleHttps(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url || '/', 'https://localhost')
     const p = url.pathname
+    if (p.startsWith('/_files/')) return this.files.serve(req, res)
 
     if (p === '/api/pair' && req.method === 'POST') {
       const body = await readBody(req)
@@ -699,6 +713,34 @@ export class RemoteBridge {
           }
         }
         return this.send(c, { t: 'handoff', windowId: msg.windowId, text })
+      }
+      case 'status': {
+        const entry = getAllProjectWindows().find(e => e.window.id === msg.windowId)
+        const status = entry ? this.vibeStatuses.get(entry.window.webContents.id) : null
+        return this.send(c, { t: 'status', windowId: msg.windowId, status: status && status.workspace === entry?.workspaceRoot ? status : null,
+          bgTasks: entry ? scanBgTasks(entry.workspaceRoot) : [], error: entry ? undefined : 'no workspace' })
+      }
+      case 'files': {
+        const ws = this.workspaceOf(msg.windowId)
+        try {
+          if (!ws) throw new Error('no workspace')
+          return this.send(c, { t: 'files', windowId: msg.windowId, path: msg.path, entries: listWorkspaceFiles(ws, msg.path) })
+        } catch (e) {
+          return this.send(c, { t: 'files', windowId: msg.windowId, path: msg.path, entries: [], error: e instanceof Error ? e.message : 'cannot list files' })
+        }
+      }
+      case 'file': {
+        const ws = this.workspaceOf(msg.windowId)
+        const ext = typeof msg.path === 'string' ? path.extname(msg.path).toLowerCase() : ''
+        const kind = ext === '.pdf' ? 'pdf' : ['.html', '.htm'].includes(ext) ? 'html' : ['.md', '.markdown'].includes(ext) ? 'markdown' : 'text'
+        try {
+          if (!ws) throw new Error('no workspace')
+          const text = kind === 'markdown' || kind === 'text' ? readWorkspaceText(ws, msg.path) : null
+          const url = this.files.issueUrl(`${c.host}:${this.port}`, ws, msg.path, c.device!.id)
+          return this.send(c, { t: 'file', windowId: msg.windowId, path: msg.path, kind, text, url })
+        } catch (e) {
+          return this.send(c, { t: 'file', windowId: msg.windowId, path: msg.path, kind, text: null, url: null, error: e instanceof Error ? e.message : 'cannot open file' })
+        }
       }
       case 'git': {
         const ws = this.workspaceOf(msg.windowId)

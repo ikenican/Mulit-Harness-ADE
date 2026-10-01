@@ -14,6 +14,7 @@ import { sessionStatus } from '../../shared/remoteProtocol'
 import { pairOverWs, RemoteConnection, type ConnState } from './conn'
 import { disablePush, enablePush, isStandalone, pushState, pushSupported, registerServiceWorker } from './api'
 import TerminalView from './TerminalView'
+import { FilePane, StatusPane } from './WorkspacePanes'
 import { ago, getLangPref, onLangChange, setLangPref, t, type LangPref } from './i18n'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import { questionPreview } from './prompt'
@@ -56,6 +57,8 @@ type View =
   | { kind: 'session'; id: string }
   | { kind: 'handoff'; windowId: number }
   | { kind: 'git'; windowId: number }
+  | { kind: 'status'; windowId: number }
+  | { kind: 'file'; windowId: number; path?: string }
 
 function sessionFromHash(): string | null {
   return /[#&]s=([\w-]+)/.exec(location.hash)?.[1] ?? null
@@ -475,6 +478,16 @@ function Main({
   } else if (view.kind === 'handoff' || view.kind === 'git') {
     const w = windows.find((x) => x.id === view.windowId)
     screen = <DetailView conn={conn} view={view} workspace={w?.workspaceName || ''} hostName={hostName} onBack={goHome} />
+  } else if (view.kind === 'status' || view.kind === 'file') {
+    const w = windows.find(x => x.id === view.windowId)
+    const windowId = view.windowId
+    screen = <div className="session">
+      <NavBar title={t(view.kind)} subtitle={w?.workspaceName || ''} backLabel={hostName} onBack={goHome} />
+      <main className="workspace-pane">
+        {view.kind === 'status' ? <StatusPane conn={conn} windowId={windowId} onFile={path => setView({ kind: 'file', windowId, path })} /> :
+          <FilePane conn={conn} windowId={windowId} initialPath={view.path} />}
+      </main>
+    </div>
   } else {
     screen = (
       <Home
@@ -722,6 +735,14 @@ function Home({
                 </button>
               </div>
               <div className="tiles">
+                <button className="bubble tile press" onClick={() => onOpen({ kind: 'status', windowId: w.id })}>
+                  <IconMark tone="accent"><ICheck size={20} /></IconMark>
+                  {t('status')}
+                </button>
+                <button className="bubble tile press" onClick={() => onOpen({ kind: 'file', windowId: w.id })}>
+                  <IconMark tone="blue"><IDoc size={20} /></IconMark>
+                  {t('file')}
+                </button>
                 <button className="bubble tile press" onClick={() => onOpen({ kind: 'handoff', windowId: w.id })}>
                   <IconMark tone="accent">
                     <IDoc size={20} />

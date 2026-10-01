@@ -49,6 +49,7 @@ export function registerRemoteHandlers(): void {
   bridge = new RemoteBridge(broadcastStatus)
 
   ipcMain.handle('remote:status', () => getStatus())
+  ipcMain.on('remote:vibeStatus', (event, status) => bridge?.reportVibeStatus(event.sender.id, status))
 
   ipcMain.handle('remote:setEnabled', async (_e, enabled: boolean) => {
     saveConfig({ enabled: !!enabled })

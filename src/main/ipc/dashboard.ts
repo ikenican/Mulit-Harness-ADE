@@ -1178,7 +1178,7 @@ function listFiles(dir: string, filter: (name: string) => boolean): string[] {
 }
 
 /** 這個工作區 12 小時內有寫入的 Claude／Codex／Antigravity 會話裡的背景任務（新到舊） */
-function scanBgTasks(workspacePath: string): BgTask[] {
+export function scanBgTasks(workspacePath: string): BgTask[] {
   const root = normPath(workspacePath)
   if (!root) return []
   // ponytail: 會話中途被關掉的任務不會有結束通知，最多卡成「執行中」12 小時；要精準再比對 live 會話 id
