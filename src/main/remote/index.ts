@@ -67,11 +67,13 @@ export function registerRemoteHandlers(): void {
     return QRCode.toDataURL(String(text).slice(0, 500), { margin: 1, width: 360 })
   })
 
-  ipcMain.handle('remote:createPairing', async (): Promise<RemotePairingInfo | null> => {
+  ipcMain.handle('remote:createPairing', async (_e, requestedAddress?: string): Promise<RemotePairingInfo | null> => {
     if (!bridge!.running) return null
+    const status = bridge!.status()
+    const address = status.addresses.includes(requestedAddress || '') ? requestedAddress : status.addresses[0]
+    if (!address) return null
     const { code, expiresAt } = bridge!.createPairingCode()
-    const st = getStatus()
-    const pairUrl = st.appUrl ? `${st.appUrl}#pair=${code}` : null
+    const pairUrl = `https://${address}:${status.port}/#pair=${code}`
     return {
       code,
       expiresAt,
