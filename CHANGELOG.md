@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.24] - 2026-10-01
+
+### Added / 新增
+- **手機預覽成品**（Session → 預覽）：終端印出本機 dev server 網址時出現「預覽」分頁，直接在 App 裡看跑起來的畫面。橋接層在 `port + 2` 開一台 HTTPS 反向代理——手機的 `localhost` 是手機自己、dev server 多半只綁 `127.0.0.1`、而 https 頁面不能框住 http，所以必須代理；給它自己一個 origin，被預覽頁面的根目錄相對路徑才會解對，不必改寫 HTML。HMR 的 WebSocket 一併轉發。
+- **手機可選工作區**：首頁新增「其他工作區」，列出最近用過但目前沒開視窗的工作區；點一下讓電腦開起來，並直接跳出「新增終端」。
+- **手機記住最多三台電腦**（設定 → 電腦）：標題就是切換用的下拉選單，**切換不重新載入**；用區網位址新增、可改名與移除，每台各自配對一次。
+
+### Changed / 變更
+- **終端自動配合手機寬度**：進「終端」分頁就把 pty 的欄數改成手機放得下的寬度（字級回到 12–13px），不再需要左右拖；離開時還給電腦。轉向或鍵盤收合後重算一次。
+- **「執行中／閒置」改由電腦判定**並在狀態翻轉時廣播（新的 `activity` 訊息），不再由手機拿自己的時鐘去比對桌面寫的時間戳。
+- `agents/*.yaml` 裡只是把內建 CLI 換個名字的 launcher，不再在手機上重複列出。
+- 遠端橋接現在使用三個 port：`port`（App + WebSocket + API）、`port + 1`（只提供 CA 憑證安裝頁）、`port + 2`（預覽代理）。
+
+### Fixed / 修復
+- **中文輸入法打字時文字被重複送出**：組字進行中若程式去搶終端的 focus（Dashboard 跳分頁、拖拉交接、分頁顯示、尺寸重算），Chromium 會中止組字並把未送出的字留在 xterm 的隱藏 textarea 裡，下一個組字鍵就會把它當成新輸入再送一次。組字中一律不搶 focus、不改尺寸。
+- **Ctrl+V 貼上兩次**：自訂按鍵處理只回傳 `false` 並不會取消瀏覽器的預設貼上，而 xterm 自己也監聽 textarea 的 `paste`。另移除 Electron 的預設選單（Windows／Linux）：它註冊的 `Ctrl+Z`／`Ctrl+A` 等編輯快速鍵會動到 xterm 的隱藏 textarea，`Ctrl+Z` 會把剛打的字還原後再送進終端。
+- Markdown 的 shell 指令按「送到終端」時，不再可能落進正在執行的 agent 提示字元。
+- 憑證涵蓋範圍改為逐項比對：`192.168.1.1` 不會再被 `…1.10` 誤判成已涵蓋而不重簽。
+- Dashboard 掃描 CLI 紀錄檔時加上界限（候選數、路徑長度、往上層數、標題解析視窗、單檔大小），異常的紀錄檔不再卡住主行程。
+
+### Security / 安全
+- **工作區檔案一律當成不受信任的輸入**（打開別人的 repo 不該由那個 repo 決定要執行什麼）：
+  - `.workbench/settings.json` 不再能改 CLI 解析到哪個執行檔、也不能開啟 Bypass 模式——這些只認使用者的全域設定。
+  - `agents/*.yaml` 的 launcher 只能指名已知的 CLI，且不得設定 `NODE_OPTIONS`、`PATH` 這類可在他人行程插入程式碼的環境變數。
+  - `.workbench/extensions.yaml` 的 id 加上格式檢查、skill 路徑必須留在工作區內，同步不會寫到宣稱目錄之外。
+- Mermaid 改用 `securityLevel: 'strict'`：`loose` 會跳過 URL 檢查，圖裡的 `javascript:` 連結會成為可點的程式執行。
+- 未認證的區網請求不再能讓主行程丟出未捕捉例外（靜態路由收斂、realpath 檢查、stream 加 error handler）；同時修好 `/remote.webmanifest` 原本永遠 404 的問題。
+- `<webview>` 的權限改由主行程釘死（無 preload、無 Node、contextIsolation）；`openExternal` 只放行 http(s)。
+
+### Docs / 文件
+- 新增 `docs/architecture.html`：中英雙語的架構說明（行程與傳輸、pty 扇出、完整訊息表、所有常數與上限及其成因、四條端到端流程、信任邊界、狀態位置、模組地圖、建置封裝、資安現況與已知取捨）。
+
+---
+
 ## [0.1.23] - 2026-09-30
 
 ### Added / 新增
