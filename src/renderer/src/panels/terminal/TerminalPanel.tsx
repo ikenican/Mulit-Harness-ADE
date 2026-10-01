@@ -15,6 +15,7 @@ import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
 import { looksLikeApprovalPrompt } from './approvalDetect'
 import { detectDevUrl } from './portDetect'
+import { focusTerm, isComposing, trackComposition } from './imeGuard'
 import AgentMark from '@/components/AgentMark'
 import {
   IconPlus,
@@ -548,15 +549,19 @@ export default function TerminalPanel(): JSX.Element {
       term.loadAddon(fitAddon)
 
       term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-        // 1. IME 組字保護：如果使用者正在組字（如注音、拼音、倉頡等），完全放行給瀏覽器/IME，切勿攔截
-        if (e.isComposing) {
+        // 1. IME 組字保護：正在組字（注音、拼音、倉頡…）就完全放行給瀏覽器／IME，切勿攔截。
+        // isComposing 在「開始組字的那一下」還是 false，所以要一起認輸入法的 keydown
+        // （Chromium 給 key='Process'、keyCode=229）；漏掉的話 xterm 的組字狀態機會被我們切斷。
+        if (e.isComposing || e.key === 'Process' || e.keyCode === 229) {
           return true
         }
 
         // 2. Ctrl+C (Windows/Linux) 或 Cmd+C (macOS)：
         // 若終端有選取文字，執行複製到剪貼簿並阻止發送 SIGINT (\x03) 給 pty，避免中斷終端執行
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && !e.shiftKey && !e.altKey) {
+        if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC' && !e.shiftKey && !e.altKey) {
           if (term.hasSelection()) {
+            // 同上：不 preventDefault 的話瀏覽器還會再複製一次（內容一樣，但沒必要）
+            e.preventDefault()
             if (e.type === 'keydown') {
               const sel = term.getSelection()
               if (sel) {
@@ -568,15 +573,19 @@ export default function TerminalPanel(): JSX.Element {
           return true
         }
 
-        // 3. Ctrl+V (Windows/Linux) 或 Cmd+V (macOS)：
-        // 由 keydown 讀取剪貼簿並透過 term.paste 送出，阻止預設行為以避免某些環境同時觸發 \x16 與 paste 產生雙重貼上
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && !e.shiftKey && !e.altKey) {
+        // 3. Ctrl+V (Windows/Linux) 或 Cmd+V (macOS)：自己讀剪貼簿送出。
+        // 一定要 preventDefault：只回傳 false 只是叫 xterm 不要把這個鍵當成 \x16，
+        // 瀏覽器的預設貼上動作還是會發生，xterm 也監聽 textarea 的 paste 事件，
+        // 於是同一次 Ctrl+V 會被插入兩次。preventDefault 之後只剩下面這一條路。
+        if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV' && !e.shiftKey && !e.altKey) {
+          e.preventDefault()
           if (e.type === 'keydown') {
-            navigator.clipboard.readText().then((text) => {
-              if (text) {
-                term.paste(text)
-              }
-            }).catch(() => {})
+            navigator.clipboard
+              .readText()
+              .then((text) => {
+                if (text) term.paste(text)
+              })
+              .catch(() => {})
           }
           return false
         }
@@ -633,7 +642,7 @@ export default function TerminalPanel(): JSX.Element {
       )
       if (matchedPty) {
         selectSession(matchedPty.id)
-        setTimeout(() => matchedPty.term.focus(), 60)
+        setTimeout(() => focusTerm(matchedPty.term), 60)
         return matchedPty.id
       }
 
@@ -699,7 +708,7 @@ export default function TerminalPanel(): JSX.Element {
 
       sendToSession(targetSession.id, prompt + '\r\n')
       selectSession(targetSession.id)
-      setTimeout(() => targetSession.term.focus(), 60)
+      setTimeout(() => focusTerm(targetSession.term), 60)
 
       window.api.notify?.show?.(
         'Agent Handoff Dispatched',
@@ -804,8 +813,10 @@ export default function TerminalPanel(): JSX.Element {
       sendToSession(activeSessionId, terminalDispatch.text)
       return
     }
-    const running = sessionsRef.current.find((s) => !s.isExited)
-    const fallbackKey = enabledShells[0]?.id || enabledAgents[0]?.id || BUILTIN_SHELLS[0].id
+    // target 'shell' 就要真的是 shell：先前是「任何還活著的分頁」，
+    // 於是 markdown 裡的指令會落進正在跑的 agent 提示字元，被當成對 agent 說的話。
+    const running = sessionsRef.current.find((s) => !s.isExited && SHELL_IDS.includes(s.launcherKey))
+    const fallbackKey = enabledShells[0]?.id || BUILTIN_SHELLS[0].id
     const id = running ? running.id : handleNewTerminal(fallbackKey)
     setActiveSessionId(id)
     sendToSession(id, terminalDispatch.text)
@@ -1942,6 +1953,7 @@ function TerminalInstance({
     // remount 時 term 要重新掛進新的 DOM 節點，但底下的 spawn 只能做一次。
     session.term.open(elRef.current)
     session.fitAddon.fit()
+    const untrackIme = trackComposition(session.term)
 
     // 杜絕手掌誤觸觸控板產生的中鍵（Button 1）貼上：以 capture 階段攔截，防止 xterm 接收 auxclick
     const targetEl = elRef.current
@@ -1954,6 +1966,8 @@ function TerminalInstance({
     targetEl.addEventListener('auxclick', handleAuxClick, true)
 
     const ro = new ResizeObserver(() => {
+      // 組字中改尺寸會讓 xterm 重繪並中止組字，殘留的字會在下一鍵被重送（見 imeGuard）
+      if (isComposing(session.term)) return
       try {
         session.fitAddon.fit()
         const pid = ptyIdRef.current || session.ptyId
@@ -1970,6 +1984,7 @@ function TerminalInstance({
       ptyIdRef.current = session.ptyId || null
       return () => {
         ro.disconnect()
+        untrackIme()
         targetEl.removeEventListener('auxclick', handleAuxClick, true)
       }
     }
@@ -2071,6 +2086,7 @@ function TerminalInstance({
 
     return () => {
       ro.disconnect()
+      untrackIme()
       targetEl.removeEventListener('auxclick', handleAuxClick, true)
     }
   }, [])
@@ -2085,7 +2101,7 @@ function TerminalInstance({
         if (pid) {
           window.api.pty.resize(pid, session.term.cols, session.term.rows)
         }
-        if (isActive) session.term.focus()
+        if (isActive) focusTerm(session.term)
       } catch {
         /* 尺寸尚未穩定時忽略 */
       }
@@ -2098,7 +2114,7 @@ function TerminalInstance({
       className={`term-surface ${isVisible ? 'on' : ''} ${multi && isActive ? 'pane-active' : ''}`}
       onMouseDown={() => {
         if (multi) onFocusPane()
-        session.term.focus()
+        focusTerm(session.term)
       }}
       onAuxClick={(e) => {
         if (e.button === 1) {
