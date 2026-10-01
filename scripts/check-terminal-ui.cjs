@@ -130,16 +130,18 @@ app.whenReady().then(async () => {
         win.setContentSize(width, 844)
         await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width, height:844, deviceScaleFactor:scale, mobile:true})
         await pause()
+        await win.webContents.capturePage()
         const bounds = await run(`(() => {
           const host = document.querySelector('.xterm-box')
           const screen = host.querySelector('.xterm-screen').getBoundingClientRect()
           return {width:innerWidth, page:document.documentElement.scrollWidth,
-            box:host.getBoundingClientRect().right, right:screen.right, cols:mobileTerm.cols,
+            box:host.getBoundingClientRect().right, right:screen.right, screenWidth:screen.width, cols:mobileTerm.cols,
             scroll:document.querySelector('.xterm-scroll').scrollWidth,
             client:document.querySelector('.xterm-scroll').clientWidth}
         })()`)
         assert.equal(bounds.width, width)
         assert.ok(bounds.page <= width, JSON.stringify(bounds))
+        assert.ok(bounds.screenWidth > 0, 'terminal really rendered')
         assert.ok(bounds.right <= bounds.box - 9, 'all terminal columns inside phone: ' + JSON.stringify(bounds))
         if (bounds.scroll > bounds.client) console.log(await run(`JSON.stringify({dims:mobileTerm._core._renderService.dimensions,paused:mobileTerm._core._renderService._isPaused,visibility:document.visibilityState, elements:Array.from(document.querySelectorAll('.xterm-box *')).slice(0,10).map(el=>({c:el.className,style:el.style.cssText,computed:getComputedStyle(el).width,rect:el.getBoundingClientRect().toJSON()}))})`))
         assert.equal(bounds.scroll, bounds.client, 'no horizontal scroll range: ' + JSON.stringify(bounds))
