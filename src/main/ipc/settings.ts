@@ -93,29 +93,23 @@ export function loadSettings(): WorkbenchSettings {
     console.warn('[Settings] Failed to load workspace settings:', err)
   }
 
+  // 工作區的 .workbench/settings.json 會跟著 repo 走，所以它是不受信任的輸入：
+  // 「要執行哪個執行檔」與「要不要略過 agent 審批」只認使用者的全域設定（userData），
+  // 否則打開一個別人的 repo，點下「Claude Code」跑的可能是 repo 自己帶的腳本，
+  // 或是 agent 的審批已經被那份檔案悄悄關掉。
+  // 其餘偏好（版面、語言、cliEnabled 這類顯示開關）才允許專案覆寫。
   const parsed = {
     ...parsedGlobal,
     ...parsedWs,
-    cliPaths: {
-      ...(parsedGlobal.cliPaths || {}),
-      ...(parsedWs.cliPaths || {})
-    },
+    cliPaths: { ...(parsedGlobal.cliPaths || {}) },
     cliEnabled: {
       ...(parsedGlobal.cliEnabled || {}),
       ...(parsedWs.cliEnabled || {})
     },
-    docToolPaths: {
-      ...(parsedGlobal.docToolPaths || {}),
-      ...(parsedWs.docToolPaths || {})
-    },
-    cliTestResults: {
-      ...(parsedGlobal.cliTestResults || {}),
-      ...(parsedWs.cliTestResults || {})
-    },
-    docToolTestResults: {
-      ...(parsedGlobal.docToolTestResults || {}),
-      ...(parsedWs.docToolTestResults || {})
-    }
+    docToolPaths: { ...(parsedGlobal.docToolPaths || {}) },
+    cliTestResults: { ...(parsedGlobal.cliTestResults || {}) },
+    docToolTestResults: { ...(parsedGlobal.docToolTestResults || {}) },
+    cliBypassPermissions: parsedGlobal.cliBypassPermissions
   }
 
   const isWin = process.platform === 'win32'

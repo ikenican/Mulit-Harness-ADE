@@ -1,5 +1,5 @@
 import * as fs from 'fs'
-import { join, dirname } from 'path'
+import { join, dirname, resolve, relative, isAbsolute } from 'path'
 import { AGENT_PATHS } from './paths'
 import { splitEnv } from './manifest'
 import type { AgentId, ExtManifest, FileChange } from '../../preload/index'
@@ -8,6 +8,31 @@ import type { AgentId, ExtManifest, FileChange } from '../../preload/index'
 // 沿用 ShareProjectMem 的「單一真相 + 生成各家原生格式」模式。
 //
 // 合併原則：只擁有自己管理的鍵，絕不整檔覆寫使用者既有設定。
+
+// .workbench/extensions.yaml 跟著 repo 走＝不受信任的輸入。
+// id 會被接進 ~/.claude/skills/<id>/ 這種路徑，`../` 就能把檔案寫到家目錄任何地方；
+// path 會被接進工作區路徑，`../` 就能把工作區外的檔案讀進來再送去別的地方。
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
+function safeId(id: unknown, what: string): string | null {
+  if (typeof id !== 'string' || !SAFE_ID.test(id) || id === '.' || id === '..') {
+    console.warn(`[ext] ${what} "${String(id)}" ignored: id must match ${SAFE_ID}`)
+    return null
+  }
+  return id
+}
+
+/** 回傳工作區內的絕對路徑；踩出工作區就回 null */
+function insideWorkspace(workspaceRoot: string, rel: unknown): string | null {
+  if (typeof rel !== 'string' || !rel) return null
+  const abs = resolve(workspaceRoot, rel)
+  const r = relative(resolve(workspaceRoot), abs)
+  if (r.startsWith('..') || isAbsolute(r)) {
+    console.warn(`[ext] skill path "${rel}" ignored: outside the workspace`)
+    return null
+  }
+  return abs
+}
 
 function readText(p: string): string {
   try {
@@ -45,6 +70,7 @@ function mergeMcpJson(existingRaw: string, manifest: ExtManifest, agent: AgentId
 
   for (const m of manifest.mcp) {
     if (!m.targets.includes(agent)) continue
+    if (!safeId(m.id, 'mcp')) continue
     // 憑證不落檔：${conn:x} 的 env 在 spawn 時才注入
     const { plain } = splitEnv(m.env)
     servers[m.id] = {
@@ -110,7 +136,10 @@ export function planSync(workspaceRoot: string, manifest: ExtManifest): FileChan
 
   // ── Skills：同一份 SKILL.md 複製到各家目錄
   for (const s of manifest.skills) {
-    const srcMd = join(workspaceRoot, s.path, 'SKILL.md')
+    if (!safeId(s.id, 'skill')) continue
+    const srcDir = insideWorkspace(workspaceRoot, s.path)
+    if (!srcDir) continue
+    const srcMd = join(srcDir, 'SKILL.md')
     const content = readText(srcMd)
     if (!content) {
       changes.push({

@@ -21,7 +21,11 @@ export default function MermaidBlock({ chart, theme }: MermaidBlockProps): JSX.E
       mermaid.initialize({
         startOnLoad: false,
         theme: theme === 'dark' ? 'dark' : 'default',
-        securityLevel: 'loose',
+        // 一定要 strict：loose 會讓 mermaid 跳過 sanitizeUrl，
+        // 圖裡的 `click A "javascript:…"` 會原樣變成 <a xlink:href>，
+        // 而下面是用 dangerouslySetInnerHTML 塞進 renderer 的——
+        // 等於工作區裡一個 .md 點一下就能拿到 window.api（pty.spawn）。
+        securityLevel: 'strict',
         suppressErrorRendering: true
       })
     } catch (e) {

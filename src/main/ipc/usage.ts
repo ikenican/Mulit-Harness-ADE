@@ -105,6 +105,14 @@ export function fileDays(agent: UsageAgent, path: string, content?: string): Day
   }
   const hit = c.get(path)
   if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return hit.days
+  // 整檔 readFileSync 沒有上限，而這些紀錄檔會長到上百 MB。
+  // utf8 解成 UTF-16 字串再 split 成每一行，尖峰是檔案大小的好幾倍；
+  // 超過 V8 字串上限會丟例外（被 catch 成 0），在那之下則可能直接 OOM 把整個 App 帶走。
+  if (st.size > 64 * 1024 * 1024) {
+    c.set(path, { mtime: st.mtimeMs, size: st.size, days: {} })
+    cacheDirty = true
+    return {}
+  }
   let days: Days = {}
   try {
     days = PARSERS[agent](content ?? fs.readFileSync(path, 'utf8'))

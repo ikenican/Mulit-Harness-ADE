@@ -258,8 +258,12 @@ function formatUpdaterError(msg: string): string {
   })
 
   ipcMain.handle('updater:openRelease', async (_e, customUrl?: string): Promise<void> => {
-    const url = customUrl || updaterStatus.updateInfo?.downloadUrl || 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
-    await shell.openExternal(url)
+    const fallback = 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
+    const url = customUrl || updaterStatus.updateInfo?.downloadUrl || fallback
+    // 只開 http(s)：openExternal 會把 file: 或自訂 scheme 交給作業系統處理
+    const ok = /^https?:\/\//i.test(url)
+    if (!ok) console.warn('[Updater] refused to open non-http url:', url)
+    await shell.openExternal(ok ? url : fallback)
   })
 
   // 應用程式啟動 5 秒後若使用者開啟 autoCheckUpdates，執行一次靜默檢查（僅提示，絕不自動下載）
