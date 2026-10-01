@@ -53,7 +53,8 @@
   --radius-control: 8px;
   --radius-dialog: 12px;
   --radius-pill: 999px;
-  --vibe-gradient: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+  /* 跟著各主題的 --accent 走，Vibe／Dev 同一色調 */
+  --vibe-gradient: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, var(--fg)) 100%);
 }
 
 /* 系統偏好暗色時、JS 尚未設定 data-theme 前的 FOUC 保護 */
@@ -514,15 +515,11 @@ button {
 }
 
 /* ── Vibe Coding 模式（<html data-mode="vibe">）────────────────────
-   只覆寫 token 與少數外框；版面切換由 App.tsx 的 grid-template-areas 負責。 */
+   只覆寫圓角與少數外框，配色沿用 Dev 模式的主題 token；版面切換由 App.tsx 的 grid-template-areas 負責。 */
 :root[data-mode='vibe'] {
   --radius: 12px;
   --radius-sm: 8px;
   --radius-control: 10px;
-  --accent: #6d4aff;
-}
-:root[data-mode='vibe'][data-theme^='dark'] {
-  --accent: #9b87ff;
 }
 :root[data-mode='vibe'] .app-brand .dot {
   background: var(--vibe-gradient);
@@ -547,8 +544,8 @@ button {
   animation: vibe-glow 2s ease-in-out infinite;
 }
 @keyframes vibe-glow {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(109, 74, 255, 0.25), 0 0 12px rgba(109, 74, 255, 0.15); }
-  50% { box-shadow: 0 0 0 2px rgba(109, 74, 255, 0.45), 0 0 24px rgba(37, 99, 235, 0.3); }
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 15%, transparent); }
+  50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 24px color-mix(in srgb, var(--accent) 30%, transparent); }
 }
 :root[data-mode='vibe'] .col-center {
   margin: var(--space-4) var(--space-4) var(--space-4) var(--space-2);
