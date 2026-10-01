@@ -1,45 +1,83 @@
 import type { Terminal } from '@xterm/xterm'
 
-// 中文輸入法（注音／拼音）打字時，不可以用程式去搶終端的 focus 或改它的尺寸。
-//
-// 為什麼：組字進行中時，還沒送出的字是放在 xterm 那個隱藏的 <textarea> 裡的。
-// 程式呼叫 focus()（或 resize 造成重繪）會讓 Chromium 中止這次組字，
-// 而被中止的內容會留在 textarea 裡沒被清掉。xterm 判斷「這次輸入法送了什麼」
-// 用的是 textarea 內容的前後差異（CompositionHelper 的 _handleAnyTextareaChanges），
-// 所以下一個組字鍵進來時，殘留的那段會被當成新輸入一起再送一次 ——
-// 畫面上就是「打到一半的字又被貼上一次」。
-//
-// 真人點擊造成的 focus 不受影響：那是使用者自己要離開，瀏覽器會正常結束組字。
-
+// xterm 5.5 finalizes composition on non-229 keydown, then sends it again
+// on compositionend. Its 229 fallback also diffs the entire retained textarea.
+// Let compositionend own commits, and use InputEvent.data for IME passthrough.
 const composing = new WeakSet<Terminal>()
+const pending = new WeakSet<Terminal>()
+
+export function isImeKey(term: Terminal, e: KeyboardEvent): boolean {
+  return composing.has(term) || e.isComposing || e.key === 'Process' || e.keyCode === 229
+}
 
 /** 在 term.open() 之後呼叫；回傳解除監聽的函式 */
 export function trackComposition(term: Terminal): () => void {
   const ta = term.textarea
-  if (!ta) return () => {}
+  const el = term.element
+  if (!ta || !el) return () => {}
+  let imeInput = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const settle = (): void => {
+    clearTimeout(timer)
+    // Registered after xterm's compositionend listener: its commit flushes first.
+    timer = setTimeout(() => {
+      pending.delete(term)
+      if (!composing.has(term) && !term.options.screenReaderMode) ta.value = ''
+    }, 0)
+  }
   const start = (): void => {
+    clearTimeout(timer)
+    if (!pending.has(term) && !term.options.screenReaderMode) ta.value = ''
     composing.add(term)
   }
   const end = (): void => {
     composing.delete(term)
+    pending.add(term)
+    settle()
   }
-  ta.addEventListener('compositionstart', start)
+  const keydown = (e: KeyboardEvent): void => {
+    imeInput = e.key === 'Process' || e.keyCode === 229
+  }
+  const input = (e: Event): void => {
+    const ev = e as InputEvent
+    if (ev.inputType === 'insertText') {
+      if (composing.has(term) || pending.has(term)) {
+        // The deferred composition commit already owns this text.
+        ev.stopImmediatePropagation()
+      } else if (imeInput && ev.data) {
+        term.input(ev.data, true)
+        ev.stopImmediatePropagation()
+      }
+    } else if (imeInput && !isComposing(term) && ev.inputType === 'deleteContentBackward') {
+      term.input('\x7f', true)
+      ev.stopImmediatePropagation()
+    }
+    if (!composing.has(term) && !pending.has(term)) settle()
+  }
+  el.addEventListener('keydown', keydown, true)
+  el.addEventListener('input', input, true)
+  el.addEventListener('compositionstart', start, true)
   ta.addEventListener('compositionend', end)
-  // 失焦時組字一定已經結束，殘留的旗標要清掉，否則之後都不會自動 focus 了
+  ta.addEventListener('keyup', settle)
   ta.addEventListener('blur', end)
   return () => {
-    ta.removeEventListener('compositionstart', start)
+    clearTimeout(timer)
+    el.removeEventListener('keydown', keydown, true)
+    el.removeEventListener('input', input, true)
+    el.removeEventListener('compositionstart', start, true)
     ta.removeEventListener('compositionend', end)
+    ta.removeEventListener('keyup', settle)
     ta.removeEventListener('blur', end)
     composing.delete(term)
+    pending.delete(term)
   }
 }
 
 export function isComposing(term: Terminal): boolean {
-  return composing.has(term)
+  return composing.has(term) || pending.has(term)
 }
 
 /** 組字中就不搶 focus（使用者本來就在打這個終端，不搶也不影響） */
 export function focusTerm(term: Terminal): void {
-  if (!composing.has(term)) term.focus()
+  if (!isComposing(term)) term.focus()
 }
