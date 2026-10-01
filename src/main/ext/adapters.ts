@@ -73,9 +73,10 @@ function mergeMcpJson(existingRaw: string, manifest: ExtManifest, agent: AgentId
     if (!safeId(m.id, 'mcp')) continue
     // 憑證不落檔：${conn:x} 的 env 在 spawn 時才注入
     const { plain } = splitEnv(m.env)
+    const windowsNpx = process.platform === 'win32' && agent === 'claude' && /^npx(?:\.cmd)?$/i.test(m.command)
     servers[m.id] = {
-      command: m.command,
-      args: m.args || [],
+      command: windowsNpx ? 'cmd.exe' : m.command,
+      args: windowsNpx ? ['/c', 'npx', ...(m.args || [])] : m.args || [],
       ...(Object.keys(plain).length ? { env: plain } : {})
     }
   }
