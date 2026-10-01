@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.25] - 2026-10-01
+
+### Added / 新增
+- Remote Control 設定頁可選擇手機連線用的 Wi-Fi、有線網路或 VPN IP；憑證安裝網址、App 網址與配對 QR 都使用所選位址，並驗證配對目標是目前偵測到的網卡位址。
+
 ## [0.1.24] - 2026-10-01
 
 ### Added / 新增
