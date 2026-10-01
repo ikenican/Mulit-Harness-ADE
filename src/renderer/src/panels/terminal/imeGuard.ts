@@ -48,7 +48,7 @@ export function trackComposition(term: Terminal): () => void {
         term.input(ev.data, true)
         ev.stopImmediatePropagation()
       }
-    } else if (imeInput && !isComposing(term) && ev.inputType === 'deleteContentBackward') {
+    } else if (imeInput && !composing.has(term) && ev.inputType === 'deleteContentBackward') {
       term.input('\x7f', true)
       ev.stopImmediatePropagation()
     }

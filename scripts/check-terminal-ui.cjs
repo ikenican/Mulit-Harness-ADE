@@ -56,26 +56,21 @@ window.ready = true
 `
 
 app.whenReady().then(async () => {
-  const { createServer } = await import('vite')
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbench-terminal-check-'))
-  const server = await createServer({ configFile: false, cacheDir,
-    plugins: [{ name: 'terminal-check', resolveId(id) { if (id === '/__check.tsx') return id }, load(id) { if (id === '/__check.tsx') return fixture },
-      configureServer(s) { s.middlewares.use((req, res, next) => {
-        if (req.url === '/__check.html') {
-          res.setHeader('Content-Type', 'text/html')
-          res.end('<meta name="viewport" content="width=device-width,initial-scale=1"><script>window.onerror=(m)=>console.error(m)</script><script type="module" src="/__check.tsx"></script>')
-        } else next()
-      }) }
-    }],
-    esbuild: { jsx: 'automatic' }, server: { host: '127.0.0.1', port: 0 } })
-  await server.listen()
+  await require('esbuild').build({
+    stdin: { contents: fixture.replaceAll("'/src/", "'./src/"), resolveDir: process.cwd(), loader: 'tsx' },
+    bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic',
+    define: { 'process.env.NODE_ENV': '"development"' }, outfile: path.join(cacheDir, 'page.js')
+  })
+  fs.writeFileSync(path.join(cacheDir, 'index.html'), '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="page.css"><script src="page.js"></script>')
   const win = new BrowserWindow({ show: false, width: 390, height: 844, useContentSize: true, webPreferences: { backgroundThrottling: false, offscreen: true } })
   const run = code => win.webContents.executeJavaScript(code)
   const pause = () => new Promise(r => setTimeout(r, 400))
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.log(message) })
   try {
-    await win.loadURL(server.resolvedUrls.local[0] + '__check.html')
-    for (let i = 0; i < 100 && !await run('window.ready'); i++) await new Promise(r => setTimeout(r, 50))
+    await win.loadFile(path.join(cacheDir, 'index.html'))
+    const deadline = Date.now() + 30000
+    while (!await run('window.ready') && Date.now() < deadline) await new Promise(r => setTimeout(r, 100))
     assert.equal(await run('window.ready'), true, 'fixture loaded')
     for (const guarded of [false, true]) {
       await run(`window.makeTerminal(${guarded})`)
@@ -160,7 +155,6 @@ app.whenReady().then(async () => {
     console.log('mobile reconnect / desktop resize: passed')
   } finally {
     win.destroy()
-    await server.close()
   }
   app.quit()
 }).catch(err => { console.error(err); app.exit(1) })
