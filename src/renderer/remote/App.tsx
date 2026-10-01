@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { version } from '../../../package.json'
 import type {
   RemoteGitFile,
   RemoteLauncher,
@@ -1088,6 +1089,10 @@ function SettingsSheet({
         )}
         <button className="btn danger press" onClick={() => setConfirm(true)}>
           {t('unpair')}
+        </button>
+        <p className="footnote stack-gap">{t('interfaceVersion', { version })}</p>
+        <button className="btn press" onClick={() => window.location.reload()}>
+          {t('reloadInterface')}
         </button>
       </Sheet>
       {confirmBypass && (

@@ -14,6 +14,7 @@ import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { trackComposition, isImeKey } from '/src/renderer/src/panels/terminal/imeGuard.ts'
 import TerminalView from '/src/renderer/remote/TerminalView.tsx'
+import { Home, SettingsSheet } from '/src/renderer/remote/App.tsx'
 import '/src/renderer/remote/remote.css'
 window.makeTerminal = (guarded) => {
   window.term?.dispose()
@@ -52,6 +53,20 @@ window.mountMobile = () => {
     session={{id:'check', title:'A'.repeat(300), workspaceName:'workspace', cols:160, rows:40}}
     hostName="desktop" onBack={() => {}} />)
 }
+window.mountHome = () => {
+  window.mobileTerm?.dispose()
+  document.body.innerHTML = '<div id="root"></div>'
+  createRoot(document.getElementById('root')).render(<Home host="DESKTOP-B6JV938" connState="open" loaded
+    sessions={[{id:'long', windowId:1, title:'@claude: <command-message>' + 'long-session-name'.repeat(40), launcherKey:'claude', startTime:Date.now(), needsApproval:false}]}
+    windows={[{id:1, workspaceName:'Business harness'}]} workspaces={[]} hosts={[]} tails={{}} busy={{}}
+    onOpen={() => {}} onNew={() => {}} onSettings={() => {}} />)
+}
+window.mountSettings = () => {
+  document.body.innerHTML = '<div id="root"></div>'
+  createRoot(document.getElementById('root')).render(<SettingsSheet token="test" host="desktop" connState="open"
+    hosts={[]} activeHost="https://localhost:47600/" onHostsChange={() => {}} onSwitchHost={() => {}}
+    onSetBypass={() => {}} onClose={() => {}} onUnpair={() => {}} />)
+}
 window.ready = true
 `
 
@@ -60,6 +75,9 @@ app.whenReady().then(async () => {
   await require('esbuild').build({
     stdin: { contents: fixture.replaceAll("'/src/", "'./src/"), resolveDir: process.cwd(), loader: 'tsx' },
     bundle: true, platform: 'browser', format: 'iife', jsx: 'automatic',
+    plugins: [{ name: 'home-check', setup(build) { build.onLoad({filter: /remote[\\/]App\.tsx$/}, args => ({
+      contents: fs.readFileSync(args.path, 'utf8') + '\nexport { Home, SettingsSheet }', loader: 'tsx', resolveDir: path.dirname(args.path)
+    })) } }],
     define: { 'process.env.NODE_ENV': '"development"' }, outfile: path.join(cacheDir, 'page.js')
   })
   fs.writeFileSync(path.join(cacheDir, 'index.html'), '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="page.css"><script src="page.js"></script>')
@@ -153,6 +171,23 @@ app.whenReady().then(async () => {
     assert.equal(await run('mobileTerm.cols'), cols, 'desktop resize cannot leave phone wide')
     assert.ok(await run('requests.filter(m => m.t === "resize").length') < 40, 'no resize feedback loop')
     console.log('mobile reconnect / desktop resize: passed')
+    await run('window.mountHome()')
+    await pause()
+    await win.webContents.capturePage()
+    const home = await run(`({page:document.documentElement.scrollWidth, width:innerWidth,
+      card:document.querySelector('.session-card').getBoundingClientRect().right,
+      add:document.querySelector('.add-card').getBoundingClientRect().right,
+      title:document.querySelector('.card-title').scrollWidth,
+      visible:document.querySelector('.card-title').clientWidth})`)
+    assert.ok(home.title > home.visible, 'long title needs ellipsis')
+    assert.ok(home.page <= home.width && home.card <= home.width - 16 && home.add <= home.width - 16, 'home card and row fit: ' + JSON.stringify(home))
+    assert.equal(await run('getComputedStyle(document.querySelector(".session-card")).minWidth'), '0px', 'button intrinsic width cannot widen the grid')
+    console.log('home long session name: passed')
+    await run('window.mountSettings()')
+    await pause()
+    assert.ok(await run('document.body.textContent.includes("v0.1.28")'), 'show loaded mobile interface version')
+    assert.ok(await run('Array.from(document.querySelectorAll("button")).some(b => /Reload mobile interface|重新載入手機介面/.test(b.textContent))'), 'standalone PWA has a reload action')
+    console.log('mobile interface version / reload control: passed')
   } finally {
     win.destroy()
   }

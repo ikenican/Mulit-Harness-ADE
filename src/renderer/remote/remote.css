@@ -529,8 +529,12 @@ p {
 }
 .stack {
   display: grid;
+  width: 100%;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+}
+.stack > * {
+  min-width: 0;
 }
 
 /* 一個終端 = 一顆泡泡 */
