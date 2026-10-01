@@ -1699,3 +1699,13 @@
 .remote-reset {
   margin-top: 10px;
 }
+.remote-address-select {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  background: var(--bg2);
+  font: inherit;
+}

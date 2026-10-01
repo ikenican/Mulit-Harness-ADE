@@ -9,11 +9,17 @@ import type { RemoteDeviceInfo, RemotePairingInfo, RemoteStatus } from '../../..
 export default function RemoteSettings({ bypassActive }: { bypassActive: boolean }): JSX.Element {
   const { t } = useTranslation()
   const [status, setStatus] = useState<RemoteStatus | null>(null)
+  const [selectedAddress, setSelectedAddress] = useState('')
   const [devices, setDevices] = useState<RemoteDeviceInfo[]>([])
   const [setupQr, setSetupQr] = useState<string | null>(null)
   const [pairing, setPairing] = useState<RemotePairingInfo | null>(null)
   const [now, setNow] = useState(Date.now())
   const [busy, setBusy] = useState(false)
+  const address = status?.addresses.includes(selectedAddress) ? selectedAddress : status?.addresses[0] || ''
+  const setupUrl = status?.running && address ? `http://${address}:${status.port + 1}/` : null
+  const appUrl = status?.running && address ? `https://${address}:${status.port}/` : null
+  const secondsLeft = pairing ? Math.max(0, Math.round((pairing.expiresAt - now) / 1000)) : 0
+  const pairingCode = pairing?.code
 
   const refreshDevices = useCallback(() => {
     window.api.remote.devices().then(setDevices).catch(() => {})
@@ -29,13 +35,27 @@ export default function RemoteSettings({ bypassActive }: { bypassActive: boolean
   }, [refreshDevices])
 
   useEffect(() => {
-    if (status?.running && status.setupUrl) {
-      window.api.remote.qr(status.setupUrl).then(setSetupQr).catch(() => setSetupQr(null))
-    } else {
+    if (!setupUrl) {
       setSetupQr(null)
       setPairing(null)
+      return
     }
-  }, [status?.running, status?.setupUrl])
+    let active = true
+    window.api.remote.qr(setupUrl)
+      .then(setupQrData => { if (active) setSetupQr(setupQrData) })
+      .catch(() => { if (active) setSetupQr(null) })
+    return () => { active = false }
+  }, [setupUrl])
+
+  useEffect(() => {
+    if (!pairingCode || !appUrl) return
+    let active = true
+    const pairUrl = `${appUrl}#pair=${pairingCode}`
+    window.api.remote.qr(pairUrl).then((pairQr) => {
+      if (active) setPairing((current) => current?.code === pairingCode ? { ...current, pairUrl, pairQr } : current)
+    }).catch(() => {})
+    return () => { active = false }
+  }, [appUrl, pairingCode])
 
   // 配對碼倒數
   useEffect(() => {
@@ -59,7 +79,7 @@ export default function RemoteSettings({ bypassActive }: { bypassActive: boolean
   }
 
   const newCode = async (): Promise<void> => {
-    setPairing(await window.api.remote.createPairing())
+    setPairing(await window.api.remote.createPairing(address))
     setNow(Date.now())
   }
 
@@ -80,7 +100,6 @@ export default function RemoteSettings({ bypassActive }: { bypassActive: boolean
     }
   }
 
-  const secondsLeft = pairing ? Math.max(0, Math.round((pairing.expiresAt - now) / 1000)) : 0
   const fmtTime = (ms: number): string => new Date(ms).toLocaleString()
 
   return (
@@ -126,15 +145,29 @@ export default function RemoteSettings({ bypassActive }: { bypassActive: boolean
           </div>
         )}
       </div>
+      {status?.running && status.addresses.length > 0 && (
+        <div className="macos-section">
+          <label className="macos-section-header" htmlFor="remote-address">{t('remote.addressLabel')}</label>
+          <select
+            id="remote-address"
+            className="remote-address-select"
+            value={address}
+            onChange={(e) => setSelectedAddress(e.target.value)}
+          >
+            {status.addresses.map((ip) => <option key={ip} value={ip}>{ip}</option>)}
+          </select>
+          <p className="remote-note">{t('remote.addressHint')}</p>
+        </div>
+      )}
 
-      {status?.running && status.setupUrl && (
+      {status?.running && setupUrl && (
         <div className="macos-section">
           <span className="macos-section-header">{t('remote.step1')}</span>
           <div className="macos-inset-group remote-card">
             {setupQr && <img className="remote-qr" src={setupQr} alt="setup QR code" />}
             <div className="remote-card-text">
               <p className="macos-row-sub">{t('remote.step1Sub')}</p>
-              <code className="remote-url">{status.setupUrl}</code>
+              <code className="remote-url">{setupUrl}</code>
               {status.caFingerprint && (
                 <p className="remote-fp">
                   {t('remote.fingerprint')}
@@ -147,14 +180,14 @@ export default function RemoteSettings({ bypassActive }: { bypassActive: boolean
         </div>
       )}
 
-      {status?.running && status.appUrl && (
+      {status?.running && appUrl && (
         <div className="macos-section">
           <span className="macos-section-header">{t('remote.step2')}</span>
           <div className="macos-inset-group remote-card">
             {pairing?.pairQr && secondsLeft > 0 && <img className="remote-qr" src={pairing.pairQr} alt="pairing QR code" />}
             <div className="remote-card-text">
               <p className="macos-row-sub">{t('remote.step2Sub')}</p>
-              <code className="remote-url">{status.appUrl}</code>
+              <code className="remote-url">{appUrl}</code>
               {pairing && secondsLeft > 0 ? (
                 <>
                   <div className="remote-code">
