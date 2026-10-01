@@ -8,6 +8,7 @@ import * as crypto from 'crypto'
 import { execFileSync } from 'child_process'
 import { getWorkspaceForEvent } from '../index'
 import { looksLikeApprovalPrompt } from '../../shared/approvalDetect'
+import { detectDevPort } from '../../shared/portDetect'
 import { resolveConnectionEnv } from './conn'
 import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
 
@@ -46,11 +47,18 @@ interface PtyEntry {
   subs: Map<string, PtySubscriber>
   needsApproval: boolean
   lastOutputAt: number
+  /** 近期還在吐輸出＝執行中。由 main 判定，遠端直接用，不讓手機拿自己的時鐘去比對 */
+  busy: boolean
+  busyTimer: NodeJS.Timeout | null
+  /** 這個終端印出來的本機 dev server port（手機預覽用） */
+  devPort: number | null
   /** 被使用者關掉（而不是自己結束）：遠端不必推播「任務結束」 */
   killed: boolean
 }
 
 const SCROLLBACK_LIMIT = 256 * 1024
+/** 停止輸出多久算「閒置」 */
+const BUSY_IDLE_MS = 4000
 
 const entries = new Map<string, PtyEntry>()
 
@@ -71,6 +79,10 @@ export interface PtySessionInfo {
   rows: number
   needsApproval: boolean
   lastOutputAt: number
+  /** 近期還在吐輸出（main 判定的「執行中」） */
+  busy: boolean
+  /** 終端印出的本機 dev server port，沒有就 null */
+  devPort: number | null
 }
 
 function toInfo(id: string, e: PtyEntry): PtySessionInfo {
@@ -86,7 +98,9 @@ function toInfo(id: string, e: PtyEntry): PtySessionInfo {
     cols: e.cols,
     rows: e.rows,
     needsApproval: e.needsApproval,
-    lastOutputAt: e.lastOutputAt
+    lastOutputAt: e.lastOutputAt,
+    busy: e.busy,
+    devPort: e.devPort
   }
 }
 
@@ -166,6 +180,11 @@ export function cleanupPtyForWindow(webContentsId: number): void {
 /** 從表中移除並發出 exit 事件；onExit 與視窗關閉都可能呼叫，只處理一次 */
 function finish(id: string, e: PtyEntry, code: number): void {
   if (entries.get(id) !== e) return
+  if (e.busyTimer) {
+    clearTimeout(e.busyTimer)
+    e.busyTimer = null
+  }
+  e.busy = false
   entries.delete(id)
   ptyEvents.emit('exit', id, code, e.title, e.killed)
   ptyEvents.emit('changed')
@@ -340,17 +359,50 @@ const BUILTIN_TITLES: Record<string, string> = {
   bash: 'Bash'
 }
 
-/** 讀取工作區 agents/*.yaml 的 launcher 定義（原始 yaml 物件） */
-function readLauncherDefs(ws: string): any[] {
+// agents/*.yaml 跟著 repo 走，所以它是「不受信任的輸入」：
+// 只能從已知的 CLI 裡挑一個，不能自己指定要跑哪個執行檔。
+const KNOWN_CLI = new Set(['claude', 'codex', 'antigravity', 'powershell', 'pwsh', 'cmd', 'bash'])
+
+// 這些環境變數能在別人的行程裡插入程式碼（NODE_OPTIONS --require、PATH 換掉執行檔…），
+// 就算 cli 本身是正牌的官方 CLI 也一樣，所以 yaml 不准碰。
+const BLOCKED_ENV = /^(NODE_OPTIONS|NODE_REPL_EXTERNAL_MODULE|PATH|LD_PRELOAD|LD_AUDIT|LD_LIBRARY_PATH|DYLD_.*|PYTHONPATH|PYTHONSTARTUP|PERL5OPT|RUBYOPT|ELECTRON_RUN_AS_NODE|BASH_ENV|ENV)$/i
+
+function sanitizeLauncherEnv(env: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!env || typeof env !== 'object') return out
+  for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+    if (BLOCKED_ENV.test(k)) {
+      console.warn(`[pty] launcher env ${k} ignored: not allowed from agents/*.yaml`)
+      continue
+    }
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k] = String(v)
+  }
+  return out
+}
+
+/** 讀取工作區 agents/*.yaml 的 launcher 定義（已過濾成安全的形狀） */
+function readLauncherDefs(ws: string): Array<{ id: string; name: string; cli: string; args: string[]; env: Record<string, string> }> {
   const agentsDir = path.join(ws, 'agents')
   if (!ws || !fs.existsSync(agentsDir)) return []
-  const out: any[] = []
+  const out: Array<{ id: string; name: string; cli: string; args: string[]; env: Record<string, string> }> = []
   try {
     for (const file of fs.readdirSync(agentsDir)) {
       if (file.endsWith('.yaml') || file.endsWith('.yml')) {
         const content = fs.readFileSync(path.join(agentsDir, file), 'utf8')
         const parsed = yaml.load(content) as any
-        if (parsed && parsed.launcher) out.push(parsed.launcher)
+        const l = parsed?.launcher
+        if (!l || typeof l.id !== 'string' || !l.id) continue
+        if (typeof l.cli !== 'string' || !KNOWN_CLI.has(l.cli)) {
+          console.warn(`[pty] launcher ${l.id} skipped: cli "${l.cli}" is not one of ${[...KNOWN_CLI].join(', ')}`)
+          continue
+        }
+        out.push({
+          id: l.id,
+          name: typeof l.name === 'string' && l.name ? l.name : l.id,
+          cli: l.cli,
+          args: Array.isArray(l.args) ? l.args.filter((a: unknown): a is string => typeof a === 'string') : [],
+          env: sanitizeLauncherEnv(l.env)
+        })
       }
     }
   } catch (e) {
@@ -372,7 +424,10 @@ export function listLaunchers(ws: string): CliLauncher[] {
       cli: l.cli,
       command: r.cmd,
       args: launcherArgs,
-      env: l.env || {}
+      env: l.env || {},
+      // yaml 自己有加參數或環境變數才算「真的自訂」。沒有的話它只是內建 CLI 的別名，
+      // 呼叫端可以不要重複列出（手機上會變成兩個一模一樣的「Claude Code」）。
+      hasExtras: (l.args || []).length > 0 || Object.keys(l.env || {}).length > 0
     }
   })
 }
@@ -489,6 +544,9 @@ export function spawnPty(
     subs: new Map(),
     needsApproval: false,
     lastOutputAt: Date.now(),
+    busy: false,
+    busyTimer: null,
+    devPort: null,
     killed: false
   }
   if (ctx.subscribeOwner) entry.subs.set(`wc:${ctx.owner.id}`, webContentsSubscriber(ctx.owner))
@@ -505,6 +563,29 @@ export function spawnPty(
       entry.scrollback = entry.scrollback.slice(cut)
     }
     for (const sub of entry.subs.values()) sub.data(id, data)
+
+    // 「執行中／閒置」由 main 判定後廣播（只在狀態翻轉時發），
+    // 否則遠端只能拿手機自己的時鐘去比 lastOutputAt：時鐘有偏差就永遠顯示錯，
+    // 而且 state 不是每次輸出都重送，閒置與執行中會卡在舊值。
+    if (!entry.busy) {
+      entry.busy = true
+      ptyEvents.emit('activity', id, true)
+    }
+    if (entry.busyTimer) clearTimeout(entry.busyTimer)
+    entry.busyTimer = setTimeout(() => {
+      entry.busyTimer = null
+      entry.busy = false
+      ptyEvents.emit('activity', id, false)
+    }, BUSY_IDLE_MS)
+    entry.busyTimer.unref?.()
+
+    // dev server 網址：看 scrollback 尾段而不是單一 chunk，
+    // 否則 Vite 那行被切成兩塊時就抓不到 port。
+    const port = detectDevPort(entry.scrollback.slice(-4000))
+    if (port && port !== entry.devPort) {
+      entry.devPort = port
+      ptyEvents.emit('changed')
+    }
 
     // 待審批偵測：false→true 才發事件，避免同一個提示連發推播
     if (!entry.needsApproval && looksLikeApprovalPrompt(data)) {

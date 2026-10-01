@@ -1,0 +1,2083 @@
+<title>Multi-Harness ADE Architecture</title>
+<style>
+  :root {
+    --ground: #f1f3f1;
+    --surface: #ffffff;
+    --surface-2: #e9ece9;
+    --lane: #e4e8e4;
+    --line: #d3d8d3;
+    --line-strong: #b4bcb4;
+    --ink: #1b1f22;
+    --ink-2: #49524f;
+    --muted: #6d7671;
+    --pine: #2f6553;
+    --pine-ink: #24503f;
+    --amber: #9a6a1c;
+    --amber-ink: #7a5414;
+    --rust: #8f3b32;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", "Noto Sans TC", ui-sans-serif, system-ui, -apple-system, "Microsoft JhengHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14181a;
+      --surface: #1c2124;
+      --surface-2: #232a2d;
+      --lane: #1f2528;
+      --line: #313a3d;
+      --line-strong: #4a5559;
+      --ink: #e7ecea;
+      --ink-2: #b4bebb;
+      --muted: #8b9793;
+      --pine: #7db69c;
+      --pine-ink: #9ccbb4;
+      --amber: #d8a959;
+      --amber-ink: #e6bf79;
+      --rust: #d98a80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14181a;
+    --surface: #1c2124;
+    --surface-2: #232a2d;
+    --lane: #1f2528;
+    --line: #313a3d;
+    --line-strong: #4a5559;
+    --ink: #e7ecea;
+    --ink-2: #b4bebb;
+    --muted: #8b9793;
+    --pine: #7db69c;
+    --pine-ink: #9ccbb4;
+    --amber: #d8a959;
+    --amber-ink: #e6bf79;
+    --rust: #d98a80;
+  }
+
+  /* 預設顯示中文；沒有 JS 也只會看到一種語言 */
+  .en {
+    display: none;
+  }
+  :root[data-doc-lang="en"] .zh {
+    display: none;
+  }
+  :root[data-doc-lang="en"] .en {
+    display: revert;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 0 80px;
+  }
+
+  header.top {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 5;
+    background: color-mix(in srgb, var(--ground) 90%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding-inline: 20px;
+    padding-block: 9px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+  }
+  .bar .name {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-right: auto;
+  }
+  nav.toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  nav.toc a {
+    color: var(--muted);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    white-space: nowrap;
+  }
+  nav.toc a:hover,
+  nav.toc a:focus-visible {
+    color: var(--pine);
+    border-bottom-color: var(--pine);
+  }
+  .langs {
+    display: flex;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    overflow: hidden;
+    flex: none;
+  }
+  .langs button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 11px;
+    cursor: pointer;
+  }
+  .langs button[aria-pressed="true"] {
+    background: var(--pine);
+    color: #fff;
+  }
+
+  .hero {
+    padding-block: 38px 26px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 12px;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(27px, 4.6vw, 38px);
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    text-wrap: balance;
+  }
+  .hero p {
+    margin: 0;
+    max-width: 64ch;
+    color: var(--ink-2);
+  }
+  .stamp {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--pine);
+  }
+  .principle {
+    margin-top: 4px;
+    border-left: 3px solid var(--pine);
+    padding: 2px 0 2px 14px;
+    color: var(--ink-2);
+    max-width: 64ch;
+  }
+  .principle b {
+    color: var(--ink);
+  }
+
+  section {
+    padding-block: 36px;
+    border-bottom: 1px solid var(--line);
+  }
+  h2 {
+    margin: 0 0 4px;
+    font-size: 21px;
+    letter-spacing: -0.015em;
+    font-weight: 600;
+  }
+  .lede {
+    margin: 0 0 20px;
+    color: var(--ink-2);
+    max-width: 68ch;
+  }
+  h3 {
+    margin: 28px 0 10px;
+    font-size: 13.5px;
+    font-family: var(--mono);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--pine);
+  }
+  p {
+    max-width: 68ch;
+  }
+  ul,
+  ol {
+    max-width: 68ch;
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 5px;
+  }
+  code,
+  .m {
+    font-family: var(--mono);
+    font-size: 0.87em;
+  }
+  code {
+    background: var(--surface-2);
+    padding: 0.1em 0.36em;
+    border-radius: 3px;
+  }
+  b,
+  strong {
+    font-weight: 600;
+  }
+
+  figure {
+    margin: 10px 0 6px;
+  }
+  .scroll {
+    overflow-x: auto;
+    padding-bottom: 6px;
+  }
+  svg.diagram {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  svg.d1 {
+    min-width: 860px;
+  }
+  svg.d2,
+  svg.d3 {
+    min-width: 660px;
+  }
+  figcaption {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--muted);
+    max-width: 72ch;
+  }
+  svg .lane-box {
+    fill: var(--lane);
+    stroke: var(--line-strong);
+    stroke-dasharray: 3 3;
+  }
+  svg .box {
+    fill: var(--surface);
+    stroke: var(--line-strong);
+  }
+  svg .box-alt {
+    fill: var(--surface-2);
+    stroke: var(--line-strong);
+  }
+  svg .t-b {
+    font-family: var(--sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    fill: var(--ink);
+  }
+  svg .tm {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    fill: var(--muted);
+  }
+  svg .lane-title {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    fill: var(--muted);
+  }
+  svg .wire {
+    fill: none;
+    stroke: var(--pine);
+    stroke-width: 1.4;
+  }
+  svg .wire-amber {
+    fill: none;
+    stroke: var(--amber);
+    stroke-width: 1.4;
+  }
+  svg .wire-dash {
+    fill: none;
+    stroke: var(--line-strong);
+    stroke-width: 1.2;
+    stroke-dasharray: 4 3;
+  }
+  svg .wl {
+    font-family: var(--mono);
+    font-size: 10px;
+    fill: var(--pine-ink);
+  }
+  svg .wl-a {
+    font-family: var(--mono);
+    font-size: 10px;
+    fill: var(--amber-ink);
+  }
+  svg .wl-m {
+    font-family: var(--mono);
+    font-size: 10px;
+    fill: var(--muted);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  .tscroll {
+    overflow-x: auto;
+  }
+  th,
+  td {
+    text-align: left;
+    vertical-align: top;
+    padding: 9px 14px 9px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom-color: var(--line-strong);
+    white-space: nowrap;
+  }
+  td.k {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+  td.num {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .flow {
+    list-style: none;
+    padding: 0;
+    margin: 4px 0 8px;
+    counter-reset: step;
+    max-width: none;
+  }
+  .flow li {
+    display: grid;
+    grid-template-columns: 24px 112px 1fr;
+    gap: 14px;
+    align-items: start;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--line);
+    margin: 0;
+  }
+  .flow li:last-child {
+    border-bottom: 0;
+  }
+  .flow .n {
+    counter-increment: step;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    padding-top: 3px;
+  }
+  .flow .n::before {
+    content: counter(step, decimal-leading-zero);
+  }
+  .flow .who {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--pine);
+    padding-top: 4px;
+    overflow-wrap: anywhere;
+  }
+  .flow .who.ph {
+    color: var(--amber);
+  }
+  .flow .what {
+    color: var(--ink-2);
+  }
+  .flow .what b {
+    color: var(--ink);
+  }
+  @media (max-width: 620px) {
+    .flow li {
+      grid-template-columns: 24px 1fr;
+      gap: 6px 12px;
+    }
+    .flow .who,
+    .flow .what {
+      grid-column: 2;
+      padding-top: 0;
+    }
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 14px;
+    margin-block: 8px;
+  }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 15px 16px;
+  }
+  .panel h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-family: var(--mono);
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .panel ul {
+    margin: 0;
+    padding-left: 17px;
+    color: var(--ink-2);
+    font-size: 13.5px;
+    max-width: none;
+  }
+  .panel li:last-child {
+    margin-bottom: 0;
+  }
+
+  .guard {
+    border-left: 3px solid var(--rust);
+    background: color-mix(in srgb, var(--rust) 7%, var(--surface));
+    border-radius: 0 6px 6px 0;
+    padding: 12px 15px;
+    margin-block: 14px;
+    font-size: 13.5px;
+    color: var(--ink-2);
+    max-width: 72ch;
+  }
+  .guard b {
+    color: var(--ink);
+  }
+  .note {
+    border-left: 3px solid var(--line-strong);
+    padding: 2px 0 2px 14px;
+    margin-block: 14px;
+    font-size: 13.5px;
+    color: var(--muted);
+    max-width: 72ch;
+  }
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+  }
+  .tag.trust {
+    color: var(--rust);
+  }
+  .tag.lan {
+    color: var(--amber);
+  }
+  .tag.local {
+    color: var(--pine);
+  }
+  footer {
+    padding-block: 26px;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-family: var(--mono);
+  }
+  a {
+    color: var(--pine);
+  }
+</style>
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;600&display=swap"
+/>
+
+<header class="top">
+  <div class="bar">
+    <span class="name">Multi-Harness ADE</span>
+    <nav class="toc">
+      <a href="#shape"><span class="zh">全貌</span><span class="en">Shape</span></a>
+      <a href="#pty"><span class="zh">終端</span><span class="en">Terminals</span></a>
+      <a href="#desktop"><span class="zh">桌面</span><span class="en">Desktop</span></a>
+      <a href="#bridge"><span class="zh">橋接</span><span class="en">Bridge</span></a>
+      <a href="#phone"><span class="zh">手機</span><span class="en">Phone</span></a>
+      <a href="#preview"><span class="zh">預覽</span><span class="en">Preview</span></a>
+      <a href="#flows"><span class="zh">流程</span><span class="en">Flows</span></a>
+      <a href="#trust"><span class="zh">信任邊界</span><span class="en">Trust</span></a>
+      <a href="#limits"><span class="zh">上限</span><span class="en">Limits</span></a>
+      <a href="#state"><span class="zh">狀態</span><span class="en">State</span></a>
+      <a href="#modules"><span class="zh">模組</span><span class="en">Modules</span></a>
+      <a href="#build"><span class="zh">建置</span><span class="en">Build</span></a>
+      <a href="#security"><span class="zh">資安現況</span><span class="en">Security</span></a>
+      <a href="#tradeoffs"><span class="zh">取捨</span><span class="en">Trade-offs</span></a>
+    </nav>
+    <div class="langs" role="group" aria-label="Language">
+      <button type="button" id="lang-zh" aria-pressed="true">繁中</button>
+      <button type="button" id="lang-en" aria-pressed="false">EN</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <span class="stamp">Agent Workbench · v0.1.23</span>
+    <div class="zh">
+      <h1>桌面程式、遠端橋接、手機程式：三個執行環境，同一組終端</h1>
+      <p>
+        Electron 桌面程式擁有 CLI 子行程；跑在它主行程裡的區網橋接把同一組終端用 HTTPS 再發佈一次；
+        iPhone 的主畫面網頁 App 接上去。這裡沒有任何 agent 的實作——迴圈是各廠商的官方 CLI 自己跑的。
+      </p>
+      <p class="principle">
+        <b>這不是 agent runtime。</b>不實作 agent 迴圈、不保存 API 金鑰、不解析任何廠商的私有協定。
+        工作台只做四件事：編輯程式碼、視覺化 Git、啟動 CLI 終端殼、渲染共享記憶。
+        跨 CLI 的交接走 <code>.project-memory/</code> 與 Git。
+      </p>
+    </div>
+    <div class="en">
+      <h1>Desktop app, remote bridge, phone app: three runtimes, one set of terminals</h1>
+      <p>
+        An Electron desktop app owns the CLI child processes. A LAN bridge inside its main process
+        re-publishes those same terminals over HTTPS. An iPhone Home Screen web app attaches to them.
+        Nothing about the agents themselves lives here — each vendor's official CLI runs the loop.
+      </p>
+      <p class="principle">
+        <b>Not an agent runtime.</b> No agent loop, no API keys, no vendor protocol parsing. The workbench
+        edits code, visualizes Git, spawns CLI shells, and renders shared memory. Cross-CLI hand-off goes
+        through <code>.project-memory/</code> and Git.
+      </p>
+    </div>
+  </div>
+
+  <section id="shape">
+    <div class="zh">
+      <h2>系統全貌</h2>
+      <p class="lede">
+        三個執行環境、一條資料主幹。主行程是唯一擁有 pty 子行程與檔案系統存取權的地方；
+        桌面 renderer 透過 preload 這道唯一的縫隙跟它說話，手機透過 WebSocket。
+      </p>
+    </div>
+    <div class="en">
+      <h2>The shape of it</h2>
+      <p class="lede">
+        Three runtimes, one spine. The main process is the only place that owns pty child processes and
+        filesystem access; the desktop renderer talks to it through one preload seam, the phone over a
+        WebSocket.
+      </p>
+    </div>
+
+    <figure>
+      <div class="scroll">
+        <svg class="diagram d1" viewBox="0 0 1020 760" role="img" aria-labelledby="d1t d1d">
+          <title id="d1t">Processes and transports</title>
+          <desc id="d1d">
+            The iPhone app talks to the remote bridge inside the Electron main process over a WebSocket and
+            two HTTP endpoints. The desktop renderer talks to the same main process over Electron IPC through
+            the preload contract. The main process owns the node-pty child processes and all filesystem
+            access. Web Push leaves the machine to Apple's push service.
+          </desc>
+          <defs>
+            <marker id="a-p" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L8 4 L0 8 z" fill="var(--pine)" />
+            </marker>
+            <marker id="a-ps" viewBox="0 0 8 8" refX="1" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M8 0 L0 4 L8 8 z" fill="var(--pine)" />
+            </marker>
+            <marker id="a-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L8 4 L0 8 z" fill="var(--amber)" />
+            </marker>
+            <marker id="a-m" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0 0 L8 4 L0 8 z" fill="var(--line-strong)" />
+            </marker>
+          </defs>
+
+          <!-- lane 1: iPhone -->
+          <text class="lane-title" x="16" y="28">IPHONE · HOME SCREEN WEB APP</text>
+          <rect class="lane-box" x="16" y="40" width="236" height="412" rx="8" />
+          <rect class="box" x="28" y="56" width="212" height="52" rx="6" />
+          <text class="t-b" x="40" y="76">App.tsx · Home</text>
+          <text class="tm" x="40" y="94">sessions · windows · workspaces</text>
+          <rect class="box" x="28" y="118" width="212" height="66" rx="6" />
+          <text class="t-b" x="40" y="138">TerminalView.tsx</text>
+          <text class="tm" x="40" y="156">xterm.js · Read / Terminal</text>
+          <text class="tm" x="40" y="172">Preview (iframe)</text>
+          <rect class="box" x="28" y="194" width="212" height="52" rx="6" />
+          <text class="t-b" x="40" y="214">conn.ts</text>
+          <text class="tm" x="40" y="232">one host at a time</text>
+          <rect class="box-alt" x="28" y="256" width="212" height="52" rx="6" />
+          <text class="t-b" x="40" y="276">hosts.ts</text>
+          <text class="tm" x="40" y="294">3 computers · a token each</text>
+          <rect class="box-alt" x="28" y="318" width="212" height="52" rx="6" />
+          <text class="t-b" x="40" y="338">remote-sw.js</text>
+          <text class="tm" x="40" y="356">Web Push → notification</text>
+          <rect class="box-alt" x="28" y="380" width="212" height="56" rx="6" />
+          <text class="t-b" x="40" y="400">installed CA</text>
+          <text class="tm" x="40" y="418">signs private IPv4</text>
+          <text class="tm" x="40" y="432">and *.local only</text>
+
+          <!-- lane 2: main process -->
+          <text class="lane-title" x="392" y="28">ELECTRON MAIN PROCESS</text>
+          <rect class="lane-box" x="392" y="40" width="300" height="480" rx="8" />
+          <rect class="box" x="404" y="56" width="276" height="108" rx="6" />
+          <text class="t-b" x="416" y="76">RemoteBridge · remote/server.ts</text>
+          <text class="tm" x="416" y="94">https :47600  app + /ws + /api</text>
+          <text class="tm" x="416" y="110">http  :47601  ca.crt page only</text>
+          <text class="tm" x="416" y="126">https :47602  preview proxy</text>
+          <text class="tm" x="416" y="150">guardLan · private IPv4 / loopback</text>
+          <rect class="box" x="404" y="176" width="132" height="58" rx="6" />
+          <text class="t-b" x="416" y="196">webpush.ts</text>
+          <text class="tm" x="416" y="212">RFC 8291</text>
+          <text class="tm" x="416" y="226">VAPID ES256</text>
+          <rect class="box" x="548" y="176" width="132" height="58" rx="6" />
+          <text class="t-b" x="560" y="196">certs.ts</text>
+          <text class="tm" x="560" y="212">local CA ·</text>
+          <text class="tm" x="560" y="226">name constraints</text>
+          <rect class="box" x="404" y="246" width="276" height="86" rx="6" />
+          <text class="t-b" x="416" y="266">ipc/pty.ts · session registry</text>
+          <text class="tm" x="416" y="284">scrollback · subscribers · busy</text>
+          <text class="tm" x="416" y="300">approval detect · dev-server port</text>
+          <text class="tm" x="416" y="316">launcher allow-list</text>
+          <rect class="box" x="404" y="344" width="276" height="62" rx="6" />
+          <text class="t-b" x="416" y="364">ipc/* handlers</text>
+          <text class="tm" x="416" y="382">files · git · settings · dashboard</text>
+          <text class="tm" x="416" y="398">ext · conn · updater · notify</text>
+          <rect class="box-alt" x="404" y="418" width="276" height="46" rx="6" />
+          <text class="t-b" x="416" y="438">remote/store.ts</text>
+          <text class="tm" x="416" y="454">devices · sealed keys · audit log</text>
+          <rect class="box-alt" x="404" y="476" width="276" height="34" rx="6" />
+          <text class="t-b" x="416" y="498">remote/preview.ts</text>
+
+          <!-- lane 3: renderer -->
+          <text class="lane-title" x="772" y="28">DESKTOP RENDERER · PER WINDOW</text>
+          <rect class="lane-box" x="772" y="40" width="232" height="412" rx="8" />
+          <rect class="box-alt" x="784" y="56" width="208" height="52" rx="6" />
+          <text class="t-b" x="796" y="76">preload · window.api</text>
+          <text class="tm" x="796" y="94">contextIsolation, no Node</text>
+          <rect class="box" x="784" y="118" width="208" height="82" rx="6" />
+          <text class="t-b" x="796" y="138">panels</text>
+          <text class="tm" x="796" y="156">editor · git · terminal</text>
+          <text class="tm" x="796" y="172">preview · dashboard</text>
+          <text class="tm" x="796" y="188">memory · customized</text>
+          <rect class="box" x="784" y="212" width="208" height="46" rx="6" />
+          <text class="t-b" x="796" y="232">store.ts</text>
+          <text class="tm" x="796" y="248">cross-panel state</text>
+          <rect class="box-alt" x="784" y="270" width="208" height="52" rx="6" />
+          <text class="t-b" x="796" y="290">&lt;webview&gt;</text>
+          <text class="tm" x="796" y="308">prefs pinned in main</text>
+          <rect class="box-alt" x="784" y="334" width="208" height="46" rx="6" />
+          <text class="t-b" x="796" y="354">CSP · index.html</text>
+          <text class="tm" x="796" y="370">no remote origins</text>
+
+          <!-- apple push -->
+          <rect class="box" x="16" y="500" width="236" height="64" rx="6" />
+          <text class="t-b" x="28" y="520">Apple Push service</text>
+          <text class="tm" x="28" y="538">the only outbound hop</text>
+          <text class="tm" x="28" y="554">payload already encrypted</text>
+
+          <!-- under main: pty + fs -->
+          <rect class="box" x="392" y="576" width="300" height="68" rx="6" />
+          <text class="t-b" x="404" y="596">node-pty child processes</text>
+          <text class="tm" x="404" y="614">claude · codex · agy</text>
+          <text class="tm" x="404" y="630">powershell · cmd · bash</text>
+          <rect class="box" x="392" y="668" width="300" height="68" rx="6" />
+          <text class="t-b" x="404" y="688">filesystem</text>
+          <text class="tm" x="404" y="706">workspace · ~/.claude · ~/.codex</text>
+          <text class="tm" x="404" y="722">~/.gemini · app userData</text>
+
+          <!-- wires -->
+          <path class="wire" d="M240 220 H272 V82 H404" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="284" y="200">wss · /ws</text>
+          <text class="wl" x="284" y="216">attach · data</text>
+
+          <path class="wire-dash" d="M240 340 H304 V104 H404" marker-end="url(#a-m)" />
+          <text class="wl-m" x="316" y="330">/api/push</text>
+
+          <path class="wire-amber" d="M404 205 H340 V532 H252" marker-end="url(#a-a)" />
+          <text class="wl-a" x="270" y="470">aes128gcm</text>
+
+          <path class="wire" d="M680 82 H784" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="732" y="70" text-anchor="middle">ipcRenderer</text>
+          <text class="wl" x="732" y="100" text-anchor="middle">invoke / send</text>
+
+          <path class="wire" d="M542 520 V576" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="554" y="552">spawn / data</text>
+
+          <path class="wire-dash" d="M542 644 V668" marker-end="url(#a-m)" marker-start="url(#a-m)" />
+          <text class="wl-m" x="554" y="662">read / write</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span class="zh">
+          實線＝WebSocket／IPC，虛線＝HTTP 或檔案存取，琥珀色＝唯一一條離開這台機器的連線。
+          每個方框下方的小字就是該檔案真正負責的事。
+        </span>
+        <span class="en">
+          Solid lines are WebSocket/IPC, dashed lines are HTTP or filesystem access, and the amber line is the
+          only connection that leaves the machine. The small type under each box is what that file actually does.
+        </span>
+      </figcaption>
+    </figure>
+
+    <div class="cols">
+      <div class="panel">
+        <h4>src/preload/index.ts</h4>
+        <ul class="zh">
+          <li>renderer 與 main 之間的<b>唯一</b>契約：<span class="m">files · git · pty · ext · conn · settings · dashboard · updater · remote · notify · window</span>。</li>
+          <li>renderer 開著 <span class="m">contextIsolation</span>、關著 Node。</li>
+          <li>加一個呼叫＝改 preload、改型別、加一個 <span class="m">ipcMain.handle</span>，沒有第四個地方。</li>
+        </ul>
+        <ul class="en">
+          <li>The <b>only</b> renderer↔main contract: <span class="m">files · git · pty · ext · conn · settings · dashboard · updater · remote · notify · window</span>.</li>
+          <li>The renderer runs with <span class="m">contextIsolation</span> on and Node off.</li>
+          <li>Adding a call means preload, its types, and one <span class="m">ipcMain.handle</span> — nowhere else.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4>src/shared/</h4>
+        <ul class="zh">
+          <li><code>remoteProtocol.ts</code>：手機與桌面共用的訊息型別，只有一份定義，兩邊不可能漂移。</li>
+          <li><code>approvalDetect.ts</code>：從輸出尾段判斷「卡在等你回答」。</li>
+          <li><code>portDetect.ts</code>：從輸出找出本機 dev server 的 port。</li>
+        </ul>
+        <ul class="en">
+          <li><code>remoteProtocol.ts</code> — the message types both ends use. One definition, so they cannot drift.</li>
+          <li><code>approvalDetect.ts</code> — decides from the output tail that a CLI is waiting on you.</li>
+          <li><code>portDetect.ts</code> — finds a local dev-server port in the output.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4>workspace</h4>
+        <ul class="zh">
+          <li>一個專案視窗＝一個工作區根目錄，是其他一切的作用範圍：終端、Git、交接筆記、檔案監聽。</li>
+          <li>main 以 IPC 的發送者反查視窗，再反查工作區——不是看「目前聚焦的視窗」。</li>
+          <li>手機看到的每個區塊，就是一個這樣的視窗。</li>
+        </ul>
+        <ul class="en">
+          <li>One project window is one workspace root, and that is the scope of everything else: terminals, Git, handoff notes, file watching.</li>
+          <li>Main resolves the window from the IPC sender, then the workspace from the window — never from "whichever window has focus".</li>
+          <li>Each section the phone shows is one of these windows.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="pty">
+    <div class="zh">
+      <h2>一條 pty，多個訂閱者</h2>
+      <p class="lede">
+        這是整個遠端控制能成立的那一個設計：pty 不綁死在某個 webContents 上。
+        它由主行程持有，誰想看就登記成訂閱者——桌面視窗是一個，手機是另一個。
+        因此手機不需要第二套 agent runtime，它看到的就是你電腦上那個終端本身。
+      </p>
+    </div>
+    <div class="en">
+      <h2>One pty, many subscribers</h2>
+      <p class="lede">
+        This is the single design decision that makes remote control possible: a pty is not bound to one
+        webContents. The main process owns it and anyone interested registers as a subscriber — the desktop
+        window is one, the phone is another. So the phone needs no second agent runtime; what it shows is
+        literally the terminal on your computer.
+      </p>
+    </div>
+
+    <figure>
+      <div class="scroll">
+        <svg class="diagram d2" viewBox="0 0 1000 300" role="img" aria-labelledby="d2t d2d">
+          <title id="d2t">The pty fan-out</title>
+          <desc id="d2d">
+            A node-pty child process feeds one PtyEntry in the main process, which keeps the scrollback ring
+            and a map of subscribers. The desktop window and each phone connection are separate subscribers.
+          </desc>
+          <rect class="box" x="16" y="104" width="196" height="76" rx="6" />
+          <text class="t-b" x="28" y="128">node-pty child</text>
+          <text class="tm" x="28" y="146">claude / codex / agy</text>
+          <text class="tm" x="28" y="162">cwd = workspace</text>
+
+          <rect class="box" x="320" y="58" width="266" height="166" rx="6" />
+          <text class="t-b" x="332" y="82">PtyEntry · ipc/pty.ts</text>
+          <text class="tm" x="332" y="104">scrollback  256 KB ring</text>
+          <text class="tm" x="332" y="122">subs        Map&lt;key, sub&gt;</text>
+          <text class="tm" x="332" y="140">needsApproval</text>
+          <text class="tm" x="332" y="158">busy        + 4 s timer</text>
+          <text class="tm" x="332" y="176">devPort</text>
+          <text class="tm" x="332" y="194">cols / rows · workspace</text>
+          <text class="tm" x="332" y="212">ownerId (window)</text>
+
+          <rect class="box-alt" x="694" y="40" width="290" height="58" rx="6" />
+          <text class="t-b" x="706" y="60">wc:&lt;id&gt;</text>
+          <text class="tm" x="706" y="78">desktop window · ipc channel</text>
+          <rect class="box-alt" x="694" y="112" width="290" height="58" rx="6" />
+          <text class="t-b" x="706" y="132">remote:&lt;connId&gt;</text>
+          <text class="tm" x="706" y="150">phone · WebSocket frames</text>
+          <rect class="box-alt" x="694" y="184" width="290" height="58" rx="6" />
+          <text class="t-b" x="706" y="204">remote:&lt;connId&gt;</text>
+          <text class="tm" x="706" y="222">another phone, same session</text>
+
+          <path class="wire" d="M212 142 H316" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="264" y="130" text-anchor="middle">onData</text>
+          <text class="wl" x="264" y="162" text-anchor="middle">write</text>
+
+          <path class="wire" d="M586 112 H640 V69 H690" marker-end="url(#a-p)" />
+          <path class="wire" d="M586 141 H660 V141 H690" marker-end="url(#a-p)" />
+          <path class="wire" d="M586 170 H640 V213 H690" marker-end="url(#a-p)" />
+          <text class="wl" x="600" y="104">fan-out</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span class="zh">
+          中途才接上的訂閱者會先收到 scrollback 當 snapshot，所以手機打開就看到完整畫面，不必重播歷史。
+        </span>
+        <span class="en">
+          A late subscriber is handed the scrollback as a snapshot, so the phone opens on a full screen
+          without replaying history.
+        </span>
+      </figcaption>
+    </figure>
+
+    <div class="zh">
+      <h3>從輸出推導出來的三個訊號</h3>
+      <ul>
+        <li>
+          <b>等你回覆</b>（<span class="m">needsApproval</span>）——<code>shared/approvalDetect.ts</code> 用一組字串樣式看輸出尾段
+          600 字。只在 false→true 的那一刻發事件，所以同一個提示不會連發推播；任何輸入進來就清掉，桌面與所有手機同時收卡片。
+        </li>
+        <li>
+          <b>執行中</b>（<span class="m">busy</span>）——最近 4 秒內還有輸出。<b>由桌面判定</b>，翻轉時才廣播一則
+          <span class="m">activity</span>。不能讓手機拿自己的時鐘去比桌面寫的 <span class="m">lastOutputAt</span>：
+          時鐘差一點就永遠顯示錯，而且 state 不是每次輸出都重送，會卡在舊值。
+        </li>
+        <li>
+          <b>dev server port</b>（<span class="m">devPort</span>）——<code>shared/portDetect.ts</code> 看 scrollback 的尾段 4 KB，
+          不是看單一個 chunk：Vite 那行被切成兩次寫入時，只看 chunk 就抓不到。有了它手機才會出現「預覽」分頁。
+        </li>
+      </ul>
+    </div>
+    <div class="en">
+      <h3>Three signals derived from the output</h3>
+      <ul>
+        <li>
+          <b>Waiting for you</b> (<span class="m">needsApproval</span>) — <code>shared/approvalDetect.ts</code> runs a set
+          of patterns over the last 600 characters. The event fires only on the false→true edge, so one prompt never
+          produces a stream of pushes; any input clears it, and the desktop and every phone drop the card together.
+        </li>
+        <li>
+          <b>Running</b> (<span class="m">busy</span>) — output within the last 4 seconds. <b>Decided on the desktop</b>,
+          broadcast as one <span class="m">activity</span> message on each flip. The phone must not compare its own clock
+          against the desktop's <span class="m">lastOutputAt</span>: a small clock skew makes it permanently wrong, and
+          state is not re-sent on every chunk, so it would sit on a stale value.
+        </li>
+        <li>
+          <b>Dev-server port</b> (<span class="m">devPort</span>) — <code>shared/portDetect.ts</code> reads the last 4 KB of
+          scrollback rather than a single chunk: when Vite's banner arrives as two writes, a per-chunk match finds nothing.
+          This is what makes the phone's Preview tab appear.
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="desktop">
+    <div class="zh">
+      <h2>桌面程式</h2>
+      <p class="lede">一個專案一個視窗。視窗的工作區根目錄是所有功能的作用範圍。</p>
+    </div>
+    <div class="en">
+      <h2>Desktop app</h2>
+      <p class="lede">One window per project. The window's workspace root is the scope of everything else.</p>
+    </div>
+
+    <div class="tscroll zh">
+      <table>
+        <thead>
+          <tr><th>模組</th><th>負責什麼</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="k">main/index.ts</td>
+            <td>建視窗、維護 <span class="m">windowId → workspaceRoot</span>、由 IPC 發送者反查工作區、釘死 <span class="m">&lt;webview&gt;</span> 的權限、單一實例鎖、Windows 工作列 Jump List。也在這裡把 Electron 的預設選單拿掉（它會註冊 Ctrl+Z／Ctrl+A 這些編輯快速鍵，在終端裡會動到 xterm 的隱藏 textarea）。</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/files.ts</td>
+            <td>讀寫與列目錄一律限制在工作區根目錄內（前綴＋分隔符比對）；每個工作區一個 recursive watcher，帶忽略清單與去抖動，agent 改檔時推 <span class="m">files:externalChange</span>，編輯器與預覽據此重載。</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/git.ts</td>
+            <td><span class="m">simple-git</span> 對該視窗的工作區操作：status、暫存、commit、分支、commit graph、commit 層級 diff。</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/pty.ts</td>
+            <td>終端的唯一擁有者（見上一節）。Windows 上先 <span class="m">taskkill /T /F</span> 殺整棵行程樹再呼叫 node-pty 的 kill，否則關終端後 shell 會多活五秒、關 App 會留孤兒行程。</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/dashboard.ts<br />ipc/usage.ts</td>
+            <td>掃各家 CLI 自己的本機紀錄（<span class="m">~/.claude/projects</span>、<span class="m">~/.codex/sessions</span>、<span class="m">~/.gemini</span> 的 brain log）組出會話清單與 token 用量，以 mtime 為鍵快取在 userData。Antigravity 的紀錄沒有 token 欄位，那邊的數字是字數估算並明確標示。</td>
+          </tr>
+          <tr>
+            <td class="k">ext/*</td>
+            <td><code>.workbench/extensions.yaml</code> 是單一真相，<code>ext/adapters.ts</code> 生成各家的原生設定（專案的 <span class="m">.mcp.json</span>、<span class="m">~/.claude/skills/</span>、Antigravity 的 plugin 目錄），寫入前先給你看 diff。</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/conn.ts</td>
+            <td>連線憑證以 OS 金鑰加密存在 <code>.workbench/credentials.enc</code>，只在 main 解密，且只在 spawn 時注入子行程的 env——不寫進任何 agent 設定檔。</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/settings.ts</td>
+            <td>全域設定在 userData；工作區的 <code>.workbench/settings.json</code> 只能覆寫顯示類偏好。「要執行哪個執行檔」與「要不要略過審批」只認全域——那個檔案是跟著 repo 走的。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tscroll en">
+      <table>
+        <thead>
+          <tr><th>Module</th><th>Responsibility</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="k">main/index.ts</td>
+            <td>Creates windows, keeps <span class="m">windowId → workspaceRoot</span>, resolves the workspace from the IPC sender, pins <span class="m">&lt;webview&gt;</span> preferences, single-instance lock, Windows Jump List. It also drops Electron's default menu, which would register Ctrl+Z / Ctrl+A and friends — editing roles that act on xterm's hidden textarea inside a terminal.</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/files.ts</td>
+            <td>Reads, writes and listings are confined to the workspace root (prefix + separator check). One recursive watcher per workspace with an ignore list and debouncing; when an agent writes, <span class="m">files:externalChange</span> makes the editor and preview reload.</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/git.ts</td>
+            <td><span class="m">simple-git</span> against that window's workspace: status, staging, commit, branches, commit graph, commit-level diffs.</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/pty.ts</td>
+            <td>The single owner of every terminal (previous section). On Windows it runs <span class="m">taskkill /T /F</span> on the process tree before node-pty's own kill, otherwise the shell outlives the tab by five seconds and quitting leaves orphans.</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/dashboard.ts<br />ipc/usage.ts</td>
+            <td>Scan each CLI's own local records (<span class="m">~/.claude/projects</span>, <span class="m">~/.codex/sessions</span>, <span class="m">~/.gemini</span> brain logs) for the session list and token usage, cached in userData keyed by mtime. Antigravity's logs carry no token counts, so those figures are character estimates and are labelled as such.</td>
+          </tr>
+          <tr>
+            <td class="k">ext/*</td>
+            <td><code>.workbench/extensions.yaml</code> is the single source; <code>ext/adapters.ts</code> generates each vendor's native config (project <span class="m">.mcp.json</span>, <span class="m">~/.claude/skills/</span>, Antigravity plugin dirs) and shows a diff before writing.</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/conn.ts</td>
+            <td>Connection secrets are OS-encrypted in <code>.workbench/credentials.enc</code>, decrypted only in main, and injected into the child process env at spawn — never written into any agent config file.</td>
+          </tr>
+          <tr>
+            <td class="k">ipc/settings.ts</td>
+            <td>Global settings live in userData; a workspace's <code>.workbench/settings.json</code> may only override presentation preferences. Which executable a CLI resolves to, and whether approvals are bypassed, come from global settings only — that file travels with the repo.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="zh">
+      <h3>兩種版面，同一個核心</h3>
+      <p>
+        Developer Mode 是程式碼優先（編輯器在中間，Git 與檔案樹在兩側）。Vibe Coding Mode 是任務優先：
+        一條圖示軌，面板滑過去淡入、點了釘住，agent 終端在中間，跑起來的結果在右邊。
+        同一組面板、同一個 store，只有排法不同。Vibe 模式下終端印出的 dev server 網址會自動打開內建瀏覽器檢視。
+      </p>
+    </div>
+    <div class="en">
+      <h3>Two layouts, one core</h3>
+      <p>
+        Developer Mode is code-first: editor in the centre, Git and the file tree flanking it. Vibe Coding Mode is
+        task-first: an icon rail whose panels fade in on hover and pin on click, the agent terminal in the middle, the
+        running result on the right. Same panels, same store — only the arrangement differs. In Vibe Mode a dev-server
+        URL printed in a terminal opens the built-in browser view automatically.
+      </p>
+    </div>
+  </section>
+
+  <section id="bridge">
+    <div class="zh">
+      <h2>遠端橋接</h2>
+      <p class="lede">
+        主行程裡的三個 listener，全部綁在區網上，而且在 TCP 層就拒絕非私有位址——
+        就算你在路由器上把 port 轉出去，外網連進來照樣被斷掉。
+      </p>
+    </div>
+    <div class="en">
+      <h2>Remote bridge</h2>
+      <p class="lede">
+        Three listeners inside the main process, all bound to the LAN and all refusing anything that is not a
+        private address at the TCP layer — so a port forwarded on the router still gets dropped.
+      </p>
+    </div>
+
+    <div class="tscroll zh">
+      <table>
+        <thead>
+          <tr><th>Port</th><th>協定</th><th>提供什麼</th><th>關卡</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">47600</td>
+            <td class="k">https</td>
+            <td>手機 App 的靜態檔、<span class="m">/ws</span>、<span class="m">/api/pair · /api/vapid · /api/push</span></td>
+            <td>只收私有位址；除配對外每一條都要裝置 token</td>
+          </tr>
+          <tr>
+            <td class="num">47601</td>
+            <td class="k">http</td>
+            <td>只有一件事：把 <span class="m">ca.crt</span> 給出去。手機在信任憑證之前唯一打得開的頁面，其他路徑一律 302 回 https。</td>
+            <td>只收私有位址</td>
+          </tr>
+          <tr>
+            <td class="num">47602</td>
+            <td class="k">https</td>
+            <td>預覽代理 → <span class="m">127.0.0.1:&lt;dev port&gt;</span></td>
+            <td>只收私有位址，外加一次性 ticket 換來的 cookie</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tscroll en">
+      <table>
+        <thead>
+          <tr><th>Port</th><th>Scheme</th><th>Serves</th><th>Gate</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">47600</td>
+            <td class="k">https</td>
+            <td>The phone app's static files, <span class="m">/ws</span>, and <span class="m">/api/pair · /api/vapid · /api/push</span></td>
+            <td>Private addresses only; every route but pairing needs a device token</td>
+          </tr>
+          <tr>
+            <td class="num">47601</td>
+            <td class="k">http</td>
+            <td>One job: hand out <span class="m">ca.crt</span>. The only page a phone can open before it trusts the certificate; everything else 302s back to https.</td>
+            <td>Private addresses only</td>
+          </tr>
+          <tr>
+            <td class="num">47602</td>
+            <td class="k">https</td>
+            <td>Preview proxy → <span class="m">127.0.0.1:&lt;dev port&gt;</span></td>
+            <td>Private addresses only, plus a cookie obtained with a single-use ticket</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="zh">
+      <h3>為什麼 iPhone 要另外安裝一張憑證</h3>
+      <p>
+        手機連的是 <span class="m">https://192.168.x.x:47600</span>——一個<b>私有 IP，沒有網域名稱</b>。
+        公開的憑證頒發機構依規定不會、也不能為私有 IP 簽憑證（它們無法證明誰擁有 192.168.1.5）。
+        所以只剩兩條路：不要 HTTPS，或者用你自己這台電腦簽的憑證。
+      </p>
+      <p>不要 HTTPS 這條走不通，因為 iOS 把這三件事綁在「可信任的 HTTPS」上：</p>
+      <ul>
+        <li><b>加入主畫面後當成真正的 App</b>（standalone，沒有 Safari 的網址列）；</li>
+        <li><b>Service Worker</b>——通知就是靠它收的；</li>
+        <li><b>Web Push</b>——agent 等你回覆時那則通知。</li>
+      </ul>
+      <p>
+        而且「自簽憑證＋點仍要前往」也不算：那樣 Safari 會把這個 origin 標成憑證無效，
+        上面三個 API 照樣是關著的。所以必須是一張<b>手機真的信任</b>的憑證。
+      </p>
+      <p>
+        於是桌面自己當一張 CA：你在手機上安裝並開啟「完全信任」一次（這就是那個一次性步驟），
+        之後每次區網 IP 變動，桌面就用同一張 CA 重簽 server 憑證——手機不必再裝任何東西。
+        一台電腦一張 CA，所以多台電腦就要各裝一次。
+      </p>
+      <p class="note">
+        風險控管：這張 CA 帶 <b>critical 的 X.509 Name Constraints</b>，只准簽私有 IPv4 與
+        <span class="m">*.local</span>——就算私鑰外洩，也簽不出能在你手機上冒充 google.com 的憑證。
+        私鑰以 OS 金鑰（Electron <span class="m">safeStorage</span>）封裝；「重設憑證與所有裝置」會換一張新的 CA。
+        憑證在 SAN 不再涵蓋目前 IP、或離到期不到 30 天時重簽，而比對是逐項相等不是字串包含：
+        <span class="m">IP Address:192.168.1.1</span> 不可以被 <span class="m">…1.10</span> 誤判成已涵蓋，
+        否則換 IP 後不重簽，手機就連不上。
+      </p>
+    </div>
+    <div class="en">
+      <h3>Why the iPhone has to install a certificate</h3>
+      <p>
+        The phone connects to <span class="m">https://192.168.x.x:47600</span> — a <b>private IP with no domain
+        name</b>. Public certificate authorities will not and cannot issue for a private IP (there is no way to prove
+        who owns 192.168.1.5). That leaves two options: no HTTPS, or a certificate your own computer signs.
+      </p>
+      <p>No HTTPS is not an option, because iOS gates three things on trusted HTTPS:</p>
+      <ul>
+        <li><b>Behaving like a real app once added to the Home Screen</b> (standalone, no Safari address bar);</li>
+        <li><b>Service workers</b> — which is how the notification is received;</li>
+        <li><b>Web Push</b> — the notification itself when an agent is waiting for you.</li>
+      </ul>
+      <p>
+        And a self-signed certificate you click through does not count either: Safari marks that origin as having an
+        invalid certificate and those three APIs stay switched off. It has to be a certificate the phone
+        <b>actually trusts</b>.
+      </p>
+      <p>
+        So the desktop becomes a small CA. You install it on the phone and turn on full trust once — that is the
+        one-time step — and from then on the desktop re-signs the server certificate from that same CA whenever the LAN
+        IP changes, with nothing to reinstall. One CA per computer, so several computers means installing one each.
+      </p>
+      <p class="note">
+        Risk control: the CA carries <b>critical X.509 Name Constraints</b> permitting only private IPv4 ranges and
+        <span class="m">*.local</span> — even with the key, it cannot sign a certificate that impersonates google.com on
+        your phone. Its private key is sealed with the OS keychain (Electron <span class="m">safeStorage</span>), and
+        "reset certificate and devices" generates a new CA. A certificate is re-issued when its SAN no longer covers the
+        current IP or it is within 30 days of expiry, and the comparison is entry-by-entry equality rather than
+        substring: <span class="m">IP Address:192.168.1.1</span> must not match <span class="m">…1.10</span>, or the
+        certificate is never renewed after an IP change and the phone can no longer connect.
+      </p>
+    </div>
+
+    <div class="zh">
+      <h3>WebSocket 訊息</h3>
+      <p>
+        每一種意圖一種訊息，定義在 <code>src/shared/remoteProtocol.ts</code>，兩端共用同一份。
+      </p>
+    </div>
+    <div class="en">
+      <h3>WebSocket messages</h3>
+      <p>One message per intent, defined once in <code>src/shared/remoteProtocol.ts</code> and used by both ends.</p>
+    </div>
+
+    <div class="tscroll zh">
+      <table>
+        <thead>
+          <tr><th>手機 → 桌面</th><th>內容</th><th>作用</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">auth</td><td>token</td><td>5 秒內沒送或無效就斷線（4001）</td></tr>
+          <tr><td class="k">pairRequest</td><td>code, name</td><td>走連線配對，跨 origin 也不會被 CORS 擋；成功就直接當成已驗證</td></tr>
+          <tr><td class="k">attach / detach</td><td>id</td><td>訂閱／退訂某個終端，attach 會先回 snapshot</td></tr>
+          <tr><td class="k">input</td><td>id, data</td><td>寫進 pty，上限 64 KB；任何輸入都會清掉待審批狀態</td></tr>
+          <tr><td class="k">resize</td><td>id, cols, rows</td><td>改 pty 尺寸，夾在 10–500 欄、5–200 列</td></tr>
+          <tr><td class="k">kill</td><td>id</td><td>結束終端（記 audit，不推播「任務結束」）</td></tr>
+          <tr><td class="k">spawn</td><td>windowId, launcherKey</td><td>在該視窗的工作區開新終端，launcher 必須在允許清單內</td></tr>
+          <tr><td class="k">openWorkspace</td><td>path</td><td>請桌面開啟／聚焦某工作區，只接受桌面自己的最近清單裡的路徑</td></tr>
+          <tr><td class="k">preview</td><td>id</td><td>要一個預覽網址（回一次性 ticket）</td></tr>
+          <tr><td class="k">handoff / git</td><td>windowId</td><td>讀該工作區的 handoff.md（上限 200 KB）／git status（最多 500 檔）</td></tr>
+          <tr><td class="k">setBypass</td><td>enabled</td><td>切換 Bypass 模式，開啟時桌面會跳通知</td></tr>
+          <tr><td class="k">visibility</td><td>visible</td><td>App 在前景時不另外推播</td></tr>
+          <tr><td class="k">ping</td><td>—</td><td>25 秒一次心跳，避免 NAT／省電模式收掉閒置連線</td></tr>
+        </tbody>
+      </table>
+      <table style="margin-top: 18px">
+        <thead>
+          <tr><th>桌面 → 手機</th><th>內容</th><th>作用</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">paired</td><td>token, deviceId</td><td>配對成功，手機把 token 存進這台電腦的那一格</td></tr>
+          <tr><td class="k">authed</td><td>deviceId, deviceName, hostName</td><td>驗證通過，順便拿到電腦的主機名</td></tr>
+          <tr><td class="k">state</td><td>sessions, windows, workspaces, bypass</td><td>整包現況，最多每 150 ms 重建一次</td></tr>
+          <tr><td class="k">snapshot</td><td>id, data, cols, rows</td><td>attach 後補畫面用的 scrollback</td></tr>
+          <tr><td class="k">data</td><td>id, d</td><td>pty 輸出</td></tr>
+          <tr><td class="k">resized</td><td>id, cols, rows</td><td>別人改了尺寸</td></tr>
+          <tr><td class="k">exit</td><td>id, code, title</td><td>終端結束；使用者自己關掉的不推播</td></tr>
+          <tr><td class="k">activity</td><td>id, busy</td><td>執行中／閒置翻轉，只在翻轉時送</td></tr>
+          <tr><td class="k">approval</td><td>id, title, tail</td><td>等你回覆，附去掉 ANSI 的畫面尾段</td></tr>
+          <tr><td class="k">spawned</td><td>id</td><td>新終端開好了，手機直接跳進去</td></tr>
+          <tr><td class="k">handoff / git / preview</td><td>各自的結果</td><td>對應請求的回覆</td></tr>
+          <tr><td class="k">error / pong</td><td>message / —</td><td>錯誤訊息、心跳回應</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tscroll en">
+      <table>
+        <thead>
+          <tr><th>Phone → desktop</th><th>Payload</th><th>Effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">auth</td><td>token</td><td>Missing or invalid within 5 s drops the socket (4001)</td></tr>
+          <tr><td class="k">pairRequest</td><td>code, name</td><td>Pair over the socket, so cross-origin is not blocked by CORS; success authenticates the socket directly</td></tr>
+          <tr><td class="k">attach / detach</td><td>id</td><td>Subscribe or unsubscribe; attach replies with a snapshot first</td></tr>
+          <tr><td class="k">input</td><td>id, data</td><td>Written to the pty, capped at 64 KB; any input clears the approval state</td></tr>
+          <tr><td class="k">resize</td><td>id, cols, rows</td><td>Resizes the pty, clamped to 10–500 columns and 5–200 rows</td></tr>
+          <tr><td class="k">kill</td><td>id</td><td>Ends the terminal (audited, and no "task finished" push)</td></tr>
+          <tr><td class="k">spawn</td><td>windowId, launcherKey</td><td>New terminal in that window's workspace; the launcher must be on the allow-list</td></tr>
+          <tr><td class="k">openWorkspace</td><td>path</td><td>Open or focus a workspace — only paths from the computer's own recent list</td></tr>
+          <tr><td class="k">preview</td><td>id</td><td>Ask for a preview URL (replies with a single-use ticket)</td></tr>
+          <tr><td class="k">handoff / git</td><td>windowId</td><td>That workspace's handoff.md (200 KB cap) or git status (500 files max)</td></tr>
+          <tr><td class="k">setBypass</td><td>enabled</td><td>Toggles Bypass Mode; turning it on raises a desktop notification</td></tr>
+          <tr><td class="k">visibility</td><td>visible</td><td>No push while the app is in the foreground</td></tr>
+          <tr><td class="k">ping</td><td>—</td><td>Heartbeat every 25 s so NAT and power saving don't reap the socket</td></tr>
+        </tbody>
+      </table>
+      <table style="margin-top: 18px">
+        <thead>
+          <tr><th>Desktop → phone</th><th>Payload</th><th>Effect</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">paired</td><td>token, deviceId</td><td>Pairing succeeded; the phone stores the token against that computer</td></tr>
+          <tr><td class="k">authed</td><td>deviceId, deviceName, hostName</td><td>Authenticated, and here is the computer's host name</td></tr>
+          <tr><td class="k">state</td><td>sessions, windows, workspaces, bypass</td><td>The whole picture, rebuilt at most every 150 ms</td></tr>
+          <tr><td class="k">snapshot</td><td>id, data, cols, rows</td><td>Scrollback to fill the screen after attach</td></tr>
+          <tr><td class="k">data</td><td>id, d</td><td>pty output</td></tr>
+          <tr><td class="k">resized</td><td>id, cols, rows</td><td>Someone else changed the size</td></tr>
+          <tr><td class="k">exit</td><td>id, code, title</td><td>Terminal ended; no push when you killed it yourself</td></tr>
+          <tr><td class="k">activity</td><td>id, busy</td><td>Running/idle flipped — sent only on the flip</td></tr>
+          <tr><td class="k">approval</td><td>id, title, tail</td><td>Waiting for you, with the ANSI-stripped screen tail</td></tr>
+          <tr><td class="k">spawned</td><td>id</td><td>The new terminal exists; the phone opens straight into it</td></tr>
+          <tr><td class="k">handoff / git / preview</td><td>their results</td><td>Replies to the matching request</td></tr>
+          <tr><td class="k">error / pong</td><td>message / —</td><td>Error text, heartbeat reply</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="phone">
+    <div class="zh">
+      <h2>手機程式</h2>
+      <p class="lede">
+        第二個 Vite entry（<code>src/renderer/remote/</code>），跟桌面 renderer 同一次 build 產出，由橋接層提供。
+        沒有自己的建置步驟，除 React 外沒有框架，每個打開的 session 一個 xterm。
+      </p>
+    </div>
+    <div class="en">
+      <h2>Phone app</h2>
+      <p class="lede">
+        A second Vite entry (<code>src/renderer/remote/</code>) built alongside the desktop renderer and served by the
+        bridge. No build step of its own, no framework beyond React, one xterm per open session.
+      </p>
+    </div>
+
+    <div class="cols">
+      <div class="panel">
+        <h4>Home</h4>
+        <ul class="zh">
+          <li>標題就是電腦切換器——最多三台，一次連一台。</li>
+          <li>等你回覆的會浮到最上面，卡片上直接顯示問題。</li>
+          <li>一個桌面專案視窗一個區塊：它的終端、交接筆記、Git。</li>
+          <li><b>其他工作區</b>列出最近用過但沒開視窗的，點一下讓電腦開起來並直接跳「新增終端」。</li>
+        </ul>
+        <ul class="en">
+          <li>The title is the computer switcher — up to three, one connected at a time.</li>
+          <li>Anything waiting for you floats to the top, with the question on the card.</li>
+          <li>One section per desktop project window: its terminals, handoff notes, Git.</li>
+          <li><b>Other Workspaces</b> lists recent ones with no window; tapping opens it on the computer and goes straight to New Terminal.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4>Session · 3 tabs</h4>
+        <ul class="zh">
+          <li><b>閱讀</b>——把 xterm 緩衝重排成手機讀得懂的樣子：接回軟換行、去掉 TUI 框線、合併空行。</li>
+          <li><b>終端</b>——真的 xterm。進去就把 pty 改成手機放得下的欄數，所以不用左右拖。</li>
+          <li><b>預覽</b>——終端印出 dev server 網址時才出現。</li>
+        </ul>
+        <ul class="en">
+          <li><b>Read</b> — the xterm buffer reflowed for a phone: soft wraps joined, TUI borders dropped, blank runs collapsed.</li>
+          <li><b>Terminal</b> — the real xterm. On entry it resizes the pty to the phone's width, so there is nothing to scroll sideways.</li>
+          <li><b>Preview</b> — appears when the terminal printed a dev-server URL.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h4>Answering</h4>
+        <ul class="zh">
+          <li><code>prompt.ts</code> 把 CLI 的問題解析成選項，並標出 CLI 目前選中的那個。</li>
+          <li>文字與 Enter 分兩次送：agent CLI 會把同一批到達的「文字＋換行」當成貼上。</li>
+          <li>多行輸入用 bracketed paste 包起來。</li>
+        </ul>
+        <ul class="en">
+          <li><code>prompt.ts</code> parses the CLI's question into options and marks the one the CLI has selected.</li>
+          <li>Text and Enter are sent as two writes, because agent CLIs treat a same-tick "text + newline" as a paste.</li>
+          <li>Multi-line input is wrapped in bracketed paste.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="zh">
+      <h3>為什麼終端要改 pty 的欄數，而不是縮字</h3>
+      <p>
+        桌面開的 session 是 120 欄。只縮字級的話，要塞進 370px 寬的手機得用 5px 以下的字，
+        而字級下限是 6px——所以畫面一定會超出去，只能左右拖，而且 6px 根本看不清。
+        真正能解的是欄數：進終端就把 pty resize 成手機放得下的寬度（字級回到 12–13px），
+        離開時還給電腦。本來就放得下就不動，轉向或鍵盤收合後重算一次（250 ms 節流，避免連續 resize 洗 pty）。
+      </p>
+      <h3>三台電腦、一次一條連線、不重新載入</h3>
+      <p>
+        WebSocket 不受同源政策限制，所以 App 可以把連線指向你選的那台，切換就是換掉連線——
+        不導覽、不重新載入，主畫面 App 也不會被踢出 standalone。
+        <code>hosts.ts</code> 在 localStorage 存最多三筆 <span class="m">{ url, label }</span> 與<b>每台各自一個</b>的 token；
+        <code>conn.ts</code> 吃目標位址，不再假設 <span class="m">location.host</span>。
+      </p>
+      <p>桌面端為此只讓了兩步，都收得很窄：</p>
+      <ul>
+        <li>
+          <b>握手的 Origin 檢查</b>：原本只收這台電腦自己的 App，現在也收「同一個 App 由區網私有位址提供」
+          （<code>certs.ts · isAllowedOrigin</code>）。公網 origin 與明文 http 仍然擋掉，而且過了這關也只是拿到一條連線，
+          5 秒內沒有有效 token 照樣斷。
+        </li>
+        <li>
+          <b>配對</b>：跨 origin 對 <span class="m">/api/pair</span> 發 fetch 會死在 CORS，所以配對也做成 WebSocket 訊息
+          （<span class="m">pairRequest</span>），在尚未驗證的連線上處理——一次性配對碼、5 分鐘失效、錯 10 次作廢，條件完全沿用。
+        </li>
+      </ul>
+    </div>
+    <div class="en">
+      <h3>Why the terminal resizes the pty instead of shrinking the font</h3>
+      <p>
+        A desktop session is 120 columns. Shrinking only the font would need something under 5px to fit a 370px phone,
+        and the floor is 6px — so the view overflows and can only be dragged sideways, at a size nobody can read. The
+        thing that actually fits is the column count: entering the terminal resizes the pty to the phone's width (which
+        puts the font back at 12–13px) and gives the size back to the computer on the way out. If it already fits,
+        nothing is touched; after a rotation or the keyboard collapsing it recomputes once, throttled to 250 ms so a
+        drag-resize doesn't flood the pty.
+      </p>
+      <h3>Three computers, one connection at a time, no reload</h3>
+      <p>
+        A WebSocket is not bound by the same-origin policy, so the app can point its connection at whichever computer
+        you pick and switch by swapping the connection — no navigation, no reload, and the Home Screen app never leaves
+        its standalone context. <code>hosts.ts</code> keeps up to three <span class="m">{ url, label }</span> entries and
+        <b>one device token per computer</b> in localStorage; <code>conn.ts</code> takes the target as a base URL instead
+        of assuming <span class="m">location.host</span>.
+      </p>
+      <p>Two things had to give way on the desktop side, both narrowly:</p>
+      <ul>
+        <li>
+          <b>The handshake's origin check.</b> It accepted only this computer's own app; it now also accepts the same app
+          served from another private-LAN address (<code>certs.ts · isAllowedOrigin</code>). Public origins and plain
+          HTTP stay rejected, and passing the check still only yields a socket that is dropped after five seconds
+          without a valid token.
+        </li>
+        <li>
+          <b>Pairing.</b> A cross-origin <span class="m">fetch</span> to <span class="m">/api/pair</span> dies at CORS,
+          so pairing is also a WebSocket message (<span class="m">pairRequest</span>) handled on the unauthenticated
+          socket — same single-use code, same 5-minute expiry, same 10-attempt lockout.
+        </li>
+      </ul>
+    </div>
+
+    <div class="guard">
+      <span class="zh">
+        <b>仍然綁在單一位址的事。</b>Web Push 訂閱屬於建立它的那個 origin 的 Service Worker，
+        所以通知只會來自送來這個 App 的那台電腦；其他台在 App 開著時是完全可控的。
+        另外每台電腦簽自己的憑證，手機要各裝一次——連不到時配對畫面會直接給你那台的憑證安裝頁連結。
+      </span>
+      <span class="en">
+        <b>What is still tied to one address.</b> A Web Push subscription belongs to the origin whose service worker
+        created it, so notifications arrive only from the computer that serves the app; the others are fully
+        controllable while you have the app open. Each computer also signs its own certificate, so the phone installs
+        each CA once — the pairing screen links straight to that computer's certificate page when it cannot reach it.
+      </span>
+    </div>
+  </section>
+
+  <section id="preview">
+    <div class="zh">
+      <h2>預覽：為什麼需要一個代理</h2>
+      <p class="lede">三件事同時擋住最直覺的做法。</p>
+      <ol>
+        <li>手機的 <span class="m">localhost</span> 是手機自己，不是你的電腦。</li>
+        <li>dev server 多半只綁 <span class="m">127.0.0.1</span>，區網連不到。</li>
+        <li>https 頁面不能框住 http 頁面（mixed content）。</li>
+      </ol>
+      <p>
+        所以橋接層自己代理：用它自己的 origin（port + 2），這樣被預覽頁面裡那些
+        <span class="m">/assets/…</span> 根目錄相對路徑才會自然解對，不必改寫任何 HTML；HMR 的 WebSocket 一併轉發，
+        否則 Vite 會一直重連並蓋上錯誤畫面。
+      </p>
+      <p class="note">
+        為什麼不是掛在 PWA 那台的 <span class="m">/preview/&lt;port&gt;/</span> 路徑下：
+        被預覽頁面的 <span class="m">/assets/x.js</span> 會跑回橋接層的根目錄，和 App 自己的檔案撞在一起。
+        給它自己一個 origin，相對路徑就對了。
+      </p>
+    </div>
+    <div class="en">
+      <h2>Preview, and why it needs a proxy</h2>
+      <p class="lede">Three things block the obvious approach at once.</p>
+      <ol>
+        <li>The phone's <span class="m">localhost</span> is the phone, not your computer.</li>
+        <li>A dev server usually binds <span class="m">127.0.0.1</span> only, so the LAN cannot reach it.</li>
+        <li>An https page cannot frame an http one (mixed content).</li>
+      </ol>
+      <p>
+        So the bridge proxies it on its own origin (port + 2), which is what makes the previewed page's root-relative
+        <span class="m">/assets/…</span> requests resolve correctly without rewriting any HTML. The HMR WebSocket is
+        forwarded too, otherwise Vite reconnects forever and paints an error overlay.
+      </p>
+      <p class="note">
+        Why not mount it under <span class="m">/preview/&lt;port&gt;/</span> on the app's own origin: the previewed
+        page's <span class="m">/assets/x.js</span> would resolve to the bridge's root and collide with the app's own
+        files. Giving it a separate origin makes relative paths correct by construction.
+      </p>
+    </div>
+
+    <figure>
+      <div class="scroll">
+        <svg class="diagram d3" viewBox="0 0 1000 230" role="img" aria-labelledby="d3t d3d">
+          <title id="d3t">Preview proxy chain</title>
+          <desc id="d3d">
+            The phone asks over the authenticated WebSocket for a preview URL. The bridge issues a single-use
+            ticket. The phone loads that URL in an iframe, the ticket is exchanged for a cookie, and every later
+            request is proxied to the dev server on loopback.
+          </desc>
+          <rect class="box" x="16" y="30" width="210" height="64" rx="6" />
+          <text class="t-b" x="28" y="52">phone · WebSocket</text>
+          <text class="tm" x="28" y="70">{ t: 'preview', id }</text>
+          <text class="tm" x="28" y="86">already authenticated</text>
+
+          <rect class="box" x="16" y="134" width="210" height="64" rx="6" />
+          <text class="t-b" x="28" y="156">phone · iframe</text>
+          <text class="tm" x="28" y="174">/__aw?t=&lt;ticket&gt;</text>
+          <text class="tm" x="28" y="190">then cookie on every hit</text>
+
+          <rect class="box" x="360" y="30" width="276" height="168" rx="6" />
+          <text class="t-b" x="372" y="52">PreviewProxy · https :47602</text>
+          <text class="tm" x="372" y="74">ticket  single use · 60 s</text>
+          <text class="tm" x="372" y="92">cookie  port + HMAC, HttpOnly</text>
+          <text class="tm" x="372" y="110">guard   private IPv4 only</text>
+          <text class="tm" x="372" y="128">target  must be a printed port</text>
+          <text class="tm" x="372" y="146">strips  our cookie, upstream</text>
+          <text class="tm" x="372" y="162">        X-Frame-Options</text>
+          <text class="tm" x="372" y="184">relays  the HMR WebSocket</text>
+
+          <rect class="box-alt" x="762" y="78" width="222" height="72" rx="6" />
+          <text class="t-b" x="774" y="100">dev server</text>
+          <text class="tm" x="774" y="118">127.0.0.1:&lt;port&gt;</text>
+          <text class="tm" x="774" y="134">loopback only, always</text>
+
+          <path class="wire" d="M226 62 H356" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="291" y="52" text-anchor="middle">ticket</text>
+          <path class="wire" d="M226 166 H356" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="291" y="156" text-anchor="middle">https</text>
+          <path class="wire" d="M636 114 H758" marker-end="url(#a-p)" marker-start="url(#a-ps)" />
+          <text class="wl" x="697" y="104" text-anchor="middle">http</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span class="zh">
+          代理本身不會曝露任何東西：只連 loopback、只連你的終端真的印出過的 port、每個請求都要 cookie，
+          而 cookie 只能用經認證的 WebSocket 發出的一次性 ticket 換到。
+        </span>
+        <span class="en">
+          The proxy exposes nothing by itself: loopback only, only a port one of your terminals actually printed, and
+          every request needs a cookie that can only be obtained by redeeming a single-use ticket issued over the
+          authenticated WebSocket.
+        </span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section id="flows">
+    <div class="zh">
+      <h2>四條端到端流程</h2>
+      <p class="lede">這幾條值得知道，因為它們把系統裡每一道邊界都走過一次。</p>
+      <h3>agent 停下來問你，你在沙發上回答</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who">pty.ts</span><span class="what">一段 CLI 輸出進來。進 scrollback、送給每個訂閱者，並觸發 <b>looksLikeApprovalPrompt</b>。</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what"><b>approval</b> 事件把去掉 ANSI 的尾段廣播給連線中的手機，並對「有訂閱但不在前景」的裝置送 Web Push。</span></li>
+        <li><span class="n"></span><span class="who ph">remote-sw.js</span><span class="what">顯示通知。點下去開到 <span class="m">/#s=&lt;session&gt;</span>。</span></li>
+        <li><span class="n"></span><span class="who ph">TerminalView</span><span class="what"><b>prompt.ts</b> 把問題做成按鈕，一下 <span class="m">input</span> 送出那個選項的鍵。</span></li>
+        <li><span class="n"></span><span class="who">pty.ts</span><span class="what">鍵寫進子行程。任何輸入都會清掉 <span class="m">needsApproval</span>，桌面與每支手機同時把卡片收掉。</span></li>
+      </ol>
+      <h3>在一個還沒開的工作區裡開 agent</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">在「其他工作區」點一個 → <span class="m">openWorkspace</span>。</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what"><b>只接受桌面自己最近清單裡的路徑</b>，然後開啟或聚焦那個專案視窗並重播 state。</span></li>
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">看到新視窗出現，自動為它打開「新增終端」。</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what"><span class="m">spawn</span> 把 launcherKey 對照該工作區的允許清單，然後呼叫桌面在用的同一個 <b>spawnPty</b>。</span></li>
+        <li><span class="n"></span><span class="who">main</span><span class="what">通知桌面視窗為同一個 pty 開分頁——等它的 renderer 載完才送，所以你回到電腦前 agent 就在那裡。</span></li>
+      </ol>
+      <h3>在手機上看成品</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who">pty.ts</span><span class="what"><b>detectDevPort</b> 讀輸出尾段（不是單一 chunk，所以網址被切成兩次寫入也抓得到），把 port 記在 session 上。</span></li>
+        <li><span class="n"></span><span class="who ph">TerminalView</span><span class="what"><b>預覽</b>分頁出現，點下去送 <span class="m">preview</span>。</span></li>
+        <li><span class="n"></span><span class="who">PreviewProxy</span><span class="what">發一張一次性 ticket，回 <span class="m">https://&lt;手機連進來的位址&gt;:47602/__aw?t=…</span>。</span></li>
+        <li><span class="n"></span><span class="who ph">iframe</span><span class="what">載入它，ticket 換成 <span class="m">HttpOnly</span> cookie 並轉到 <span class="m">/</span>。</span></li>
+        <li><span class="n"></span><span class="who">PreviewProxy</span><span class="what">把每個請求轉給 <span class="m">127.0.0.1:&lt;port&gt;</span>，拿掉 <span class="m">X-Frame-Options</span> 讓 App 框得住，並轉發 HMR 的連線。</span></li>
+      </ol>
+      <h3>切到另一台電腦</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">點標題的下拉，選另一台（或在設定裡用區網位址新增一台）。</span></li>
+        <li><span class="n"></span><span class="who ph">hosts.ts</span><span class="what">記下「現在連哪台」，取出那台的 token。沒有 token 就先進配對畫面。</span></li>
+        <li><span class="n"></span><span class="who ph">conn.ts</span><span class="what">舊連線關掉，對新位址開一條 <span class="m">wss</span>。整個畫面不重新載入。</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what">握手時認得這是「同一個 App 在區網另一個位址」，接受後仍要求 5 秒內送有效 token。</span></li>
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">收到 <span class="m">authed</span> 與 <span class="m">state</span>，把清單裡那台的名字換成電腦自己報的主機名。</span></li>
+      </ol>
+    </div>
+    <div class="en">
+      <h2>Four flows end to end</h2>
+      <p class="lede">These are the ones worth knowing, because they cross every boundary in the system.</p>
+      <h3>An agent stops to ask — you answer from the sofa</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who">pty.ts</span><span class="what">A chunk of CLI output arrives. It lands in the scrollback, goes to every subscriber, and trips <b>looksLikeApprovalPrompt</b>.</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what">The <b>approval</b> event broadcasts the ANSI-stripped tail to connected phones and sends a Web Push to devices that are subscribed but not in the foreground.</span></li>
+        <li><span class="n"></span><span class="who ph">remote-sw.js</span><span class="what">Shows the notification. Tapping it opens the app at <span class="m">/#s=&lt;session&gt;</span>.</span></li>
+        <li><span class="n"></span><span class="who ph">TerminalView</span><span class="what"><b>prompt.ts</b> turns the question into buttons; one tap sends <span class="m">input</span> with that option's key.</span></li>
+        <li><span class="n"></span><span class="who">pty.ts</span><span class="what">The key is written to the child process. Any input clears <span class="m">needsApproval</span>, so the desktop and every phone drop the card together.</span></li>
+      </ol>
+      <h3>Starting an agent in a workspace that isn't even open</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">Taps one under <b>Other Workspaces</b> → <span class="m">openWorkspace</span>.</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what">Accepts the path <b>only if it is in the computer's own recent list</b>, then opens or focuses that project window and re-broadcasts state.</span></li>
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">Sees the new window arrive and opens New Terminal for it automatically.</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what"><span class="m">spawn</span> resolves the launcher key against that workspace's allow-listed launchers, then calls the same <b>spawnPty</b> the desktop uses.</span></li>
+        <li><span class="n"></span><span class="who">main</span><span class="what">Tells the desktop window to open a tab on the same pty — deferred until its renderer has loaded — so the agent is in front of you when you get back.</span></li>
+      </ol>
+      <h3>Checking the build on your phone</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who">pty.ts</span><span class="what"><b>detectDevPort</b> reads the output tail (not a single chunk, so a URL split across writes still resolves) and records the port on the session.</span></li>
+        <li><span class="n"></span><span class="who ph">TerminalView</span><span class="what">The <b>Preview</b> tab appears; tapping it sends <span class="m">preview</span>.</span></li>
+        <li><span class="n"></span><span class="who">PreviewProxy</span><span class="what">Issues a single-use ticket and replies with <span class="m">https://&lt;the address the phone used&gt;:47602/__aw?t=…</span>.</span></li>
+        <li><span class="n"></span><span class="who ph">iframe</span><span class="what">Loads it; the ticket is exchanged for an <span class="m">HttpOnly</span> cookie and redirects to <span class="m">/</span>.</span></li>
+        <li><span class="n"></span><span class="who">PreviewProxy</span><span class="what">Forwards each request to <span class="m">127.0.0.1:&lt;port&gt;</span>, strips <span class="m">X-Frame-Options</span> so the app can frame it, and relays the HMR socket.</span></li>
+      </ol>
+      <h3>Switching to another computer</h3>
+      <ol class="flow">
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">Taps the title's dropdown and picks another one (or adds one by LAN address in Settings).</span></li>
+        <li><span class="n"></span><span class="who ph">hosts.ts</span><span class="what">Records which computer is active and reads that computer's token. No token means the pairing screen first.</span></li>
+        <li><span class="n"></span><span class="who ph">conn.ts</span><span class="what">Closes the old connection and opens a <span class="m">wss</span> to the new address. The page never reloads.</span></li>
+        <li><span class="n"></span><span class="who">server.ts</span><span class="what">Recognises the handshake as the same app from another private-LAN address, and still demands a valid token within five seconds.</span></li>
+        <li><span class="n"></span><span class="who ph">Home</span><span class="what">On <span class="m">authed</span> and <span class="m">state</span>, relabels that entry with the host name the computer reports.</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="trust">
+    <div class="zh">
+      <h2>信任邊界</h2>
+      <p class="lede">
+        誰能讓這個 App 做事，以及什麼在擋。有意思的不是網路那幾道——是那些跟著 repo 一起進來的檔案。
+      </p>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>邊界</th><th>另一邊是誰</th><th>什麼在擋</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag lan">區網</span></td>
+              <td>同一個 Wi-Fi 上任何能打到 47600–47602 的東西</td>
+              <td>非私有位址在 TCP 層就被斷。配對是唯一不需驗證的入口：8 字元、31 字母表（去掉易混淆的 0/O、1/I/L）、一次性、5 分鐘失效、錯 10 次作廢、常數時間比對。</td>
+            </tr>
+            <tr>
+              <td><span class="tag lan">已配對的手機</span></td>
+              <td>完成配對的裝置</td>
+              <td>設計上它就有完整終端控制權——能打字、能開能殺 agent、能切 Bypass 模式（開啟要確認，桌面會跳通知）。256-bit token 只存 SHA-256，撤銷裝置立即斷線。</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">專案 repo</span></td>
+              <td>你打開的任何專案——clone 的、下載的、別人傳給你的</td>
+              <td>repo 帶的檔案一律當不受信任輸入：<code>agents/*.yaml</code> 的 launcher 只能指名已知的 CLI，也不准設 <span class="m">NODE_OPTIONS</span>／<span class="m">PATH</span> 這類會在別人行程裡插程式碼的變數；<code>.workbench/settings.json</code> 不能改 CLI 解析到哪個執行檔、不能打開 Bypass；<code>.workbench/extensions.yaml</code> 的 id 有格式檢查、skill 路徑必須留在工作區內，所以同步不會寫到它宣稱的目錄之外。</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">被渲染的內容</span></td>
+              <td>工作區裡的 Markdown、圖表、文件</td>
+              <td>renderer 握著 <span class="m">window.api</span>，所以那裡的 HTML 注入等於程式執行：Mermaid 跑在 <span class="m">securityLevel: 'strict'</span>、HTML 預覽的 iframe 沒有 <span class="m">allow-scripts</span>、Markdown 連結過濾 scheme、<span class="m">&lt;webview&gt;</span> 的權限由 main 釘死而不是由標籤屬性決定。</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">Agent CLI</span></td>
+              <td>子行程本身</td>
+              <td>它以你的身分、你的 shell、你的檔案在跑——那正是這個產品的用途。Bypass 模式是唯一會關掉它自己審批的開關，預設關閉、每台機器各自設定，開著時桌面與手機都看得到。</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">網際網路</span></td>
+              <td>Apple 推播服務、GitHub releases、各廠商的安裝腳本</td>
+              <td>推播內容在離開前就已為手機加密（RFC 8291），而且只接受已知的推播主機當端點。更新檢查與 CLI 安裝都由使用者觸發，走各廠商自己的 HTTPS 端點。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="en">
+      <h2>Trust boundaries</h2>
+      <p class="lede">
+        Who can make this app do something, and what stops them. The interesting ones are not the network edges — they
+        are the files that arrive with a repository.
+      </p>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>Boundary</th><th>Who's on the other side</th><th>What holds it</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag lan">LAN</span></td>
+              <td>Anything on the same Wi-Fi that can reach 47600–47602</td>
+              <td>Non-private addresses are destroyed at the TCP layer. Pairing is the only unauthenticated route: 8 characters from a 31-symbol alphabet (no confusable 0/O, 1/I/L), single use, 5-minute lifetime, dead after 10 wrong attempts, compared in constant time.</td>
+            </tr>
+            <tr>
+              <td><span class="tag lan">Paired phone</span></td>
+              <td>A device that completed pairing</td>
+              <td>By design it has full terminal control — typing, starting and killing agents, toggling Bypass Mode (which asks for confirmation and raises a desktop notification). A 256-bit token is stored only as its SHA-256; revoking a device disconnects it at once.</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">Repository</span></td>
+              <td>Any project you open — cloned, downloaded, or sent to you</td>
+              <td>Repo-supplied files are treated as untrusted input: <code>agents/*.yaml</code> launchers may only name a known CLI and cannot set <span class="m">NODE_OPTIONS</span>, <span class="m">PATH</span> or other variables that inject code into someone else's process; <code>.workbench/settings.json</code> cannot change which executable a CLI resolves to or enable Bypass; <code>.workbench/extensions.yaml</code> ids are pattern-checked and skill paths must stay inside the workspace, so a sync cannot write outside the directories it advertises.</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">Rendered content</span></td>
+              <td>Markdown, diagrams and documents from the workspace</td>
+              <td>The renderer holds <span class="m">window.api</span>, so HTML injection there is code execution: Mermaid runs at <span class="m">securityLevel: 'strict'</span>, the HTML preview iframe has no <span class="m">allow-scripts</span>, markdown links are scheme-filtered, and <span class="m">&lt;webview&gt;</span> preferences are pinned in main rather than by the tag.</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">Agent CLI</span></td>
+              <td>The child process itself</td>
+              <td>It runs as you, with your shell and your files — that is the point of the product. Bypass Mode is the one switch that removes its own approval prompts: off by default, per machine, and visible on both the desktop and the phone while it is on.</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">Internet</span></td>
+              <td>Apple's push service, GitHub releases, vendor install scripts</td>
+              <td>Push payloads are encrypted for the phone before they leave (RFC 8291) and only known push hosts are accepted as endpoints. Update checks and CLI installs are user-initiated and go to the vendors' own HTTPS endpoints.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="limits">
+    <div class="zh">
+      <h2>常數與上限</h2>
+      <p class="lede">
+        每一個數字都是為了某個具體的失敗模式存在的。這張表就是「為什麼是這個值」。
+      </p>
+    </div>
+    <div class="en">
+      <h2>Constants and limits</h2>
+      <p class="lede">Every number here exists because of a specific failure mode. This table is the "why this value".</p>
+    </div>
+    <div class="tscroll zh">
+      <table>
+        <thead>
+          <tr><th>值</th><th>在哪</th><th>為什麼</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">256 KB</td><td class="k">pty scrollback</td><td>中途接上的訂閱者要有畫面可補。從換行處切（4 KB 內找），少把 ANSI 序列切一半。</td></tr>
+          <tr><td class="num">4 s</td><td class="k">busy 判定</td><td>停止輸出多久算閒置。只在翻轉時廣播，不然每次輸出都要重建整包 state。</td></tr>
+          <tr><td class="num">150 ms</td><td class="k">state 節流</td><td><span class="m">buildState()</span> 會讀設定檔與 <code>agents/*.yaml</code>，不能每個事件都重建。</td></tr>
+          <tr><td class="num">600 字</td><td class="k">審批偵測視窗</td><td>提示都在最後幾行；看整段歷史會誤判。</td></tr>
+          <tr><td class="num">2–3 KB</td><td class="k">審批尾段</td><td>state 裡帶 2 KB、approval 事件帶 3 KB，夠手機卡片顯示問題。</td></tr>
+          <tr><td class="num">4 KB</td><td class="k">dev port 偵測視窗</td><td>看 scrollback 尾段而不是單一 chunk，否則 Vite 那行被切開就抓不到。</td></tr>
+          <tr><td class="num">5 s</td><td class="k">WS 驗證逾時</td><td>沒驗證的連線不留著，逾時以 4001 關閉。</td></tr>
+          <tr><td class="num">1 MB</td><td class="k">WS 單一訊框</td><td>手機不該送更大的東西；<span class="m">input</span> 另外限 64 KB。</td></tr>
+          <tr><td class="num">8 MB</td><td class="k">WS 緩衝上限</td><td>手機網路卡住時堆積會吃光記憶體；超過就以 1013 斷線，讓它重連拿新 snapshot。</td></tr>
+          <tr><td class="num">64 KB</td><td class="k">HTTP body</td><td><span class="m">/api/*</span> 的 JSON 上限。</td></tr>
+          <tr><td class="num">25 s</td><td class="k">心跳</td><td>NAT 與 Wi-Fi 省電模式會收掉閒置連線。</td></tr>
+          <tr><td class="num">20 s</td><td class="k">推播節流</td><td>同一個 <span class="m">kind:id</span> 不重複吵。</td></tr>
+          <tr><td class="num">5 min · 10</td><td class="k">配對碼</td><td>TTL 與失敗次數上限；一次性，用掉就作廢。</td></tr>
+          <tr><td class="num">60 s</td><td class="k">預覽 ticket</td><td>一次性，換成 cookie 之後就沒用了。</td></tr>
+          <tr><td class="num">397 天 / 5 年</td><td class="k">憑證效期</td><td>server 憑證 397 天（iOS 上限 825 天以內）、CA 五年；剩 30 天內重簽。</td></tr>
+          <tr><td class="num">10–500 / 5–200</td><td class="k">resize 範圍</td><td>遠端能改的欄列數上限，避免荒謬尺寸把 TUI 弄爛。</td></tr>
+          <tr><td class="num">200 KB</td><td class="k">handoff.md</td><td>手機要讀的交接筆記上限。</td></tr>
+          <tr><td class="num">500</td><td class="k">git 檔案數</td><td>state 裡最多帶這麼多變更檔。</td></tr>
+          <tr><td class="num">64 MB</td><td class="k">用量紀錄單檔</td><td>CLI 的 jsonl 會長到上百 MB；整檔讀進來再切行，尖峰是檔案大小的好幾倍，超過就跳過。</td></tr>
+          <tr><td class="num">200 · 260 · 40</td><td class="k">路徑萃取上限</td><td>從對話紀錄找工作區路徑時：最多 200 個候選、單一候選 260 字元、往上找 40 層。沒有上限的話一長串路徑字元會讓主行程卡住幾十秒。</td></tr>
+          <tr><td class="num">64 KB</td><td class="k">標題解析視窗</td><td><span class="m">&lt;USER_REQUEST&gt;</span> 的 regex 在「很多開頭、沒有結尾」時是二次方的（實測 1 MB 要 9 秒）。</td></tr>
+          <tr><td class="num">1 MB</td><td class="k">audit.log 輪替</td><td>只記事件不記輸入內容，滿了轉一份 <span class="m">.1</span>。</td></tr>
+          <tr><td class="num">3</td><td class="k">手機記住的電腦</td><td>一次連一台；第四台是拒絕，不會擠掉既有的。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="tscroll en">
+      <table>
+        <thead>
+          <tr><th>Value</th><th>Where</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">256 KB</td><td class="k">pty scrollback</td><td>A late subscriber needs a screen to start from. Cut at a newline (searched within 4 KB) so ANSI sequences aren't sliced in half.</td></tr>
+          <tr><td class="num">4 s</td><td class="k">busy threshold</td><td>How long without output counts as idle. Broadcast only on the flip, or every chunk would rebuild the whole state.</td></tr>
+          <tr><td class="num">150 ms</td><td class="k">state throttle</td><td><span class="m">buildState()</span> reads settings files and <code>agents/*.yaml</code>; it cannot run per event.</td></tr>
+          <tr><td class="num">600 chars</td><td class="k">approval window</td><td>Prompts live in the last few lines; scanning all history produces false positives.</td></tr>
+          <tr><td class="num">2–3 KB</td><td class="k">approval tail</td><td>2 KB inside state, 3 KB on the approval event — enough for the phone's card to show the question.</td></tr>
+          <tr><td class="num">4 KB</td><td class="k">dev-port window</td><td>Reads the scrollback tail, not one chunk, so a split Vite banner still matches.</td></tr>
+          <tr><td class="num">5 s</td><td class="k">WS auth timeout</td><td>Unauthenticated sockets are not kept; the timeout closes with 4001.</td></tr>
+          <tr><td class="num">1 MB</td><td class="k">WS frame cap</td><td>A phone has no reason to send more; <span class="m">input</span> is separately capped at 64 KB.</td></tr>
+          <tr><td class="num">8 MB</td><td class="k">WS buffer cap</td><td>A stalled phone network would otherwise buffer until memory runs out; past this it closes with 1013 and reconnects onto a fresh snapshot.</td></tr>
+          <tr><td class="num">64 KB</td><td class="k">HTTP body</td><td>The JSON limit on <span class="m">/api/*</span>.</td></tr>
+          <tr><td class="num">25 s</td><td class="k">heartbeat</td><td>NAT and Wi-Fi power saving reap idle sockets.</td></tr>
+          <tr><td class="num">20 s</td><td class="k">push throttle</td><td>The same <span class="m">kind:id</span> does not nag twice.</td></tr>
+          <tr><td class="num">5 min · 10</td><td class="k">pairing code</td><td>Lifetime and failure ceiling; single use, dead once redeemed.</td></tr>
+          <tr><td class="num">60 s</td><td class="k">preview ticket</td><td>Single use, worthless once exchanged for the cookie.</td></tr>
+          <tr><td class="num">397 d / 5 y</td><td class="k">certificate validity</td><td>397 days for the server certificate (inside iOS's 825-day ceiling), five years for the CA; re-issued within 30 days of expiry.</td></tr>
+          <tr><td class="num">10–500 / 5–200</td><td class="k">resize clamps</td><td>The column and row range a remote may ask for, so an absurd size can't wreck a TUI.</td></tr>
+          <tr><td class="num">200 KB</td><td class="k">handoff.md</td><td>Cap on the handoff notes sent to the phone.</td></tr>
+          <tr><td class="num">500</td><td class="k">git files</td><td>Most changed files carried in state.</td></tr>
+          <tr><td class="num">64 MB</td><td class="k">usage log per file</td><td>CLI jsonl files reach hundreds of MB; reading one whole and splitting lines peaks at several times its size, so past this it is skipped.</td></tr>
+          <tr><td class="num">200 · 260 · 40</td><td class="k">path extraction caps</td><td>When mining a conversation record for a workspace path: at most 200 candidates, 260 characters each, walking up 40 levels. Without caps one long run of path characters stalls the main process for tens of seconds.</td></tr>
+          <tr><td class="num">64 KB</td><td class="k">title parse window</td><td>The <span class="m">&lt;USER_REQUEST&gt;</span> regex is quadratic when there are many openers and no closer (measured: 9 s for 1 MB).</td></tr>
+          <tr><td class="num">1 MB</td><td class="k">audit.log rotation</td><td>Events only, never input; rolls to <span class="m">.1</span> when full.</td></tr>
+          <tr><td class="num">3</td><td class="k">computers on the phone</td><td>One connection at a time; a fourth is refused rather than evicting one.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="state">
+    <div class="zh">
+      <h2>狀態放在哪</h2>
+      <p class="lede">刻意分三個家。遠端控制與憑證相關的東西永遠不會寫進任何專案。</p>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>位置</th><th>內容</th><th>範圍</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">userData/settings.json</td><td>CLI 路徑、文件工具路徑、Bypass 旗標、語言、最近工作區</td><td>權威來源，每台機器各自。安全相關的鍵只從這裡讀。</td></tr>
+            <tr><td class="k">userData/remote/</td><td><span class="m">config.json</span>（開關、port）、<span class="m">devices.json</span>（token 的雜湊、推播訂閱）、<span class="m">secrets.json</span>（CA 與 VAPID 私鑰，已封裝）、<span class="m">audit.log</span></td><td>每台機器各自，永遠不進專案、不進 Git。</td></tr>
+            <tr><td class="k">userData/*-cache.json</td><td>Dashboard 與 token 用量快取，以檔案 mtime 為鍵</td><td>所有視窗共用，可隨時刪。</td></tr>
+            <tr><td class="k">&lt;workspace&gt;/.workbench/</td><td><span class="m">extensions.yaml</span>（納版控的範本）、<span class="m">credentials.enc</span>（OS 加密，git 忽略）、每台機器的 runtime state（git 忽略）</td><td>每個專案。</td></tr>
+            <tr><td class="k">&lt;workspace&gt;/.project-memory/</td><td>交接筆記、協定、決策紀錄——跨 CLI 的交接層，也是手機 Handoff 分頁讀的東西</td><td>每個專案。</td></tr>
+            <tr><td class="k">&lt;workspace&gt;/agents/*.yaml</td><td>launcher 定義：用哪個已知 CLI、帶哪些參數</td><td>每個專案，跟著 repo 走——所以才要允許清單。</td></tr>
+            <tr><td class="k">手機 localStorage</td><td>最多三台電腦（名字＋位址）、每台一個 device token、目前連哪台、語言與外觀偏好</td><td>依 origin 分隔。token 不會離開這支手機。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="en">
+      <h2>Where state lives</h2>
+      <p class="lede">Three homes, deliberately. Nothing about remote control or credentials is ever written into a project.</p>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>Location</th><th>Contents</th><th>Scope</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">userData/settings.json</td><td>CLI paths, doc-tool paths, Bypass flag, language, recent workspaces</td><td>Authoritative, per machine. Security-relevant keys are read from here only.</td></tr>
+            <tr><td class="k">userData/remote/</td><td><span class="m">config.json</span> (enabled, port), <span class="m">devices.json</span> (token hashes, push subscriptions), <span class="m">secrets.json</span> (CA and VAPID keys, sealed), <span class="m">audit.log</span></td><td>Per machine, never in a project, never in Git.</td></tr>
+            <tr><td class="k">userData/*-cache.json</td><td>Dashboard and token-usage caches, keyed by file mtime</td><td>Shared by all windows; disposable.</td></tr>
+            <tr><td class="k">&lt;workspace&gt;/.workbench/</td><td><span class="m">extensions.yaml</span> (versioned template), <span class="m">credentials.enc</span> (OS-encrypted, git-ignored), per-machine runtime state (git-ignored)</td><td>Per project.</td></tr>
+            <tr><td class="k">&lt;workspace&gt;/.project-memory/</td><td>Handoff notes, protocol, decisions — the cross-CLI hand-off layer, and what the phone's Handoff tab reads</td><td>Per project.</td></tr>
+            <tr><td class="k">&lt;workspace&gt;/agents/*.yaml</td><td>Launcher definitions: which known CLI, which arguments</td><td>Per project, travels with the repo — hence the allow-list.</td></tr>
+            <tr><td class="k">phone localStorage</td><td>Up to three computers (name + address), one device token each, which one is active, language and theme preference</td><td>Per origin. Tokens never leave the device.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="modules">
+    <div class="zh">
+      <h2>模組地圖</h2>
+      <p class="lede">依關注點決定從哪裡開始讀。</p>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>路徑</th><th>裡面是什麼</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">src/main/index.ts</td><td>視窗、工作區解析、webview 權限釘死、選單、生命週期</td></tr>
+            <tr><td class="k">src/main/ipc/</td><td><span class="m">pty · files · git · settings · dashboard · usage · usageParse · ext · conn · updater · notify</span></td></tr>
+            <tr><td class="k">src/main/remote/</td><td><span class="m">server.ts</span>（橋接）、<span class="m">preview.ts</span>（代理）、<span class="m">certs.ts</span>、<span class="m">webpush.ts</span>、<span class="m">store.ts</span>、<span class="m">index.ts</span>（IPC 介面）</td></tr>
+            <tr><td class="k">src/main/ext/</td><td>盤點、manifest、各家 adapter、agent 路徑探測</td></tr>
+            <tr><td class="k">src/preload/index.ts</td><td>整個 IPC 契約與共用型別</td></tr>
+            <tr><td class="k">src/renderer/src/</td><td>桌面 UI：各面板、store、版面、i18n、Monaco 設定</td></tr>
+            <tr><td class="k">src/renderer/src/panels/terminal/</td><td><span class="m">TerminalPanel · imeGuard · approvalDetect · portDetect</span></td></tr>
+            <tr><td class="k">src/renderer/remote/</td><td>手機 App：<span class="m">App · TerminalView · conn · api · hosts · prompt · ui · icons · i18n · theme</span></td></tr>
+            <tr><td class="k">src/renderer/public/</td><td><span class="m">remote-sw.js</span>（推播）、圖示、<span class="m">remote.webmanifest</span></td></tr>
+            <tr><td class="k">src/shared/</td><td><span class="m">remoteProtocol.ts · approvalDetect.ts · portDetect.ts</span>——兩個行程共用</td></tr>
+            <tr><td class="k">scripts/check-*.mts</td><td>可直接跑的自我檢查：遠端密碼學與預覽授權、電腦名冊、port 偵測、用量解析</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>輸入法與終端的那道縫</h3>
+      <p>
+        <code>imeGuard.ts</code> 存在的原因：組字進行中、還沒送出的字是放在 xterm 隱藏的 <span class="m">&lt;textarea&gt;</span> 裡。
+        程式去呼叫 <span class="m">focus()</span>（或 resize 造成重繪）會讓 Chromium 中止這次組字，而被中止的內容會留在 textarea 裡沒被清掉。
+        xterm 判斷「輸入法這次送了什麼」用的是 textarea 內容的前後差異，所以下一個組字鍵進來時，殘留那段會被當成新輸入再送一次——
+        看起來就是「打到一半的字又被貼上一次」。所以組字中一律不搶 focus、不改尺寸；真人點擊不受影響。
+      </p>
+    </div>
+    <div class="en">
+      <h2>Module map</h2>
+      <p class="lede">Where to start reading, by concern.</p>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>Path</th><th>What's in it</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">src/main/index.ts</td><td>Windows, workspace routing, webview pinning, menu, lifecycle</td></tr>
+            <tr><td class="k">src/main/ipc/</td><td><span class="m">pty · files · git · settings · dashboard · usage · usageParse · ext · conn · updater · notify</span></td></tr>
+            <tr><td class="k">src/main/remote/</td><td><span class="m">server.ts</span> (bridge), <span class="m">preview.ts</span> (proxy), <span class="m">certs.ts</span>, <span class="m">webpush.ts</span>, <span class="m">store.ts</span>, <span class="m">index.ts</span> (IPC surface)</td></tr>
+            <tr><td class="k">src/main/ext/</td><td>Inventory, manifest, per-vendor adapters, agent path discovery</td></tr>
+            <tr><td class="k">src/preload/index.ts</td><td>The entire IPC contract and its shared types</td></tr>
+            <tr><td class="k">src/renderer/src/</td><td>Desktop UI: panels, store, layout, i18n, Monaco setup</td></tr>
+            <tr><td class="k">src/renderer/src/panels/terminal/</td><td><span class="m">TerminalPanel · imeGuard · approvalDetect · portDetect</span></td></tr>
+            <tr><td class="k">src/renderer/remote/</td><td>Phone app: <span class="m">App · TerminalView · conn · api · hosts · prompt · ui · icons · i18n · theme</span></td></tr>
+            <tr><td class="k">src/renderer/public/</td><td><span class="m">remote-sw.js</span> (push), icons, <span class="m">remote.webmanifest</span></td></tr>
+            <tr><td class="k">src/shared/</td><td><span class="m">remoteProtocol.ts · approvalDetect.ts · portDetect.ts</span> — used by both processes</td></tr>
+            <tr><td class="k">scripts/check-*.mts</td><td>Runnable self-checks: remote crypto and preview auth, the saved-computer registry, port detection, usage parsers</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>The IME seam in the terminal</h3>
+      <p>
+        Why <code>imeGuard.ts</code> exists: while an IME composition is in progress, the not-yet-committed text lives in
+        xterm's hidden <span class="m">&lt;textarea&gt;</span>. A programmatic <span class="m">focus()</span> (or a resize
+        that forces a redraw) makes Chromium abort the composition, and the aborted text stays in the textarea
+        uncleared. xterm decides what the IME just produced by diffing the textarea's contents, so the next composition
+        key re-sends that leftover as new input — which looks exactly like the half-typed text being pasted again. So
+        nothing steals focus or changes size while composing; a real click is unaffected.
+      </p>
+    </div>
+  </section>
+
+  <section id="build">
+    <div class="zh">
+      <h2>建置與封裝</h2>
+      <ul>
+        <li><b>兩個 renderer entry，一次 build</b>：<code>src/renderer/index.html</code>（桌面）與 <code>src/renderer/remote.html</code>（手機）由同一個 Vite 設定產出，橋接層從 <span class="m">out/renderer</span> 提供手機那份。開發時要先跑一次 <span class="m">npm run build</span>，<span class="m">npm run dev</span> 才有手機端可以測。</li>
+        <li><b>原生相依</b>：<span class="m">@lydell/node-pty</span> 帶 <span class="m">.node</span> 二進位（conpty），必須從 asar 解包，否則打包後終端整個起不來。<span class="m">simple-git</span> 與 node-pty 都靠 <span class="m">externalizeDepsPlugin</span> 排除在 bundle 外。</li>
+        <li><b>目標</b>：Windows NSIS（非 one-click、可改安裝目錄、per-user）、macOS dmg、Linux AppImage；發佈走 GitHub provider。</li>
+        <li><b>更新</b>：預設不自動下載。安裝版走 <span class="m">electron-updater</span>，失敗或免安裝版就退回 GitHub Releases API 查詢；「是不是安裝版」用 exe 旁邊有沒有 NSIS 的解除安裝程式判斷，不能用保護目錄判斷（那對 exe 目錄恆為真，可攜版會被誤判成安裝版）。</li>
+        <li><b>自我檢查</b>：<span class="m">npx tsx scripts/check-remote.mts</span> 驗 CA 的名稱限制（真的去跑一次 TLS 握手，確認冒充 <span class="m">www.google.com</span> 的憑證會被擋）、Web Push 的解密、VAPID 簽章、預覽的 ticket/cookie 流程、WebSocket 來源判斷；另外三支驗電腦名冊、port 偵測、用量解析。</li>
+      </ul>
+    </div>
+    <div class="en">
+      <h2>Build and packaging</h2>
+      <ul>
+        <li><b>Two renderer entries, one build.</b> <code>src/renderer/index.html</code> (desktop) and <code>src/renderer/remote.html</code> (phone) come out of one Vite config, and the bridge serves the phone one from <span class="m">out/renderer</span>. In development run <span class="m">npm run build</span> once so <span class="m">npm run dev</span> has a phone client to serve.</li>
+        <li><b>Native dependencies.</b> <span class="m">@lydell/node-pty</span> ships a <span class="m">.node</span> binary (conpty) that must be unpacked from the asar, or terminals don't start at all in a packaged build. Both it and <span class="m">simple-git</span> are kept out of the bundle by <span class="m">externalizeDepsPlugin</span>.</li>
+        <li><b>Targets.</b> Windows NSIS (not one-click, installation directory changeable, per-user), macOS dmg, Linux AppImage; publishing goes through the GitHub provider.</li>
+        <li><b>Updates.</b> No automatic download by default. Installed builds use <span class="m">electron-updater</span>, with a GitHub Releases API fallback for portable builds or when that fails. "Is this an installed build" is decided by whether an NSIS uninstaller sits next to the exe — not by a protected-directory check, which is always true for the exe's own directory and would misread a portable copy as installed.</li>
+        <li><b>Self-checks.</b> <span class="m">npx tsx scripts/check-remote.mts</span> verifies the CA's name constraints (by actually completing a TLS handshake and confirming a certificate impersonating <span class="m">www.google.com</span> is rejected), Web Push decryption, VAPID signatures, the preview ticket/cookie flow, and the WebSocket origin rule; three more cover the computer registry, port detection and usage parsing.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="security">
+    <div class="zh">
+      <h2>資安現況</h2>
+      <p class="lede">
+        2026-10-01 對 <span class="m">af4c479</span> 做過一次完整的原始碼稽核（沒有啟動 App、沒有對外探測）。
+        以下是當時找到的問題與處理狀態。寫在這裡是為了讓它可追蹤，而不是躺在某個人的記憶裡。
+      </p>
+      <h3>已修</h3>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>嚴重度</th><th>問題</th><th>修法</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td>工作區的 <code>.workbench/settings.json</code> 被當成可信設定——它能改 <span class="m">cliPaths</span>，於是打開別人的 repo、點「Claude Code」跑的可能是 repo 自己帶的腳本；也能把 <span class="m">cliBypassPermissions</span> 打開，悄悄關掉 agent 的審批。</td>
+              <td>安全相關的鍵（CLI 路徑、文件工具路徑、Bypass）只認使用者的全域設定，工作區只能覆寫顯示類偏好。</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td><code>agents/*.yaml</code> 的 launcher 沒有白名單：<span class="m">cli</span> 可以指向任意執行檔或 <span class="m">.ps1</span>，<span class="m">env</span> 還能疊在 <span class="m">process.env</span> 上（<span class="m">NODE_OPTIONS: --require …</span> 連正牌 CLI 都能被插入程式碼），而選單上只顯示 yaml 給的名字。</td>
+              <td><span class="m">cli</span> 收斂成已知 CLI 的白名單；<span class="m">env</span> 過濾掉 <span class="m">NODE_OPTIONS</span>／<span class="m">PATH</span>／<span class="m">LD_PRELOAD</span> 這類可插入程式碼的變數。</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td><code>ext:applySync</code> 路徑穿越：<code>.workbench/extensions.yaml</code> 的 <span class="m">id</span> 會被接進 <span class="m">~/.claude/skills/&lt;id&gt;/</span>，<span class="m">../</span> 就能把檔案寫到家目錄任何地方；<span class="m">path</span> 也能讀到工作區外。MCP 的 <span class="m">command</span> 還會寫進 Antigravity 的全域設定，下次 CLI 啟動就會執行它。</td>
+              <td>id 格式檢查、skill 路徑必須留在工作區內，不合的直接跳過並記 warn。</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td>Mermaid 跑在 <span class="m">securityLevel: 'loose'</span>，而該模式會跳過 <span class="m">sanitizeUrl</span>：圖裡的 <span class="m">click A "javascript:…"</span> 會原樣變成 <span class="m">&lt;a xlink:href&gt;</span>，而結果是用 <span class="m">dangerouslySetInnerHTML</span> 塞進 renderer 的。renderer 握著 <span class="m">window.api</span>，等於工作區一個 .md 點一下就能執行任意程式。</td>
+              <td>改成 <span class="m">securityLevel: 'strict'</span>。</td>
+            </tr>
+            <tr>
+              <td><span class="tag lan">medium</span></td>
+              <td>未認證的區網請求 <span class="m">GET /assets/..</span> 能通過路由正則與存在性檢查，指到目錄；對目錄 <span class="m">createReadStream</span> 的 EISDIR 沒有人接，會上浮成主行程的未捕捉例外（本機驗證過）。</td>
+              <td>路由正則收成「字詞＋副檔名」、用 realpath 做 root 內含檢查且必須是一般檔案、stream 加上 error handler。順手修好 <span class="m">/remote.webmanifest</span> 原本永遠 404 的舊 bug。</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">medium</span></td>
+              <td>Dashboard 掃紀錄檔時有無界迴圈（對幾百 KB 的字串反覆 <span class="m">dirname</span> + <span class="m">existsSync</span>）與二次方 regex（1 MB 的一行要 9 秒），以及沒有上限的整檔讀取；惡意或異常的紀錄檔會把主行程卡住。</td>
+              <td>候選與層數上限、標題解析只看前 64 KB、單檔 64 MB 上限。</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">low</span></td>
+              <td><span class="m">certCovers</span> 用字串包含比對 SAN，<span class="m">192.168.1.1</span> 會被 <span class="m">…1.10</span> 誤判成已涵蓋 → 換 IP 後不重簽，手機連不上。</td>
+              <td>改成逐項相等，並加了回歸檢查。</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">low</span></td>
+              <td><span class="m">&lt;webview&gt;</span> 的權限由 renderer 的標籤屬性決定（其中一處還明確關掉 sandbox）；<span class="m">updater:openRelease</span> 接受任意 scheme 丟給 <span class="m">shell.openExternal</span>。</td>
+              <td>主行程用 <span class="m">will-attach-webview</span> 釘死（無 preload、無 Node、contextIsolation）；openExternal 只放行 http(s)。</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">low</span></td>
+              <td>Markdown 裡的 shell 指令按「送到終端」時，落點是「任何還活著的 session」，可能直接送進正在跑的 agent 提示字元，被當成對 agent 說的話。</td>
+              <td>target 是 shell 就只找真正的 shell session，沒有才新開。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>未修（需要你決定或需要實機驗證）</h3>
+      <ul>
+        <li>
+          <b>「送到終端」的多行貼上</b>（待驗證）：按鈕寫著「只貼上，不執行」，但行與行之間的換行是原樣送進 pty 的，安全性完全靠接收端支援 bracketed paste。cmd.exe 與 PSReadLine 不吃那組標記時，除最後一行外每一行都會立刻執行。要先在實機確認，修法也涉及 UX 取捨（多行要不要先確認、還是只送第一行）。
+        </li>
+        <li>
+          <b>PDF 自動嵌入</b>：agent 寫出的 <span class="m">.pdf</span> 會在無任何點擊的情況下被載進 <span class="m">file://</span> 的 webview 解析。改成點了才嵌入會動到既有習慣，所以留著等你決定。
+        </li>
+        <li>
+          <b>工作區路徑限制沒有解 symlink</b>：<span class="m">resolveSafePath</span> 只做字串前綴比對，repo 裡的 symlink／junction 可以指向工作區外。加 <span class="m">realpath</span> 要小心「寫入還不存在的檔案」這條路徑。
+        </li>
+        <li>
+          <b><span class="m">stripAnsi</span> 的正則缺 ESC 前綴</b>：會吃掉字面的 <span class="m">[…]</span>，而且 <span class="m">\]</span> 之後的內容會被貪婪吃光——手機的審批卡片可能因此少顯示後半段。改它會動到審批偵測，要一起驗。
+        </li>
+        <li>
+          <b>沒有程式碼簽章、<code>install.ps1</code> 不比對雜湊</b>：屬於發佈流程，見「已知取捨」。
+        </li>
+      </ul>
+      <p class="note">
+        稽核範圍：main process 全部、preload、橋接、各 renderer 面板、<code>install.ps1</code>、<code>electron-builder.yml</code>、git hooks。
+        未涵蓋：i18n 字串檔、圖示、CSS、<code>scripts/release.ps1</code>（只 grep 過）、相依套件的 CVE 盤點（<span class="m">npm audit</span> 未執行）。
+      </p>
+    </div>
+    <div class="en">
+      <h2>Security status</h2>
+      <p class="lede">
+        A full source-only audit of <span class="m">af4c479</span> was done on 2026-10-01 (no app launch, no probing of
+        anything deployed). Below is what it found and where each item stands — written down so it stays traceable
+        instead of living in someone's memory.
+      </p>
+      <h3>Fixed</h3>
+      <div class="tscroll">
+        <table>
+          <thead>
+            <tr><th>Severity</th><th>Problem</th><th>Fix</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td>A workspace's <code>.workbench/settings.json</code> was trusted — it could set <span class="m">cliPaths</span>, so opening someone's repo and clicking "Claude Code" could run a script the repo shipped, and it could turn <span class="m">cliBypassPermissions</span> on, silently disabling the agents' approval prompts.</td>
+              <td>Security-relevant keys (CLI paths, doc-tool paths, Bypass) come from the user's global settings only; a workspace may override presentation preferences.</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td><code>agents/*.yaml</code> launchers had no allow-list: <span class="m">cli</span> could name any executable or <span class="m">.ps1</span>, <span class="m">env</span> was merged over <span class="m">process.env</span> (<span class="m">NODE_OPTIONS: --require …</span> injects code into even a genuine CLI), and the menu showed only the name the yaml supplied.</td>
+              <td><span class="m">cli</span> is restricted to known CLIs; <span class="m">env</span> drops <span class="m">NODE_OPTIONS</span>, <span class="m">PATH</span>, <span class="m">LD_PRELOAD</span> and friends.</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td><code>ext:applySync</code> path traversal: an <span class="m">id</span> from <code>.workbench/extensions.yaml</code> was joined into <span class="m">~/.claude/skills/&lt;id&gt;/</span>, so <span class="m">../</span> wrote anywhere under the home directory, and <span class="m">path</span> could read outside the workspace. An MCP <span class="m">command</span> also landed in Antigravity's global config, to be executed on the CLI's next start.</td>
+              <td>Ids are pattern-checked, skill paths must stay inside the workspace, and anything else is skipped with a warning.</td>
+            </tr>
+            <tr>
+              <td><span class="tag trust">high</span></td>
+              <td>Mermaid ran at <span class="m">securityLevel: 'loose'</span>, which skips <span class="m">sanitizeUrl</span>: a diagram's <span class="m">click A "javascript:…"</span> became a literal <span class="m">&lt;a xlink:href&gt;</span>, and the result is injected with <span class="m">dangerouslySetInnerHTML</span>. The renderer holds <span class="m">window.api</span>, so one click on a .md in the workspace was arbitrary code execution.</td>
+              <td>Switched to <span class="m">securityLevel: 'strict'</span>.</td>
+            </tr>
+            <tr>
+              <td><span class="tag lan">medium</span></td>
+              <td>An unauthenticated LAN request for <span class="m">GET /assets/..</span> passed the route regex and the existence check and resolved to a directory; the resulting EISDIR from <span class="m">createReadStream</span> had no handler and surfaced as an uncaught exception in the main process (verified locally).</td>
+              <td>The route patterns now require "word + extension", the target is realpath-checked to be a regular file under the root, and the stream has an error handler. This also fixed an old bug where <span class="m">/remote.webmanifest</span> always 404'd.</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">medium</span></td>
+              <td>The dashboard's log scanners had an unbounded loop (repeated <span class="m">dirname</span> + <span class="m">existsSync</span> over a several-hundred-KB string), a quadratic regex (9 s for a 1 MB line) and uncapped whole-file reads, so a hostile or merely unusual log stalled the main process.</td>
+              <td>Candidate and depth caps, a 64 KB window for title parsing, and a 64 MB per-file ceiling.</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">low</span></td>
+              <td><span class="m">certCovers</span> compared the SAN by substring, so <span class="m">192.168.1.1</span> matched <span class="m">…1.10</span> — the certificate was never renewed after an IP change and the phone could not connect.</td>
+              <td>Entry-by-entry equality, with a regression check.</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">low</span></td>
+              <td><span class="m">&lt;webview&gt;</span> preferences were decided by renderer tag attributes (one of them explicitly disabling the sandbox); <span class="m">updater:openRelease</span> handed any scheme to <span class="m">shell.openExternal</span>.</td>
+              <td>Main pins them with <span class="m">will-attach-webview</span> (no preload, no Node, contextIsolation); openExternal accepts http(s) only.</td>
+            </tr>
+            <tr>
+              <td><span class="tag local">low</span></td>
+              <td>"Send to terminal" on a markdown shell block targeted any live session, so it could land in a running agent's prompt and be read as an instruction to the agent.</td>
+              <td>A shell target now finds a real shell session, and only creates one if there is none.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Open (needs a decision, or device verification)</h3>
+      <ul>
+        <li>
+          <b>Multi-line paste from "Send to terminal"</b> (unverified): the button says "paste only, does not run", but the
+          newlines between lines are sent to the pty verbatim, so the guarantee rests on the receiving program supporting
+          bracketed paste. Where cmd.exe or PSReadLine don't honour those markers, every line but the last runs
+          immediately. Needs checking on a real machine, and the fix involves a UX call (confirm multi-line, or send only
+          the first line).
+        </li>
+        <li>
+          <b>PDF auto-embedding</b>: a <span class="m">.pdf</span> written by an agent is loaded into a
+          <span class="m">file://</span> webview and parsed with no click anywhere. Requiring a click changes existing
+          behaviour, so it is left for you to decide.
+        </li>
+        <li>
+          <b>Workspace confinement doesn't resolve symlinks</b>: <span class="m">resolveSafePath</span> compares strings,
+          so a symlink or junction in a repo can point outside. Adding <span class="m">realpath</span> needs care for the
+          "writing a file that doesn't exist yet" path.
+        </li>
+        <li>
+          <b><span class="m">stripAnsi</span>'s regex is missing the ESC prefix</b>: it eats literal
+          <span class="m">[…]</span> text, and everything after a <span class="m">\]</span> is consumed greedily — the
+          phone's approval card can lose the second half of a prompt. Changing it touches approval detection, so both
+          need verifying together.
+        </li>
+        <li>
+          <b>No code signing, and <code>install.ps1</code> checks no hash</b>: a release-process matter, see Known
+          trade-offs.
+        </li>
+      </ul>
+      <p class="note">
+        Audit scope: the whole main process, preload, the bridge, the renderer panels, <code>install.ps1</code>,
+        <code>electron-builder.yml</code> and the git hooks. Not covered: i18n string files, icons, CSS,
+        <code>scripts/release.ps1</code> (grepped only), and a dependency CVE sweep (<span class="m">npm audit</span> was
+        not run).
+      </p>
+    </div>
+  </section>
+
+  <section id="tradeoffs">
+    <div class="zh">
+      <h2>已知取捨</h2>
+      <p class="lede">這些是刻意留著的，不是忘了。寫在這裡，下次有人想動的時候才知道當初為什麼。</p>
+      <ul>
+        <li><b>推播只來自一台</b>：Web Push 訂閱綁 origin，所以多電腦切換時只有「送來這個 App 的那台」會推。要讓每台都能推，得為每台註冊不同 scope 的 Service Worker，並把 VAPID 公鑰與訂閱改走 WebSocket——還沒做。</li>
+        <li><b>預覽的 frame-src 放到 <span class="m">https:</span></b>：預覽可能在你選的另一台電腦上，CSP 沒辦法表達「私有網段」，而這台電腦也不知道你記了哪幾台。被框住的頁面本來就碰不到 App 的東西。</li>
+        <li><b>桌面 renderer 的 CSP 含 <span class="m">unsafe-inline</span> 與 <span class="m">unsafe-eval</span></b>：Monaco 需要。這也是為什麼「被渲染的內容」那道邊界要守得特別緊——那裡的 HTML 注入等於程式執行。</li>
+        <li><b>Bypass 模式</b>：開著時之後啟動的 agent 不再詢問。這是使用者明確要的功能，所以保留，但預設關閉、開啟要確認、桌面跳通知、手機首頁常駐警示。</li>
+        <li><b>沒有程式碼簽章</b>：electron-updater 在沒有 publisherName 時會跳過安裝檔的簽章驗證，更新的完整性只靠對 GitHub 的 TLS。<code>install.ps1</code> 也只比對檔案大小，沒有比對雜湊。</li>
+        <li><b>審批偵測是純文字啟發式</b>：各家 CLI 換個提示字串就會失準。升級路徑是哪家 CLI 走結構化輸出（如 stream-json）就改那家，不必動其他家。</li>
+      </ul>
+    </div>
+    <div class="en">
+      <h2>Known trade-offs</h2>
+      <p class="lede">These are deliberate, not forgotten. Written down so the next person to touch them knows why.</p>
+      <ul>
+        <li><b>Push comes from one computer.</b> A Web Push subscription is tied to an origin, so with several computers only the one that served the app can push. Per-computer push would need a separate service-worker scope per computer plus moving the VAPID key and the subscription onto the WebSocket — not done.</li>
+        <li><b>The preview's frame-src is <span class="m">https:</span>.</b> A preview may live on whichever computer you picked, CSP cannot express "private LAN", and this computer doesn't know which computers you remembered. The framed page cannot touch the app regardless.</li>
+        <li><b>The desktop renderer's CSP allows <span class="m">unsafe-inline</span> and <span class="m">unsafe-eval</span>.</b> Monaco needs them. It is also why the "rendered content" boundary is guarded so tightly — HTML injection there is code execution.</li>
+        <li><b>Bypass Mode.</b> While on, agents started from then on stop asking. It is a feature people explicitly want, so it stays — off by default, confirmed on enable, with a desktop notification and a standing warning on the phone's home screen.</li>
+        <li><b>No code signing.</b> Without a publisherName, electron-updater skips signature validation of the downloaded installer, so update integrity rests on TLS to GitHub alone. <code>install.ps1</code> likewise only checks the file size, not a hash.</li>
+        <li><b>Approval detection is a text heuristic.</b> Any CLI that rewrites its prompt breaks it. The upgrade path is per vendor: when one ships structured output (such as stream-json), switch that one over without touching the others.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>Multi-Harness ADE · docs/architecture.html · regenerate when the bridge protocol changes</footer>
+</div>
+
+<script>
+  ;(function () {
+    var root = document.documentElement
+    var zh = document.getElementById('lang-zh')
+    var en = document.getElementById('lang-en')
+    function apply(lang) {
+      root.setAttribute('data-doc-lang', lang)
+      root.setAttribute('lang', lang === 'en' ? 'en' : 'zh-Hant')
+      zh.setAttribute('aria-pressed', String(lang !== 'en'))
+      en.setAttribute('aria-pressed', String(lang === 'en'))
+      try {
+        localStorage.setItem('arch.lang', lang)
+      } catch (e) {
+        /* 私密視窗寫不進去就只在這次生效 */
+      }
+    }
+    var saved = null
+    try {
+      saved = localStorage.getItem('arch.lang')
+    } catch (e) {
+      saved = null
+    }
+    apply(saved === 'en' ? 'en' : 'zh')
+    zh.addEventListener('click', function () {
+      apply('zh')
+    })
+    en.addEventListener('click', function () {
+      apply('en')
+    })
+  })()
+</script>

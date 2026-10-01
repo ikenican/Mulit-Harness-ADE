@@ -8,7 +8,7 @@ import * as path from 'path'
 import type { Socket } from 'net'
 import simpleGit from 'simple-git'
 import { WebSocketServer, WebSocket } from 'ws'
-import { getAllProjectWindows } from '../index'
+import { getAllProjectWindows, openProjectWindow } from '../index'
 import {
   ptyEvents,
   listPtySessions,
@@ -23,7 +23,7 @@ import {
   listLaunchers,
   type PtySessionInfo
 } from '../ipc/pty'
-import { isCliBypassPermissions, isCliEnabled, setCliBypassPermissions } from '../ipc/settings'
+import { getRecentWorkspaces, isCliBypassPermissions, isCliEnabled, setCliBypassPermissions } from '../ipc/settings'
 import { stripAnsi } from '../../shared/approvalDetect'
 import {
   BUILTIN_LAUNCHERS,
@@ -31,9 +31,10 @@ import {
   type RemoteLauncher,
   type RemoteSession,
   type RemoteWindow,
+  type RemoteWorkspaceOption,
   type ServerMessage
 } from '../../shared/remoteProtocol'
-import { certCovers, certDer, createCa, isPrivateIPv4, issueServerCert, lanAddresses, localHostname } from './certs'
+import { certCovers, certDer, createCa, isAllowedOrigin, isPrivateIPv4, issueServerCert, lanAddresses, localHostname } from './certs'
 import {
   addDevice,
   audit,
@@ -48,13 +49,19 @@ import {
   type DeviceRecord
 } from './store'
 import { generateVapidKeys, sendPush, type PushSubscriptionJSON, type VapidKeys } from './webpush'
+import { PreviewProxy } from './preview'
 
 // Remote Bridge：讓同一個區網的 iPhone 遠端操作桌面上的 CLI 終端。
 //
 //   https://<區網IP>:<port>      手機 PWA + WebSocket（/ws）+ 配對／推播 API
 //   http://<區網IP>:<port+1>     只提供「安裝 CA 憑證」的設定頁，其餘一律導去 https
+//   https://<區網IP>:<port+2>    手機預覽代理（見 ./preview.ts）
 //
 // 只接受私有網段來源；即使使用者在路由器上把 port 轉出去，外網連線也會在 TCP 層被斷開。
+//
+// 手機可以在一個畫面裡切換多台電腦：那是跨 origin 的 WebSocket，所以 upgrade 的
+// Origin 檢查放行「區網上同一個 App 的 origin」（certs.ts 的 isAllowedOrigin），
+// 而配對也提供 WebSocket 版本（pairRequest），否則跨 origin 的 fetch 會被 CORS 擋掉。
 
 const PAIR_TTL_MS = 5 * 60 * 1000
 const PAIR_MAX_FAILURES = 10
@@ -79,6 +86,8 @@ interface Client {
   device: DeviceRecord | null
   attached: Set<string>
   visible: boolean
+  /** 手機是用哪個位址連進來的：預覽網址要給同一個位址，不能猜網卡 */
+  host: string
 }
 
 export interface BridgeStatus {
@@ -144,6 +153,9 @@ const MIME: Record<string, string> = {
   '.ttf': 'font/ttf'
 }
 
+// 預覽的 iframe 在另一個 port（甚至是你選的另一台電腦）＝另一個 origin，
+// 所以 frame-src 不能只有 'self'。CSP 沒辦法表達「私有網段」，而且這台電腦
+// 也不知道使用者記了哪幾台，只能放行 https:；被框住的頁面本來就碰不到這個 App 的東西。
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -153,13 +165,31 @@ const CSP = [
   "connect-src 'self' wss:",
   "worker-src 'self'",
   "manifest-src 'self'",
+  "frame-src 'self' https:",
   "frame-ancestors 'none'",
   "base-uri 'none'"
 ].join('; ')
 
+// 手機端要拿的檔案只有這兩種形狀。每一段都必須是「字詞 + 副檔名」，
+// 所以 `..`、`.` 這種路徑元素過不了（/assets/.. 會指到 root 目錄本身）。
+const ASSET_PATH = /^\/assets\/[\w-]+(?:\.[\w-]+)+$/
+const PUBLIC_PATH = /^\/remote[-.][\w-]+(?:\.[\w-]+)*$/
+
 /** 手機端靜態檔：打包後在 out/renderer（與桌面 renderer 同一個 Vite build 的第二個 entry） */
 function staticRoot(): string {
   return path.join(__dirname, '../renderer')
+}
+
+/** 目標必須是 root 底下的一般檔案（不是目錄、不是符號連結指出去的東西） */
+function isFileUnder(root: string, file: string): boolean {
+  try {
+    const real = fs.realpathSync(file)
+    const rel = path.relative(fs.realpathSync(root), real)
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false
+    return fs.statSync(real).isFile()
+  } catch {
+    return false
+  }
 }
 
 function launcherKeyOf(s: PtySessionInfo): string {
@@ -180,6 +210,8 @@ export class RemoteBridge {
   private stateTimer: NodeJS.Timeout | null = null
   private pushThrottle = new Map<string, number>()
   private onStatus: () => void
+  // 只代理「目前真的有終端印出過」的 port，而且一律只連 127.0.0.1
+  private preview = new PreviewProxy((p) => listPtySessions().some((s) => s.devPort === p))
 
   constructor(onStatus: () => void) {
     this.onStatus = onStatus
@@ -209,12 +241,14 @@ export class RemoteBridge {
       const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
       server.on('upgrade', (req, socket, head) => {
         const host = req.headers.host || ''
-        // 擋跨站 WebSocket：只接受由本 PWA 自己的來源發起的連線
-        if (req.url !== '/ws' || req.headers.origin !== `https://${host}`) {
+        // 擋跨站 WebSocket。允許的來源有兩種：本機 PWA 自己，以及
+        // 同一個 App 跑在區網上另一台電腦的 origin（手機在一個畫面裡切換電腦用）。
+        // 通過這關也只是拿到一條連線，五秒內沒有有效 token 一樣被斷開。
+        if (req.url !== '/ws' || !isAllowedOrigin(req.headers.origin, host)) {
           socket.destroy()
           return
         }
-        wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws))
+        wss.handleUpgrade(req, socket, head, (ws) => this.onConnection(ws, host.split(':')[0]))
       })
 
       const setup = http.createServer((req, res) => this.handleSetup(req, res))
@@ -231,6 +265,13 @@ export class RemoteBridge {
       server.on('error', (e) => this.fail(e))
       setup.on('error', (e) => this.fail(e))
 
+      // 預覽代理（port+2）起不來只是沒有預覽，遠端控制照常跑
+      try {
+        await this.preview.start(port + 2, certPem, keyPem, guardLan)
+      } catch (e) {
+        console.warn('[Remote] preview proxy failed to start:', e)
+      }
+
       this.server = server
       this.setupServer = setup
       this.wss = wss
@@ -238,6 +279,7 @@ export class RemoteBridge {
       ptyEvents.on('approval', this.onApproval)
       ptyEvents.on('exit', this.onExit)
       ptyEvents.on('resized', this.onResized)
+      ptyEvents.on('activity', this.onActivity)
       audit('bridge.start', { port, addresses: this.addresses })
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e)
@@ -254,6 +296,7 @@ export class RemoteBridge {
     ptyEvents.off('approval', this.onApproval)
     ptyEvents.off('exit', this.onExit)
     ptyEvents.off('resized', this.onResized)
+    ptyEvents.off('activity', this.onActivity)
     for (const c of this.clients) this.dropClient(c, 1001)
     this.clients.clear()
     this.wss?.close()
@@ -268,6 +311,7 @@ export class RemoteBridge {
     this.server = null
     this.setupServer = null
     this.pairing = null
+    closing.push(this.preview.stop())
     await Promise.all(closing)
     this.onStatus()
   }
@@ -409,11 +453,13 @@ export class RemoteBridge {
     const root = staticRoot()
     let rel: string | null = null
     if (p === '/' || p === '/index.html') rel = 'remote.html'
-    else if (/^\/assets\/[\w.-]+$/.test(p)) rel = p.slice(1)
-    else if (/^\/remote-[\w.-]+$/.test(p)) rel = p.slice(1)
+    else if (ASSET_PATH.test(p)) rel = p.slice(1)
+    else if (PUBLIC_PATH.test(p)) rel = p.slice(1)
 
     const file = rel ? path.join(root, rel) : null
-    if (!file || !fs.existsSync(file)) {
+    // 一定要是 root 底下的一般檔案：目錄（例如 /assets/..）通得過 existsSync，
+    // 但 createReadStream 會丟 EISDIR，而那個 error 沒人接就直接上浮成 main process 的未捕捉例外。
+    if (!file || !isFileUnder(root, file)) {
       if (p === '/' || p === '/index.html') {
         res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' })
         res.end('Mobile client not built. Run `npm run build` once, then restart the app.')
@@ -434,7 +480,10 @@ export class RemoteBridge {
     }
     if (rel === 'remote-sw.js') headers['Service-Worker-Allowed'] = '/'
     res.writeHead(200, headers)
-    fs.createReadStream(file).pipe(res)
+    const stream = fs.createReadStream(file)
+    // pipe() 不會轉發 error；沒有這行，任何讀檔失敗都會變成 main process 的未捕捉例外
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
   }
 
   /** http 設定頁：iPhone 還沒信任 CA 前唯一能打開的頁面 */
@@ -463,8 +512,8 @@ export class RemoteBridge {
 
   // —— WebSocket ——
 
-  private onConnection(ws: WebSocket): void {
-    const client: Client = { connId: crypto.randomUUID(), ws, device: null, attached: new Set(), visible: true }
+  private onConnection(ws: WebSocket, host: string): void {
+    const client: Client = { connId: crypto.randomUUID(), ws, device: null, attached: new Set(), visible: true, host }
     this.clients.add(client)
     // 5 秒內沒通過驗證就斷線
     const authTimer = setTimeout(() => {
@@ -479,6 +528,22 @@ export class RemoteBridge {
         return
       }
       if (!client.device) {
+        // 配對也走 WebSocket：手機在「這台」的 App 裡配對另一台電腦時，
+        // 跨 origin 的 fetch 會被 CORS 擋掉，而 WebSocket 沒有這個問題。
+        // 保護與 /api/pair 完全相同：一次性配對碼、5 分鐘、錯 10 次作廢。
+        if (msg.t === 'pairRequest') {
+          const paired = this.tryPair(msg.code, msg.name)
+          if (!paired) return this.send(client, { t: 'error', message: 'invalid or expired code' })
+          const device = findDeviceByToken(paired.token)
+          if (!device) return this.dropClient(client, 4001)
+          clearTimeout(authTimer)
+          client.device = device
+          this.send(client, { t: 'paired', token: paired.token, deviceId: paired.deviceId })
+          this.send(client, { t: 'authed', deviceId: device.id, deviceName: device.name, hostName: os.hostname() })
+          this.send(client, this.buildState())
+          this.onStatus()
+          return
+        }
         if (msg.t !== 'auth') return this.dropClient(client, 4001)
         const device = findDeviceByToken(msg.token)
         if (!device) return this.dropClient(client, 4001)
@@ -590,10 +655,37 @@ export class RemoteBridge {
           },
           { workspace: entry.workspaceRoot, owner: win.webContents, subscribeOwner: false }
         )
-        // 桌面上也開一個分頁接上同一個 pty：手機開的 agent 在電腦前也看得到、接得手
-        win.webContents.send('pty:remoteSpawned', { ptyId: id, launcherKey: launcher.key, title: launcher.title })
+        // 桌面上也開一個分頁接上同一個 pty：手機開的 agent 在電腦前也看得到、接得手。
+        // 視窗可能是手機剛請桌面開的、renderer 還在載入，這時要等載完再送，否則這則訊息沒人收。
+        // ponytail: 只等到 did-finish-load；renderer 掛上 listener 還要幾十毫秒，
+        // 極端情況分頁仍可能沒出現（pty 本身不受影響，手機照樣看得到）。真要保險就改成 renderer 掛載時主動問一次。
+        const announce = (): void => {
+          if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+            win.webContents.send('pty:remoteSpawned', { ptyId: id, launcherKey: launcher.key, title: launcher.title })
+          }
+        }
+        if (win.webContents.isLoading()) win.webContents.once('did-finish-load', announce)
+        else announce()
         audit('session.spawn', { deviceId: c.device?.id, launcher: launcher.key, workspace: entry.workspaceRoot })
         return this.send(c, { t: 'spawned', id })
+      }
+      case 'preview': {
+        const s = getPtySession(msg.id)
+        if (!s?.devPort) return this.send(c, { t: 'preview', id: msg.id, url: null, error: 'no dev server detected' })
+        const url = this.preview.issueUrl(c.host, s.devPort)
+        if (!url) return this.send(c, { t: 'preview', id: msg.id, url: null, error: 'preview unavailable' })
+        audit('preview.open', { deviceId: c.device?.id, session: msg.id, devPort: s.devPort })
+        return this.send(c, { t: 'preview', id: msg.id, url })
+      }
+      case 'openWorkspace': {
+        // 只認「桌面最近開啟清單裡」的路徑：手機不能指定任意資料夾讓桌面開起來跑 agent
+        const wanted = this.workspaceOptions(getAllProjectWindows().map((e) => e.workspaceRoot)).find(
+          (w) => w.path === msg.path
+        )
+        if (!wanted) return this.send(c, { t: 'error', message: 'workspace not available' })
+        const win = openProjectWindow(wanted.path)
+        audit('workspace.open', { deviceId: c.device?.id, workspace: wanted.path, windowId: win.id })
+        return this.broadcast(this.buildState())
       }
       case 'handoff': {
         const ws = this.workspaceOf(msg.windowId)
@@ -642,10 +734,24 @@ export class RemoteBridge {
 
   private launchersFor(ws: string): RemoteLauncher[] {
     const builtin = BUILTIN_LAUNCHERS.filter((l) => isCliEnabled(l.key))
+    // 只是把內建 CLI 換個名字、沒加任何 args／env 的 launcher 不重複列出：
+    // 否則 agents/*.yaml 裡一個 `cli: claude` 的別名，在手機上會變成第二個「Claude Code」。
     const custom: RemoteLauncher[] = ws
-      ? listLaunchers(ws).map((l) => ({ key: l.id, title: l.name, kind: 'custom' as const }))
+      ? listLaunchers(ws)
+          .filter((l) => l.hasExtras || !DIRECT_KEYS.has(l.cli) || !isCliEnabled(l.cli))
+          .map((l) => ({ key: l.id, title: l.name, kind: 'custom' as const }))
       : []
     return [...builtin, ...custom]
+  }
+
+  /** 最近開啟過、但目前沒有視窗的工作區（手機的工作區選單） */
+  private workspaceOptions(open: string[]): RemoteWorkspaceOption[] {
+    const norm = (p: string): string => path.resolve(p).replace(/\\/g, '/').toLowerCase()
+    const openSet = new Set(open.filter(Boolean).map(norm))
+    return getRecentWorkspaces()
+      .filter((p) => !openSet.has(norm(p)))
+      .slice(0, 12)
+      .map((p) => ({ path: p, name: path.basename(p) || p }))
   }
 
   private buildState(): ServerMessage {
@@ -664,6 +770,8 @@ export class RemoteBridge {
         rows: s.rows,
         needsApproval: s.needsApproval,
         lastOutputAt: s.lastOutputAt,
+        busy: s.busy,
+        devPort: s.devPort,
         approvalTail: s.needsApproval ? stripAnsi((getPtyScrollback(s.id) || '').slice(-2000)) : undefined
       }))
     const remoteWindows: RemoteWindow[] = windows.map((e) => ({
@@ -672,7 +780,13 @@ export class RemoteBridge {
       workspaceName: path.basename(e.workspaceRoot || '') || '(no folder)',
       launchers: this.launchersFor(e.workspaceRoot)
     }))
-    return { t: 'state', sessions, windows: remoteWindows, bypass: isCliBypassPermissions() }
+    return {
+      t: 'state',
+      sessions,
+      windows: remoteWindows,
+      workspaces: this.workspaceOptions(windows.map((e) => e.workspaceRoot)),
+      bypass: isCliBypassPermissions()
+    }
   }
 
   // arrow function：當成事件 listener 註冊／移除時 this 不會跑掉
@@ -682,6 +796,11 @@ export class RemoteBridge {
       this.stateTimer = null
       if (this.clients.size) this.broadcast(this.buildState())
     }, 150)
+  }
+
+  // 執行中／閒置只在翻轉時廣播，不必為了狀態更新整包 state（buildState 會讀設定檔與 agents/*.yaml）
+  private onActivity = (id: string, busy: boolean): void => {
+    this.broadcast({ t: 'activity', id, busy })
   }
 
   private onResized = (id: string, cols: number, rows: number): void => {

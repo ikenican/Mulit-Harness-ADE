@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, Menu, shell, ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { join } from 'path'
@@ -211,6 +211,16 @@ export function createWindow(initialWorkspace?: string): BrowserWindow {
     return { action: 'deny' }
   })
 
+  // <webview> 的權限由 main 釘死，不讓 renderer 的標籤屬性自己決定：
+  // 那裡面放的是 dev server 或 PDF 之類的外部內容，不該拿到 Node 或我們的 preload。
+  win.webContents.on('will-attach-webview', (_event, prefs) => {
+    delete prefs.preload
+    prefs.nodeIntegration = false
+    prefs.nodeIntegrationInSubFrames = false
+    prefs.contextIsolation = true
+    prefs.webSecurity = true
+  })
+
   // 在視窗關閉前（DOM 與 WebContents 尚未銷毀）執行 PTY 行程終止與工作區清理
   win.on('close', () => {
     try {
@@ -412,6 +422,14 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
+    // 不要用 Electron 的預設選單。它會註冊 Ctrl+Z / Ctrl+A / Ctrl+X / Ctrl+C / Ctrl+V
+    // 這些「編輯」快速鍵，而終端裡每一個都另有意義（Ctrl+Z 是 suspend、Ctrl+A 是行首、
+    // Ctrl+C 是中斷）。對焦在 xterm 的隱藏 textarea 時，這些角色會先動到 textarea：
+    // undo 會把剛打的字還原回去、再被當成輸入送進 pty，看起來就是「莫名又貼上一次」。
+    // 這個 App 用自繪標題列、選單本來就隱藏（autoHideMenuBar），拿掉沒有損失。
+    // macOS 例外：沒有選單連 Cmd+C／Cmd+V 都會失效，所以保留它的預設選單。
+    if (process.platform !== 'darwin') Menu.setApplicationMenu(null)
+
     registerFileHandlers()
     registerGitHandlers()
     registerPtyHandlers()

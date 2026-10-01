@@ -107,7 +107,8 @@ export default function TerminalView({
   const opened = useRef(false)
   const originalSize = useRef<{ cols: number; rows: number } | null>(null)
   const stick = useRef(true)
-  const [mode, setMode] = useState<'read' | 'term'>('read')
+  const [mode, setMode] = useState<'read' | 'term' | 'preview'>('read')
+  const [preview, setPreview] = useState<{ url: string | null; error: string | null }>({ url: null, error: null })
   const [lines, setLines] = useState<Line[]>([])
   const [prompt, setPrompt] = useState<ParsedPrompt | null>(null)
   const [answered, setAnswered] = useState(false)
@@ -117,6 +118,9 @@ export default function TerminalView({
   const [text, setText] = useState('')
   const modeRef = useRef(mode)
   modeRef.current = mode
+  const fitRef = useRef(false)
+  fitRef.current = fit
+  const autoFitDone = useRef(false)
 
   const fitFont = useCallback((): void => {
     const term = termRef.current
@@ -125,6 +129,30 @@ export default function TerminalView({
     const size = Math.max(6, Math.min(14, Math.floor(((body.clientWidth - 12) / (term.cols * monoCharRatio())) * 10) / 10))
     if (term.options.fontSize !== size) term.options.fontSize = size
   }, [])
+
+  /**
+   * 把 pty 的欄數改成手機放得下的寬度。
+   * 只縮字級沒有用：桌面開的 session 是 120 欄，要塞進手機得用 5px 以下的字，
+   * 字級下限是 6px，所以畫面一定會超出去、只能左右拖。真正要改的是欄數。
+   * 回傳有沒有真的送出 resize（本來就放得下就不去動電腦的尺寸）。
+   */
+  const applyFit = useCallback((): boolean => {
+    const body = bodyRef.current
+    if (!body || !body.clientWidth) return false
+    const px = 12 * monoCharRatio()
+    const cols = Math.max(40, Math.floor((body.clientWidth - 32) / px))
+    const rows = Math.max(12, Math.floor((body.clientHeight - 12) / 17))
+    const current = termRef.current?.cols ?? session.cols
+    if (cols >= current) return false
+    if (!originalSize.current) originalSize.current = { cols: session.cols, rows: session.rows }
+    conn.send({ t: 'resize', id, cols, rows })
+    return true
+  }, [conn, id, session.cols, session.rows])
+
+  const restoreSize = useCallback((): void => {
+    if (originalSize.current) conn.send({ t: 'resize', id, ...originalSize.current })
+    originalSize.current = null
+  }, [conn, id])
 
   const toBottom = (): void => {
     const b = bodyRef.current
@@ -171,6 +199,8 @@ export default function TerminalView({
         term.resize(m.cols, m.rows)
         fitFont()
         refresh()
+      } else if (m.t === 'preview' && m.id === id) {
+        setPreview({ url: m.url, error: m.url ? null : m.error || 'preview unavailable' })
       }
     })
     // 連上（或從背景回來重連）就重新 attach：伺服器會重送 snapshot
@@ -192,6 +222,7 @@ export default function TerminalView({
       conn.send({ t: 'detach', id })
       // 接管過尺寸就還給電腦
       if (originalSize.current) conn.send({ t: 'resize', id, ...originalSize.current })
+      originalSize.current = null
       term.dispose()
       termRef.current = null
       opened.current = false
@@ -206,10 +237,35 @@ export default function TerminalView({
       opened.current = true
       fitFont()
     }
+    // 進終端就自動配合手機寬度，不必先去選單按一次；使用者關掉後不再自動開回來
+    if (mode === 'term' && !autoFitDone.current) {
+      autoFitDone.current = true
+      if (applyFit()) setFit(true)
+    }
     if (mode === 'read' && term) setLines(readBuffer(term))
     stick.current = true
     requestAnimationFrame(toBottom)
-  }, [mode])
+  }, [mode, applyFit, fitFont])
+
+  // 轉向、鍵盤收合之後寬度變了：fit 開著就重算欄數（節流，避免連續 resize 洗 pty）
+  useEffect(() => {
+    let timer: number | null = null
+    const onResize = (): void => {
+      if (!fitRef.current) return
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        timer = null
+        applyFit()
+      }, 250)
+    }
+    window.addEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
+    }
+  }, [applyFit])
 
   // 新的審批出現就重新可以按
   useEffect(() => {
@@ -237,27 +293,24 @@ export default function TerminalView({
   }
 
   const toggleFit = (): void => {
-    const body = bodyRef.current
-    if (!body) return
-    if (!fit) {
-      originalSize.current = { cols: session.cols, rows: session.rows }
-      const px = 12 * monoCharRatio()
-      conn.send({
-        t: 'resize',
-        id,
-        cols: Math.max(40, Math.floor((body.clientWidth - 32) / px)),
-        rows: Math.max(12, Math.floor((body.clientHeight - 12) / 17))
-      })
-      setFit(true)
-    } else {
-      if (originalSize.current) conn.send({ t: 'resize', id, ...originalSize.current })
-      originalSize.current = null
+    if (fit) {
+      restoreSize()
       setFit(false)
+    } else if (applyFit()) {
+      setFit(true)
     }
   }
 
   const exited = exitCode !== undefined
   const showApproval = session.needsApproval && !exited && !answered
+  // 只有這個終端真的印出過 dev server 網址才有預覽可看
+  const canPreview = !!session.devPort
+  // 每次點「預覽」都換一張新 ticket：ticket 是一次性的，重進來要重發
+  const openPreview = (): void => {
+    setPreview({ url: null, error: null })
+    setMode('preview')
+    conn.send({ t: 'preview', id })
+  }
 
   return (
     <div className="session">
@@ -272,18 +325,29 @@ export default function TerminalView({
           </button>
         }
       >
-        <div className="segmented" role="group" data-index={mode === 'read' ? 0 : 1}>
+        <div
+          className="segmented"
+          role="group"
+          data-index={mode === 'read' ? 0 : mode === 'term' ? 1 : 2}
+          style={{ '--seg': canPreview ? 3 : 2 } as React.CSSProperties}
+        >
           <button aria-pressed={mode === 'read'} onClick={() => setMode('read')}>
             {t('read')}
           </button>
           <button aria-pressed={mode === 'term'} onClick={() => setMode('term')}>
             {t('terminal')}
           </button>
+          {canPreview && (
+            <button aria-pressed={mode === 'preview'} onClick={openPreview}>
+              {t('preview')}
+            </button>
+          )}
         </div>
       </NavBar>
 
       <div
         className="session-body"
+        hidden={mode === 'preview'}
         ref={bodyRef}
         onScroll={(e) => {
           const el = e.currentTarget
@@ -299,6 +363,17 @@ export default function TerminalView({
           </div>
         </div>
       </div>
+
+      {/* 成品預覽：桌面把終端印出的 dev server 代理成 https 送過來，所以這裡放 iframe 就好 */}
+      {canPreview && (
+        <div className="preview-pane" hidden={mode !== 'preview'}>
+          {preview.url ? (
+            <iframe key={preview.url} src={preview.url} className="preview-frame" title={t('preview')} />
+          ) : (
+            <p className="empty">{preview.error || t('loading')}</p>
+          )}
+        </div>
+      )}
 
       {exited ? (
         <div className="ended" role="status">

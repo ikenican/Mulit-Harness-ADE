@@ -301,7 +301,7 @@ export default function TestBrowserPanel({ onClose, idleUntilRequested = false }
                 src={url}
                 className="browser-webview"
                 allowpopups={true}
-                webpreferences="contextIsolation=true, sandbox=false"
+                webpreferences="contextIsolation=true"
               />
               {loadError && (
                 <div className="browser-error-overlay">

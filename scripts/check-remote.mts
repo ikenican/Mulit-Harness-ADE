@@ -3,9 +3,14 @@
 import assert from 'node:assert'
 import * as crypto from 'node:crypto'
 import * as tls from 'node:tls'
-import { createCa, issueServerCert, certCovers, isPrivateIPv4 } from '../src/main/remote/certs.ts'
+import { createCa, issueServerCert, certCovers, isAllowedOrigin, isPrivateIPv4 } from '../src/main/remote/certs.ts'
 import { encryptPayload, generateVapidKeys, vapidAuthHeader } from '../src/main/remote/webpush.ts'
 import { parsePrompt, questionPreview } from '../src/renderer/remote/prompt.ts'
+import { sessionStatus } from '../src/shared/remoteProtocol.ts'
+import { PreviewProxy } from '../src/main/remote/preview.ts'
+import * as http from 'node:http'
+import * as https from 'node:https'
+import type { AddressInfo } from 'node:net'
 
 // —— 私有網段判斷 ——
 assert.ok(isPrivateIPv4('192.168.1.20'))
@@ -20,6 +25,12 @@ const ca = createCa('check')
 const good = issueServerCert(ca, ['192.168.50.7'], ['box.local'])
 assert.ok(certCovers(good.certPem, ['192.168.50.7'], ['box.local']))
 assert.ok(!certCovers(good.certPem, ['192.168.50.8'], []))
+// SAN 是 192.168.50.7，不可以讓 .5 這種前綴相同的位址誤判成已涵蓋（否則換 IP 後不重簽）
+{
+  const wide = issueServerCert(ca, ['192.168.50.70'], [])
+  assert.ok(certCovers(wide.certPem, ['192.168.50.70'], []))
+  assert.ok(!certCovers(wide.certPem, ['192.168.50.7'], []))
+}
 
 async function handshake(cert: { certPem: string; keyPem: string }, servername: string): Promise<string> {
   const server = tls.createServer({ cert: cert.certPem, key: cert.keyPem }, (s) => s.end())
@@ -120,5 +131,98 @@ const yn = parsePrompt('some output\nOverwrite file? [y/N]')!
 assert.deepEqual(yn.options.map((o) => [o.key, o.selected]), [['y', false], ['n', true]])
 assert.equal(parsePrompt('just output\n1. not a menu'), null)
 assert.equal(questionPreview('foo\n│ Do you want to proceed? │\n│ ❯ 1. Yes │'), 'Do you want to proceed?')
+
+// —— WebSocket 來源：自己的 PWA，或同一個 App 在區網另一台電腦上的 origin ——
+{
+  const HOST = '192.168.50.7:47600'
+  assert.ok(isAllowedOrigin(`https://${HOST}`, HOST), '自己的 PWA')
+  assert.ok(isAllowedOrigin('https://192.168.1.20:47600', HOST), '另一台電腦上的同一個 App')
+  assert.ok(isAllowedOrigin('https://10.1.2.3:47600', HOST))
+  assert.ok(isAllowedOrigin('https://box.local:47600', HOST))
+  // 公網來源、明文、以及沒有 Origin 的一律擋掉
+  assert.ok(!isAllowedOrigin('https://evil.example.com', HOST))
+  assert.ok(!isAllowedOrigin('https://8.8.8.8', HOST))
+  assert.ok(!isAllowedOrigin('http://192.168.1.20:47600', HOST))
+  assert.ok(!isAllowedOrigin('null', HOST))
+  assert.ok(!isAllowedOrigin(undefined, HOST))
+  // 只是像 .local 的網域名不算（evil.local.example.com）
+  assert.ok(!isAllowedOrigin('https://evil.local.example.com', HOST))
+}
+
+// —— 終端狀態：只看桌面送來的 busy，不看時鐘 ——
+const base = { id: 'a', needsApproval: false, busy: false }
+assert.equal(sessionStatus(base), 'idle')
+assert.equal(sessionStatus({ ...base, busy: true }), 'running')
+// 等你回覆優先於執行中
+assert.equal(sessionStatus({ ...base, needsApproval: true, busy: true }), 'waiting')
+// activity 事件（live）蓋掉 state 的初值，兩個方向都要蓋得掉
+assert.equal(sessionStatus(base, { a: true }), 'running')
+assert.equal(sessionStatus({ ...base, busy: true }, { a: false }), 'idle')
+// 別的 session 的 activity 不會影響這個
+assert.equal(sessionStatus(base, { b: true }), 'idle')
+
+// —— 手機預覽代理：ticket 換 cookie，沒 cookie 不給過 ——
+{
+  const fake = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain', 'X-Frame-Options': 'DENY' })
+    res.end(`hello ${req.url}`)
+  })
+  await new Promise<void>((r) => fake.listen(0, '127.0.0.1', () => r()))
+  const devPort = (fake.address() as AddressInfo).port
+
+  const proxy = new PreviewProxy((p) => p === devPort)
+  assert.equal(proxy.issueUrl('127.0.0.1', devPort), null, '沒啟動就不該發得出網址')
+  const leaf = issueServerCert(ca, ['192.168.50.7'], [])
+  const proxyPort = devPort + 1
+  await proxy.start(proxyPort, leaf.certPem, leaf.keyPem, () => {})
+
+  const get = (path: string, cookie?: string): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> =>
+    new Promise((resolve, reject) => {
+      const req = https.request(
+        { host: '127.0.0.1', port: proxyPort, path, rejectUnauthorized: false, headers: cookie ? { cookie } : {} },
+        (res) => {
+          let body = ''
+          res.on('data', (c) => (body += c))
+          res.on('end', () => resolve({ status: res.statusCode || 0, headers: res.headers, body }))
+        }
+      )
+      req.on('error', reject)
+      req.end()
+    })
+
+  // 不認識的 port 不給代理
+  assert.equal(proxy.issueUrl('127.0.0.1', devPort + 500), null)
+
+  const url = proxy.issueUrl('127.0.0.1', devPort)!
+  assert.match(url, new RegExp(`^https://127\\.0\\.0\\.1:${proxyPort}/__aw\\?t=`))
+  const authPath = url.slice(url.indexOf('/__aw'))
+
+  // 沒 cookie：擋
+  assert.equal((await get('/')).status, 403)
+  // 亂簽的 cookie：擋
+  assert.equal((await get('/', `aw_preview=${devPort}.not-a-signature`)).status, 403)
+
+  // ticket 換 cookie
+  const authed = await get(authPath)
+  assert.equal(authed.status, 302)
+  const setCookie = String(authed.headers['set-cookie']?.[0] ?? '')
+  assert.match(setCookie, new RegExp(`^aw_preview=${devPort}\\.[A-Za-z0-9_-]+;`))
+  assert.ok(setCookie.includes('HttpOnly') && setCookie.includes('Secure'))
+  const cookie = setCookie.split(';')[0]
+
+  // ticket 是一次性的
+  assert.equal((await get(authPath)).status, 403)
+
+  // 帶 cookie 才代理得到 dev server，且不能把 X-Frame-Options 傳下去（否則手機 iframe 框不住）
+  const page = await get('/index.html?x=1', cookie)
+  assert.equal(page.status, 200)
+  assert.equal(page.body, 'hello /index.html?x=1')
+  assert.equal(page.headers['x-frame-options'], undefined)
+
+  // 停掉之後 cookie 也沒用（伺服器不在了）
+  await proxy.stop()
+  await assert.rejects(() => get('/', cookie))
+  await new Promise<void>((r) => fake.close(() => r()))
+}
 
 console.log('remote ok')

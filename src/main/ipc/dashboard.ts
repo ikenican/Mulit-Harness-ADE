@@ -55,9 +55,13 @@ function extractWorkspaceFromBlob(buf: Buffer): { workspace?: string; workspaceP
     const text = buf.toString('utf8')
     const matches = text.match(/([a-zA-Z]:(?:\\\\|\/)[A-Za-z0-9_.\-\\/ ]+)/g)
     if (matches) {
-      for (const m of matches) {
+      // 這個 blob 可能是任何內容（agent 讀過的檔案都會進對話紀錄）。
+      // 沒有上限的話，一長串路徑字元會被吃成單一 match，下面的 while 就會對一個
+      // 幾百 KB 的字串反覆 dirname + existsSync，把 main process 卡住幾十秒。
+      for (const m of matches.slice(0, 200)) {
+        if (m.length > 260) continue // 超過 Windows 最長路徑，不可能是真路徑
         let clean = m.replace(/\\\\/g, '\\').trim()
-        while (clean.length > 3 && !fs.existsSync(clean)) {
+        for (let i = 0; i < 40 && clean.length > 3 && !fs.existsSync(clean); i++) {
           clean = dirname(clean)
         }
         if (clean.length > 3 && fs.existsSync(clean) && !clean.toLowerCase().includes('appdata') && !clean.toLowerCase().includes('temp')) {
@@ -487,8 +491,10 @@ function scanAntigravitySessions(max = 20): AgentSessionInfo[] {
         for (const line of lines) {
           try {
             const row = JSON.parse(line)
-            if (row.type === 'USER_INPUT' && row.content) {
-              const match = row.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)
+            if (row.type === 'USER_INPUT' && typeof row.content === 'string' && row.content) {
+              // 這個 regex 在「很多個 <USER_REQUEST> 但沒有結束標籤」時是二次方的
+              // （實測 1MB 的一行要 9 秒）。標題只取第一行，所以看開頭 64KB 就夠。
+              const match = row.content.slice(0, 65536).match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)
               if (match) {
                 title = match[1].trim().split(/\r?\n/)[0].slice(0, 45)
               }

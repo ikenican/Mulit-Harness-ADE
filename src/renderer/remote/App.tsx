@@ -1,25 +1,54 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { RemoteGitFile, RemoteLauncher, RemoteSession, RemoteWindow, ServerMessage } from '../../shared/remoteProtocol'
-import { RemoteConnection, type ConnState } from './conn'
-import {
-  disablePush,
-  enablePush,
-  getToken,
-  isStandalone,
-  pair,
-  pushState,
-  pushSupported,
-  registerServiceWorker,
-  setToken
-} from './api'
+import type {
+  RemoteGitFile,
+  RemoteLauncher,
+  RemoteSession,
+  RemoteWindow,
+  RemoteWorkspaceOption,
+  ServerMessage
+} from '../../shared/remoteProtocol'
+import { sessionStatus } from '../../shared/remoteProtocol'
+import { pairOverWs, RemoteConnection, type ConnState } from './conn'
+import { disablePush, enablePush, isStandalone, pushState, pushSupported, registerServiceWorker } from './api'
 import TerminalView from './TerminalView'
 import { ago, getLangPref, onLangChange, setLangPref, t, type LangPref } from './i18n'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import { questionPreview } from './prompt'
-import { AgentMark, IBranch, IChevronRight, IconMark, IDesktop, IDoc, IGear, IPhone, IPlus, IShare, IWarning } from './icons'
-import { ConfirmSheet, ConnCapsule, NavBar, Sheet, Switch, useScrolled } from './ui'
+import {
+  AgentMark,
+  IBranch,
+  ICheck,
+  IChevronRight,
+  IconMark,
+  IDesktop,
+  IDoc,
+  IGear,
+  IPhone,
+  IPlus,
+  IShare,
+  IStop,
+  IWarning
+} from './icons'
+import { ConfirmSheet, ConnCapsule, Menu, NavBar, Sheet, Switch, useScrolled, type MenuItem } from './ui'
+import {
+  activeUrl,
+  addHost,
+  currentUrl,
+  getToken,
+  hostOf,
+  hostsFull,
+  loadHosts,
+  MAX_HOSTS,
+  parseHostInput,
+  removeHost,
+  renameHost,
+  setActiveUrl,
+  setToken,
+  setupUrlFor,
+  type SavedHost
+} from './hosts'
 
 type View =
   | { kind: 'home' }
@@ -29,6 +58,11 @@ type View =
 
 function sessionFromHash(): string | null {
   return /[#&]s=([\w-]+)/.exec(location.hash)?.[1] ?? null
+}
+
+/** Windows 路徑：分隔符與大小寫都不該影響比對 */
+function samePath(a: string, b: string): boolean {
+  return a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase()
 }
 
 function formatCode(raw: string): string {
@@ -62,19 +96,42 @@ export default function App(): JSX.Element {
 }
 
 function Screens(): JSX.Element {
-  const [token, setTokenState] = useState<string | null>(getToken())
+  // 目前連哪一台電腦。切換不換頁：WebSocket 可以跨 origin，所以只是換連線目標。
+  const [active, setActive] = useState<string>(() => activeUrl())
+  const [token, setTokenState] = useState<string | null>(() => getToken(activeUrl()))
+  const [hosts, setHosts] = useState<SavedHost[]>(() => loadHosts())
   const [unpaired, setUnpaired] = useState(false)
 
   useEffect(() => {
+    // Service Worker 只為「送來這個 App 的那台電腦」註冊：推播綁在 origin 上
     void registerServiceWorker()
   }, [])
+
+  const switchHost = (url: string): void => {
+    const u = setActiveUrl(url)
+    setUnpaired(false)
+    setActive(u)
+    setTokenState(getToken(u))
+  }
+
+  const changeHosts = (list: SavedHost[]): void => {
+    setHosts(list)
+    // 刪掉的可能正是目前連著的那一台
+    if (!list.some((h) => h.url === active)) switchHost(activeUrl())
+  }
 
   if (!token) {
     return (
       <PairScreen
+        base={active}
+        hosts={hosts}
         notice={unpaired ? t('unauthorized') : null}
+        onSwitch={switchHost}
+        onHostsChange={changeHosts}
         onPaired={(tok) => {
-          setToken(tok)
+          setToken(active, tok)
+          addHost(active)
+          setHosts(loadHosts())
           setUnpaired(false)
           setTokenState(tok)
         }}
@@ -83,10 +140,14 @@ function Screens(): JSX.Element {
   }
   return (
     <Main
-      key={token}
+      key={`${active}|${token}`}
+      base={active}
       token={token}
+      hosts={hosts}
+      onSwitch={switchHost}
+      onHostsChange={changeHosts}
       onUnauthorized={() => {
-        setToken(null)
+        setToken(active, null)
         setUnpaired(true)
         setTokenState(null)
       }}
@@ -96,23 +157,46 @@ function Screens(): JSX.Element {
 
 // —— 配對 ——
 
-function PairScreen({ notice, onPaired }: { notice: string | null; onPaired: (token: string) => void }): JSX.Element {
+function PairScreen({
+  base,
+  hosts,
+  notice,
+  onSwitch,
+  onHostsChange,
+  onPaired
+}: {
+  base: string
+  hosts: SavedHost[]
+  notice: string | null
+  onSwitch: (url: string) => void
+  onHostsChange: (list: SavedHost[]) => void
+  onPaired: (token: string) => void
+}): JSX.Element {
   const [code, setCode] = useState(() => formatCode(/[#&]pair=([A-Za-z0-9-]+)/.exec(location.hash)?.[1] ?? ''))
   const [name, setName] = useState(/iPad/.test(navigator.userAgent) ? 'iPad' : 'iPhone')
   const [error, setError] = useState<string | null>(notice)
+  const [unreachable, setUnreachable] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [manage, setManage] = useState(false)
   const ready = code.replace(/-/g, '').length === 8 && name.trim().length > 0
+  const remote = base !== currentUrl()
 
   const submit = async (): Promise<void> => {
     setBusy(true)
     setError(null)
+    setUnreachable(false)
     try {
-      const res = await pair(code, name.trim())
+      // 配對走 WebSocket：要配對的可能是另一台電腦（跨 origin，fetch 會被 CORS 擋）
+      const token = await pairOverWs(base, code, name.trim())
       history.replaceState(null, '', '/')
-      onPaired(res.token)
+      onPaired(token)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      setError(msg === 'invalid' ? t('pairInvalid') : t('pairFailed', { e: msg }))
+      if (msg === 'invalid') setError(t('pairInvalid'))
+      else {
+        setUnreachable(true)
+        setError(t('pairFailed', { e: msg }))
+      }
     } finally {
       setBusy(false)
     }
@@ -129,7 +213,7 @@ function PairScreen({ notice, onPaired }: { notice: string | null; onPaired: (to
       <div className="pair-hero">
         <img src="/remote-icon-180.png" alt="" width={76} height={76} />
         <h1>{t('pairTitle')}</h1>
-        <p>{t('pairDesc')}</p>
+        <p>{remote ? t('pairDescRemote', { host: hostOf(base) }) : t('pairDesc')}</p>
       </div>
 
       <div className="section">
@@ -178,18 +262,123 @@ function PairScreen({ notice, onPaired }: { notice: string | null; onPaired: (to
           {busy ? t('pairing') : t('pair')}
         </button>
       </div>
+
+      {/* 連不上通常不是配對碼的問題，而是這支手機還沒信任那台電腦的憑證 */}
+      {unreachable && (
+        <div className="notice neutral bubble">
+          <IWarning size={22} />
+          <div>
+            <b>{t('trustFirstTitle')}</b>
+            <p className="t-sub">{t('trustFirst', { url: setupUrlFor(base) })}</p>
+            <a className="btn press" href={setupUrlFor(base)} target="_blank" rel="noreferrer">
+              {t('openSetupPage')}
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* 選另一台已記住的電腦，或加一台新的——都不離開這個畫面 */}
+      <div className="section">
+        <div className="section-head">
+          <h2>{t('computers')}</h2>
+        </div>
+        <div className="stack">
+          {hosts
+            .filter((h) => h.url !== base)
+            .map((h) => (
+              <button type="button" key={h.url} className="add-card press" onClick={() => onSwitch(h.url)}>
+                <IDesktop size={18} />
+                {h.label}
+              </button>
+            ))}
+          <button type="button" className="add-card press" onClick={() => setManage(true)} disabled={hostsFull()}>
+            <IPlus size={20} />
+            {t('addComputer')}
+          </button>
+        </div>
+      </div>
+
+      {manage && (
+        <AddComputerSheet
+          onClose={() => setManage(false)}
+          onAdd={(url) => {
+            const list = addHost(url)
+            if (list) {
+              onHostsChange(list)
+              onSwitch(url)
+            }
+            setManage(false)
+          }}
+        />
+      )}
     </form>
+  )
+}
+
+/** 加一台電腦：輸入它的區網位址（電腦的「設定 → 遠端控制」上就有） */
+function AddComputerSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (url: string) => void }): JSX.Element {
+  const [value, setValue] = useState('')
+  const parsed = parseHostInput(value)
+  return (
+    <Sheet
+      title={t('addComputer')}
+      onClose={onClose}
+      leading={
+        // 這個 sheet 會畫在配對畫面的 <form> 裡：不標 type 的按鈕會變成送出表單
+        <button type="button" className="text-btn" onClick={onClose}>
+          {t('cancel')}
+        </button>
+      }
+      trailing={
+        <button type="button" className="text-btn strong" disabled={!parsed} onClick={() => parsed && onAdd(parsed)}>
+          {t('add')}
+        </button>
+      }
+    >
+      <div className="bubble form-card">
+        <div className="field">
+          <label htmlFor="host-input">{t('computerAddress')}</label>
+          <input
+            id="host-input"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="192.168.1.20"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            inputMode="url"
+          />
+        </div>
+      </div>
+      <p className="footnote">{parsed ? t('addComputerResolved', { url: hostOf(parsed) }) : t('addComputerHint')}</p>
+    </Sheet>
   )
 }
 
 // —— 主畫面 ——
 
-function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => void }): JSX.Element {
-  const conn = useMemo(() => new RemoteConnection(token), [token])
+function Main({
+  base,
+  token,
+  hosts,
+  onSwitch,
+  onHostsChange,
+  onUnauthorized
+}: {
+  base: string
+  token: string
+  hosts: SavedHost[]
+  onSwitch: (url: string) => void
+  onHostsChange: (list: SavedHost[]) => void
+  onUnauthorized: () => void
+}): JSX.Element {
+  const conn = useMemo(() => new RemoteConnection(base, token), [base, token])
   const [connState, setConnState] = useState<ConnState>('connecting')
   const [host, setHost] = useState('')
   const [sessions, setSessions] = useState<RemoteSession[]>([])
   const [windows, setWindows] = useState<RemoteWindow[]>([])
+  const [workspaces, setWorkspaces] = useState<RemoteWorkspaceOption[]>([])
+  const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [bypass, setBypass] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [view, setView] = useState<View>(() => {
@@ -200,6 +389,8 @@ function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => 
   const [tails, setTails] = useState<Record<string, string>>({})
   const [sheet, setSheet] = useState<null | { kind: 'new'; windowId: number } | { kind: 'settings' }>(null)
   const [lastSession, setLastSession] = useState<RemoteSession | null>(null)
+  // 手機請桌面開工作區後，等它出現在 state 就直接跳出「新增終端」，不用再多按一次
+  const pendingWorkspace = useRef<string | null>(null)
 
   useEffect(() => {
     const offState = conn.onState((s) => {
@@ -210,15 +401,32 @@ function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => 
       switch (m.t) {
         case 'authed':
           setHost(m.hostName)
+          // 連上也驗過了，把名字換成電腦自己報的主機名（剛加進來時只有 IP）
+          onHostsChange(addHost(base, m.hostName) || loadHosts())
           break
-        case 'state':
+        case 'state': {
           setSessions(m.sessions)
           setWindows(m.windows)
+          setWorkspaces(m.workspaces || [])
+          setBusy(Object.fromEntries(m.sessions.map((s) => [s.id, s.busy])))
           setBypass(m.bypass)
           setLoaded(true)
+          const want = pendingWorkspace.current
+          if (want) {
+            const opened = m.windows.find((w) => samePath(w.workspace, want))
+            if (opened) {
+              pendingWorkspace.current = null
+              setSheet({ kind: 'new', windowId: opened.id })
+            }
+          }
+          break
+        }
+        case 'activity':
+          setBusy((prev) => ({ ...prev, [m.id]: m.busy }))
           break
         case 'exit':
           setExits((prev) => ({ ...prev, [m.id]: m.code }))
+          setBusy((prev) => ({ ...prev, [m.id]: false }))
           break
         case 'approval':
           setTails((prev) => ({ ...prev, [m.id]: m.tail }))
@@ -274,10 +482,19 @@ function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => 
         loaded={loaded}
         sessions={sessions}
         windows={windows}
+        workspaces={workspaces}
+        busy={busy}
         bypass={bypass}
         tails={tails}
+        hosts={hosts}
+        activeHost={base}
         onOpen={(v) => setView(v)}
         onNew={(windowId) => setSheet({ kind: 'new', windowId })}
+        onSwitchHost={onSwitch}
+        onOpenWorkspace={(p) => {
+          pendingWorkspace.current = p
+          conn.send({ t: 'openWorkspace', path: p })
+        }}
         onSettings={() => setSheet({ kind: 'settings' })}
       />
     )
@@ -300,6 +517,10 @@ function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => 
           token={token}
           host={hostName}
           connState={connState}
+          hosts={hosts}
+          activeHost={base}
+          onHostsChange={onHostsChange}
+          onSwitchHost={onSwitch}
           bypass={bypass}
           onSetBypass={(enabled) => conn.send({ t: 'setBypass', enabled })}
           onClose={() => setSheet(null)}
@@ -311,10 +532,6 @@ function Main({ token, onUnauthorized }: { token: string; onUnauthorized: () => 
       )}
     </>
   )
-}
-
-function statusOf(s: RemoteSession, now: number): 'waiting' | 'running' | 'idle' {
-  return s.needsApproval ? 'waiting' : now - s.lastOutputAt < 4000 ? 'running' : 'idle'
 }
 
 function useNow(ms = 2000): number {
@@ -343,10 +560,16 @@ function Home({
   loaded,
   sessions,
   windows,
+  workspaces,
+  busy,
   bypass,
   tails,
+  hosts,
+  activeHost,
   onOpen,
   onNew,
+  onOpenWorkspace,
+  onSwitchHost,
   onSettings
 }: {
   host: string
@@ -354,14 +577,32 @@ function Home({
   loaded: boolean
   sessions: RemoteSession[]
   windows: RemoteWindow[]
+  workspaces: RemoteWorkspaceOption[]
+  busy: Record<string, boolean>
   bypass: boolean
   tails: Record<string, string>
+  hosts: SavedHost[]
+  activeHost: string
   onOpen: (v: View) => void
   onNew: (windowId: number) => void
+  onOpenWorkspace: (path: string) => void
+  onSwitchHost: (url: string) => void
   onSettings: () => void
 }): JSX.Element {
   const scrolled = useScrolled(44)
-  const now = useNow()
+  const [picker, setPicker] = useState(false)
+  // 下拉：記住的每一台（打勾的是現在連著的）＋管理。切換只是換連線目標，不換頁。
+  const hostMenu: MenuItem[] = [
+    ...hosts.map((h) => ({
+      label: h.url === activeHost ? host : h.label,
+      note: h.url === activeHost ? t('thisComputer') : hostOf(h.url),
+      checked: h.url === activeHost,
+      onSelect: () => onSwitchHost(h.url)
+    })),
+    { label: t('manageComputers'), icon: <IGear size={18} />, onSelect: onSettings }
+  ]
+  // 只為了讓「N 分鐘前開始」跟著走，狀態膠囊不看時鐘
+  useNow()
   const waiting = sessions.filter((s) => s.needsApproval)
   const byWindow = new Map<number, RemoteSession[]>()
   for (const s of sessions) byWindow.set(s.windowId, [...(byWindow.get(s.windowId) || []), s])
@@ -380,7 +621,17 @@ function Home({
       />
       <main className="content">
         <header className="large-header">
-          <h1 className="t-large">{host}</h1>
+          {/* 記了多台電腦（或這台還沒記）時，標題就是切換電腦的下拉 */}
+          {hostMenu.length > 1 ? (
+            <button className="host-switch press" onClick={() => setPicker(true)} aria-haspopup="menu">
+              <h1 className="t-large">{host}</h1>
+              <span className="chev-down" aria-hidden="true">
+                <IChevronRight size={20} />
+              </span>
+            </button>
+          ) : (
+            <h1 className="t-large">{host}</h1>
+          )}
           <div className="header-pills">
             <span className={`pill ${connState === 'open' ? 'run' : 'idle'}`}>
               <span className="dot" aria-hidden="true" />
@@ -460,7 +711,7 @@ function Home({
                         {ago(s.startTime) === t('justNow') ? t('justNow') : t('startedAgo', { t: ago(s.startTime) })}
                       </span>
                     </span>
-                    <StatusPill status={statusOf(s, now)} />
+                    <StatusPill status={sessionStatus(s, busy)} />
                     <IChevronRight size={18} className="chev" />
                   </button>
                 ))}
@@ -486,7 +737,26 @@ function Home({
             </section>
           )
         })}
+
+        {/* 最近用過但目前沒開的工作區：點一下請電腦開起來，開好就直接跳新增終端 */}
+        {workspaces.length > 0 && (
+          <section className="section" aria-labelledby="ws-h">
+            <div className="section-head">
+              <h2 id="ws-h">{t('otherWorkspaces')}</h2>
+            </div>
+            <div className="stack">
+              {workspaces.map((w) => (
+                <button key={w.path} className="add-card press" onClick={() => onOpenWorkspace(w.path)}>
+                  <IPlus size={20} />
+                  {w.name}
+                </button>
+              ))}
+            </div>
+            <p className="footnote">{t('otherWorkspacesHint')}</p>
+          </section>
+        )}
       </main>
+      {picker && <Menu items={hostMenu} onClose={() => setPicker(false)} />}
     </div>
   )
 }
@@ -590,10 +860,93 @@ function OptionCard<T extends string>({
   )
 }
 
+/** 設定裡的「電腦」區：切換、改名、移除、新增。最多 MAX_HOSTS 台，一次連一台。 */
+function ComputerList({
+  hosts,
+  activeHost,
+  onChange,
+  onSwitch
+}: {
+  hosts: SavedHost[]
+  activeHost: string
+  onChange: (list: SavedHost[]) => void
+  onSwitch: (url: string) => void
+}): JSX.Element {
+  const [adding, setAdding] = useState(false)
+  return (
+    <>
+      <div className="bubble">
+        <ul className="list">
+          {hosts.map((h) => (
+            <li className="row host-row" key={h.url}>
+              <button
+                className="host-pick press"
+                aria-label={t('connectTo', { name: h.label })}
+                aria-pressed={h.url === activeHost}
+                onClick={() => h.url !== activeHost && onSwitch(h.url)}
+              >
+                <IconMark tone={h.url === activeHost ? 'accent' : 'blue'} size={32}>
+                  {h.url === activeHost ? <ICheck size={18} /> : <IDesktop size={18} />}
+                </IconMark>
+              </button>
+              <span className="row-main host-main">
+                <input
+                  id={`host-${h.url}`}
+                  className="host-name"
+                  value={h.label}
+                  aria-label={t('computerName')}
+                  maxLength={40}
+                  onChange={(e) => onChange(renameHost(h.url, e.target.value))}
+                />
+                <span className="host-url">
+                  {hostOf(h.url)}
+                  {h.url === currentUrl() ? ` · ${t('servedFromHere')}` : ''}
+                </span>
+              </span>
+              <button
+                className="circle-btn press"
+                aria-label={t('forgetComputer')}
+                disabled={h.url === currentUrl()}
+                onClick={() => onChange(removeHost(h.url))}
+              >
+                <IStop size={16} />
+              </button>
+            </li>
+          ))}
+          <li className="row">
+            <span className="row-main t-sub">{t('computersCount', { n: hosts.length, max: MAX_HOSTS })}</span>
+            <button className="text-btn strong" disabled={hostsFull()} onClick={() => setAdding(true)}>
+              {t('addComputer')}
+            </button>
+          </li>
+        </ul>
+      </div>
+      <p className="footnote stack-gap">{t('computersFooter', { n: MAX_HOSTS })}</p>
+      {adding && (
+        <AddComputerSheet
+          onClose={() => setAdding(false)}
+          onAdd={(url) => {
+            const list = addHost(url)
+            if (list) {
+              onChange(list)
+              onSwitch(url)
+            }
+            setAdding(false)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
 function SettingsSheet({
   token,
   host,
   connState,
+  hosts,
+  activeHost,
+  onHostsChange,
+  onSwitchHost,
   bypass,
   onSetBypass,
   onClose,
@@ -602,6 +955,10 @@ function SettingsSheet({
   token: string
   host: string
   connState: ConnState
+  hosts: SavedHost[]
+  activeHost: string
+  onHostsChange: (list: SavedHost[]) => void
+  onSwitchHost: (url: string) => void
   bypass: boolean
   onSetBypass: (enabled: boolean) => void
   onClose: () => void
@@ -668,6 +1025,8 @@ function SettingsSheet({
             </li>
           </ul>
         </div>
+        <h3 className="sheet-label">{t('computers')}</h3>
+        <ComputerList hosts={hosts} activeHost={activeHost} onChange={onHostsChange} onSwitch={onSwitchHost} />
         <div className="bubble">
           <ul className="list">
             <li className="row">

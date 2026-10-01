@@ -427,10 +427,13 @@ export interface DashboardData {
 export interface CliLauncher {
   id: string
   name: string
-  cli: 'claude' | 'codex' | 'antigravity'
+  /** 已在 main（pty.ts 的 KNOWN_CLI）驗證過的 CLI 名稱：agent 三家或內建 shell */
+  cli: string
   command: string
   args: string[]
   env?: Record<string, string>
+  /** yaml 有自帶 args／env＝真的自訂；否則只是內建 CLI 的別名 */
+  hasExtras?: boolean
 }
 // ── 擴充管理型別 ──────────────────────────────────────────────────
 export type AgentId = 'claude' | 'antigravity' | 'codex'
