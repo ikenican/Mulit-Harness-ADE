@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
 import type { RemoteConnection } from './conn'
@@ -62,11 +61,14 @@ export default function TerminalView({
   const id = session.id
   const scrollRef = useRef<HTMLDivElement>(null)
   const spaceRef = useRef<HTMLDivElement>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
+  const scalerRef = useRef<HTMLDivElement>(null)
   const xtermHost = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const opened = useRef(false)
   const followOutput = useRef(true)
-  const fitAddon = useRef<FitAddon | null>(null)
+  const scaleRef = useRef(1)
+  const cellHeightRef = useRef(15)
   const [mode, setMode] = useState<'status' | 'term' | 'file' | 'preview'>('term')
   const [filePath, setFilePath] = useState('')
   const [preview, setPreview] = useState<{ url: string | null; error: string | null }>({ url: null, error: null })
@@ -78,46 +80,82 @@ export default function TerminalView({
   const modeRef = useRef(mode)
   modeRef.current = mode
 
+  const applyScale = useCallback((): void => {
+    const term = termRef.current
+    const scroll = scrollRef.current
+    const space = spaceRef.current
+    const box = boxRef.current
+    const scaler = scalerRef.current
+    const host = xtermHost.current
+    if (!term || !scroll || !space || !box || !scaler || !host || !opened.current || modeRef.current !== 'term') return
+
+    const screen = host.querySelector<HTMLElement>('.xterm-screen')
+    const rawCellWidth = screen && term.cols ? (screen.offsetWidth / term.cols) : 7.2
+    const rawCellHeight = screen && term.rows ? (screen.offsetHeight / term.rows) : 15
+    const unscaledWidth = screen ? screen.offsetWidth + 20 : (term.cols || 120) * rawCellWidth + 20
+    const unscaledHeight = screen ? screen.offsetHeight + 20 : (term.rows || 40) * rawCellHeight + 20
+    const containerWidth = Math.max(80, scroll.clientWidth)
+
+    const scale = unscaledWidth > 0 ? Math.min(1, containerWidth / unscaledWidth) : 1
+    scaleRef.current = scale
+    const scaledHeight = unscaledHeight * scale
+    const cellHeight = rawCellHeight * scale
+    cellHeightRef.current = cellHeight
+
+    scaler.style.width = `${unscaledWidth}px`
+    scaler.style.height = `${unscaledHeight}px`
+    scaler.style.transform = `scale(${scale})`
+    scaler.style.transformOrigin = 'top left'
+
+    box.style.width = '100%'
+    box.style.height = `${Math.max(scaledHeight, scroll.clientHeight)}px`
+
+    space.style.width = '100%'
+    space.style.height = `${term.buffer.active.baseY * cellHeight + Math.max(scaledHeight, scroll.clientHeight)}px`
+
+    if (followOutput.current && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) {
+      scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight
+    }
+    if (followOutput.current) {
+      term.scrollToBottom()
+    } else {
+      term.scrollToLine(Math.round(scroll.scrollTop / (cellHeight || 1)))
+    }
+  }, [])
+
   const syncScroll = useCallback((): void => {
     const term = termRef.current
     const scroll = scrollRef.current
     const space = spaceRef.current
-    const screen = term?.element?.querySelector<HTMLElement>('.xterm-screen')
-    if (!term || !scroll || !space || !screen || modeRef.current !== 'term') return
-    const cellHeight = screen.offsetHeight / term.rows
-    if (!cellHeight) return
-    // Only vertical scrolling for history. The terminal width fits the phone screen.
-    space.style.height = `${term.buffer.active.baseY * cellHeight + Math.max(screen.offsetHeight + 20, scroll.clientHeight)}px`
+    const box = boxRef.current
+    if (!term || !scroll || !space || !box || modeRef.current !== 'term') return
+    const cellHeight = cellHeightRef.current || 15
+    const scaledHeight = box.offsetHeight || scroll.clientHeight
+
+    space.style.width = '100%'
+    space.style.height = `${term.buffer.active.baseY * cellHeight + Math.max(scaledHeight, scroll.clientHeight)}px`
+
     if (followOutput.current && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) {
       scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight
     }
-    term.scrollToLine(Math.round(scroll.scrollTop / cellHeight))
-  }, [])
-
-  const applyFit = useCallback((): void => {
-    const term = termRef.current
-    const scroll = scrollRef.current
-    const host = xtermHost.current
-    if (!term || !scroll || !host || !opened.current || modeRef.current !== 'term') return
-    const dims = fitAddon.current?.proposeDimensions()
-    const screen = host.querySelector<HTMLElement>('.xterm-screen')
-    const cellWidth = screen && term.cols ? (screen.offsetWidth / term.cols) : 7.2
-    const cellHeight = screen && term.rows ? (screen.offsetHeight / term.rows) : 15
-    const width = Math.max(80, scroll.clientWidth - 20)
-    const height = Math.max(80, scroll.clientHeight)
-    const cols = dims?.cols ? Math.max(10, dims.cols) : Math.max(10, Math.floor(width / (cellWidth || 7.2)))
-    const rows = Math.max(5, Math.floor(height / (cellHeight || 15)))
-    if (term.cols !== cols || term.rows !== rows) {
-      term.resize(cols, rows)
+    if (followOutput.current) {
+      term.scrollToBottom()
+    } else {
+      term.scrollToLine(Math.round(scroll.scrollTop / (cellHeight || 1)))
     }
-    syncScroll()
-  }, [syncScroll])
+  }, [])
 
   const onScroll = (): void => {
     const scroll = scrollRef.current
-    if (!scroll) return
+    const term = termRef.current
+    if (!scroll || !term) return
+    const cellHeight = cellHeightRef.current || 15
     followOutput.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2
-    syncScroll()
+    if (followOutput.current) {
+      term.scrollToBottom()
+    } else {
+      term.scrollToLine(Math.round(scroll.scrollTop / (cellHeight || 1)))
+    }
   }
 
   // 輸出很密時合併成每 120ms 重畫一次
@@ -134,6 +172,8 @@ export default function TerminalView({
 
   useEffect(() => {
     const term = new Terminal({
+      cols: session.cols || 120,
+      rows: session.rows || 40,
       fontFamily: FONT,
       fontSize: 12,
       disableStdin: true,
@@ -143,27 +183,24 @@ export default function TerminalView({
       theme: termTheme()
     })
     termRef.current = term
-    const addon = new FitAddon()
-    term.loadAddon(addon)
-    fitAddon.current = addon
     followOutput.current = true
-    const rendered = term.onRender(syncScroll)
+    const rendered = term.onRender(applyScale)
     // CLI redraws may erase saved lines. Keep the mobile history available to read.
     const keepHistory = term.parser.registerCsiHandler({ final: 'J' }, params => params[0] === 3)
 
     const off = conn.onMessage((m: ServerMessage) => {
       if (m.t === 'snapshot' && m.id === id) {
         term.reset()
-        applyFit()
+        if (m.cols && m.rows) term.resize(m.cols, m.rows)
         term.write(m.data, () => {
-          syncScroll()
+          applyScale()
           refresh()
         })
       } else if (m.t === 'data' && m.id === id) {
         term.write(m.d, () => { syncScroll(); refresh() })
       } else if (m.t === 'resized' && m.id === id) {
-        // Desktop window resized. Mobile keeps its own fitted cols.
-        syncScroll()
+        if (m.cols && m.rows) term.resize(m.cols, m.rows)
+        applyScale()
         refresh()
       } else if (m.t === 'preview' && m.id === id) {
         setPreview({ url: m.url, error: m.url ? null : m.error || 'preview unavailable' })
@@ -188,10 +225,9 @@ export default function TerminalView({
       conn.send({ t: 'detach', id })
       term.dispose()
       termRef.current = null
-      fitAddon.current = null
       opened.current = false
     }
-  }, [id, applyFit, syncScroll])
+  }, [id, applyScale, syncScroll, session.cols, session.rows])
 
   // 第一次切到「終端」才真的把 xterm 掛上 DOM（在隱藏狀態下 open 會量不到字寬）
   useEffect(() => {
@@ -200,24 +236,24 @@ export default function TerminalView({
       term.open(xtermHost.current)
       opened.current = true
     }
-    if (mode === 'term') applyFit()
-  }, [mode, applyFit])
+    if (mode === 'term') applyScale()
+  }, [mode, applyScale])
 
   // The body changes on rotation and when the mobile keyboard/dock opens.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const observer = new ResizeObserver(() => {
       clearTimeout(timer)
-      timer = setTimeout(applyFit, 100)
+      timer = setTimeout(applyScale, 50)
     })
     if (scrollRef.current) observer.observe(scrollRef.current)
-    document.fonts.addEventListener('loadingdone', applyFit)
+    document.fonts.addEventListener('loadingdone', applyScale)
     return () => {
       clearTimeout(timer)
       observer.disconnect()
-      document.fonts.removeEventListener('loadingdone', applyFit)
+      document.fonts.removeEventListener('loadingdone', applyScale)
     }
-  }, [applyFit])
+  }, [applyScale])
 
   // 新的審批出現就重新可以按
   useEffect(() => {
@@ -298,13 +334,16 @@ export default function TerminalView({
           <div className="xterm-scroll" ref={scrollRef} onScroll={onScroll}>
             <div className="terminal-scroll-space" ref={spaceRef}>
               <div
-                className="xterm-box"
-                ref={xtermHost}
-                // Let the browser scroll with inertia instead of xterm's touchmove handler.
+                className="xterm-scaler-box"
+                ref={boxRef}
                 onTouchStartCapture={(e) => e.stopPropagation()}
                 onTouchMoveCapture={(e) => e.stopPropagation()}
                 onWheelCapture={(e) => e.stopPropagation()}
-              />
+              >
+                <div className="xterm-scaler" ref={scalerRef}>
+                  <div className="xterm-box" ref={xtermHost} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
