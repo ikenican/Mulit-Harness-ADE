@@ -1158,7 +1158,7 @@ p {
 }
 /* 輸出本身也是一顆泡泡 */
 .output {
-  min-height: 100%;
+  height: 100%;
   border-radius: var(--r-bubble);
   background: var(--glass-strong); /* 大段文字：用較不透明的玻璃 */
   -webkit-backdrop-filter: var(--glass-blur);
@@ -1169,22 +1169,29 @@ p {
 }
 .xterm-scroll {
   width: 100%;
+  height: 100%;
+  overflow: auto;
+  overflow-anchor: none;
+  touch-action: pan-x pan-y pinch-zoom;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.terminal-scroll-space {
+  min-width: 100%;
 }
 .xterm-box {
   width: 100%;
   min-width: 0;
+  position: sticky;
+  top: 0;
 }
 .xterm-box .xterm {
   padding: 10px;
+  touch-action: pan-x pan-y pinch-zoom;
 }
-@media (pointer: coarse) {
-  .xterm-box .xterm-viewport {
-    /* Put the native scroll surface above the screen so swipes reach it. */
-    z-index: 1;
-    touch-action: pan-y pinch-zoom;
-    overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch;
-  }
+.xterm-box .xterm-viewport {
+  overflow: hidden;
+  pointer-events: none;
 }
 /* 成品預覽：iframe 吃滿剩下的高度，和輸出泡泡同一個圓角 */
 .preview-pane {
