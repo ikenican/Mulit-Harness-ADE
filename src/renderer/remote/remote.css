@@ -1190,24 +1190,32 @@ p {
 .xterm-scroll {
   width: 100%;
   height: 100%;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   overflow-anchor: none;
-  touch-action: pan-x pan-y pinch-zoom;
-  overscroll-behavior: contain;
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
 .terminal-scroll-space {
-  min-width: 100%;
+  width: 100%;
+  max-width: 100%;
 }
 .xterm-box {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
   position: sticky;
   top: 0;
+  overflow: hidden;
 }
 .xterm-box .xterm {
   padding: 10px;
-  touch-action: pan-x pan-y pinch-zoom;
+  touch-action: pan-y pinch-zoom;
+  box-sizing: border-box;
+}
+.xterm-box .xterm-screen {
+  max-width: 100%;
 }
 .xterm-box .xterm-viewport {
   overflow: hidden;

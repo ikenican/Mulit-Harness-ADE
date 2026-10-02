@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
 import type { RemoteConnection } from './conn'
@@ -65,6 +66,7 @@ export default function TerminalView({
   const termRef = useRef<Terminal | null>(null)
   const opened = useRef(false)
   const followOutput = useRef(true)
+  const fitAddon = useRef<FitAddon | null>(null)
   const [mode, setMode] = useState<'status' | 'term' | 'file' | 'preview'>('term')
   const [filePath, setFilePath] = useState('')
   const [preview, setPreview] = useState<{ url: string | null; error: string | null }>({ url: null, error: null })
@@ -75,6 +77,7 @@ export default function TerminalView({
   const [text, setText] = useState('')
   const modeRef = useRef(mode)
   modeRef.current = mode
+
   const syncScroll = useCallback((): void => {
     const term = termRef.current
     const scroll = scrollRef.current
@@ -83,14 +86,32 @@ export default function TerminalView({
     if (!term || !scroll || !space || !screen || modeRef.current !== 'term') return
     const cellHeight = screen.offsetHeight / term.rows
     if (!cellHeight) return
-    // One browser scroll surface owns both axes. Only the visible terminal rows render.
-    space.style.width = `${screen.offsetWidth + 20}px`
+    // Only vertical scrolling for history. The terminal width fits the phone screen.
     space.style.height = `${term.buffer.active.baseY * cellHeight + Math.max(screen.offsetHeight + 20, scroll.clientHeight)}px`
     if (followOutput.current && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) {
       scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight
     }
     term.scrollToLine(Math.round(scroll.scrollTop / cellHeight))
   }, [])
+
+  const applyFit = useCallback((): void => {
+    const term = termRef.current
+    const scroll = scrollRef.current
+    const host = xtermHost.current
+    if (!term || !scroll || !host || !opened.current || modeRef.current !== 'term') return
+    const dims = fitAddon.current?.proposeDimensions()
+    const screen = host.querySelector<HTMLElement>('.xterm-screen')
+    const cellWidth = screen && term.cols ? (screen.offsetWidth / term.cols) : 7.2
+    const cellHeight = screen && term.rows ? (screen.offsetHeight / term.rows) : 15
+    const width = Math.max(80, scroll.clientWidth - 20)
+    const height = Math.max(80, scroll.clientHeight)
+    const cols = dims?.cols ? Math.max(10, dims.cols) : Math.max(10, Math.floor(width / (cellWidth || 7.2)))
+    const rows = Math.max(5, Math.floor(height / (cellHeight || 15)))
+    if (term.cols !== cols || term.rows !== rows) {
+      term.resize(cols, rows)
+    }
+    syncScroll()
+  }, [syncScroll])
 
   const onScroll = (): void => {
     const scroll = scrollRef.current
@@ -113,8 +134,6 @@ export default function TerminalView({
 
   useEffect(() => {
     const term = new Terminal({
-      cols: session.cols,
-      rows: session.rows,
       fontFamily: FONT,
       fontSize: 12,
       disableStdin: true,
@@ -124,6 +143,9 @@ export default function TerminalView({
       theme: termTheme()
     })
     termRef.current = term
+    const addon = new FitAddon()
+    term.loadAddon(addon)
+    fitAddon.current = addon
     followOutput.current = true
     const rendered = term.onRender(syncScroll)
     // CLI redraws may erase saved lines. Keep the mobile history available to read.
@@ -132,7 +154,7 @@ export default function TerminalView({
     const off = conn.onMessage((m: ServerMessage) => {
       if (m.t === 'snapshot' && m.id === id) {
         term.reset()
-        term.resize(m.cols, m.rows)
+        applyFit()
         term.write(m.data, () => {
           syncScroll()
           refresh()
@@ -140,7 +162,7 @@ export default function TerminalView({
       } else if (m.t === 'data' && m.id === id) {
         term.write(m.d, () => { syncScroll(); refresh() })
       } else if (m.t === 'resized' && m.id === id) {
-        term.resize(m.cols, m.rows)
+        // Desktop window resized. Mobile keeps its own fitted cols.
         syncScroll()
         refresh()
       } else if (m.t === 'preview' && m.id === id) {
@@ -166,9 +188,10 @@ export default function TerminalView({
       conn.send({ t: 'detach', id })
       term.dispose()
       termRef.current = null
+      fitAddon.current = null
       opened.current = false
     }
-  }, [id])
+  }, [id, applyFit, syncScroll])
 
   // 第一次切到「終端」才真的把 xterm 掛上 DOM（在隱藏狀態下 open 會量不到字寬）
   useEffect(() => {
@@ -177,25 +200,24 @@ export default function TerminalView({
       term.open(xtermHost.current)
       opened.current = true
     }
-    if (mode === 'term') syncScroll()
-  }, [mode, syncScroll])
+    if (mode === 'term') applyFit()
+  }, [mode, applyFit])
 
   // The body changes on rotation and when the mobile keyboard/dock opens.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     const observer = new ResizeObserver(() => {
       clearTimeout(timer)
-      timer = setTimeout(syncScroll, 100)
+      timer = setTimeout(applyFit, 100)
     })
     if (scrollRef.current) observer.observe(scrollRef.current)
-    if (spaceRef.current) observer.observe(spaceRef.current)
-    document.fonts.addEventListener('loadingdone', syncScroll)
+    document.fonts.addEventListener('loadingdone', applyFit)
     return () => {
       clearTimeout(timer)
       observer.disconnect()
-      document.fonts.removeEventListener('loadingdone', syncScroll)
+      document.fonts.removeEventListener('loadingdone', applyFit)
     }
-  }, [syncScroll])
+  }, [applyFit])
 
   // 新的審批出現就重新可以按
   useEffect(() => {
