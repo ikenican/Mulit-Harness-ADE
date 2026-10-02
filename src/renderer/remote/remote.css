@@ -527,6 +527,26 @@ p {
   color: var(--label-2);
   font-size: 0.88rem;
 }
+.workspace-summary {
+  min-height: 44px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--r-inner);
+}
+.workspace-summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-chevron {
+  flex-shrink: 0;
+  color: var(--label-2);
+}
+.workspace-group[open] > summary .workspace-chevron {
+  transform: rotate(90deg);
+}
+.workspace-summary .pill {
+  flex-shrink: 0;
+}
 .stack {
   display: grid;
   width: 100%;
