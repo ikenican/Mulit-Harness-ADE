@@ -1200,22 +1200,29 @@ p {
 .terminal-scroll-space {
   width: 100%;
   max-width: 100%;
+  touch-action: pan-y pinch-zoom;
 }
-.xterm-box {
+.xterm-scaler-box {
   width: 100%;
   max-width: 100%;
   min-width: 0;
   position: sticky;
   top: 0;
   overflow: hidden;
+  touch-action: pan-y pinch-zoom;
+}
+.xterm-scaler {
+  transform-origin: top left;
+}
+.xterm-box {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .xterm-box .xterm {
   padding: 10px;
   touch-action: pan-y pinch-zoom;
   box-sizing: border-box;
-}
-.xterm-box .xterm-screen {
-  max-width: 100%;
 }
 .xterm-box .xterm-viewport {
   overflow: hidden;
