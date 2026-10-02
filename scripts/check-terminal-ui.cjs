@@ -72,6 +72,25 @@ window.ready = true
 `
 
 app.whenReady().then(async () => {
+  // Exercise the real WS dispatcher without starting Electron's application/server dependencies.
+  const legacyResizes = [], remoteInputs = []
+  const serverModule = { exports: {} }
+  const serverCode = await require('esbuild').transform(fs.readFileSync('src/main/remote/server.ts', 'utf8'), {loader:'ts', format:'cjs'})
+  new Function('require', 'module', 'exports', serverCode.code)(id => {
+    if (id === '../ipc/pty') return {
+      resizePty: (...args) => legacyResizes.push(args),
+      writePty: (...args) => remoteInputs.push(args)
+    }
+    if (id === '../../shared/remoteProtocol') return { BUILTIN_LAUNCHERS: [] }
+    return id.startsWith('.') ? {} : require(id)
+  }, serverModule, serverModule.exports)
+  const bridge = Object.create(serverModule.exports.RemoteBridge.prototype)
+  const oldPhone = { connId:'cached-phone', attached:new Set(['desktop']) }
+  await bridge.handleMessage(oldPhone, {t:'resize', id:'desktop', cols:30, rows:12})
+  assert.deepEqual(legacyResizes, [], 'cached mobile page cannot change desktop PTY dimensions')
+  await bridge.handleMessage(oldPhone, {t:'input', id:'desktop', data:'hello'})
+  assert.deepEqual(remoteInputs, [['desktop', 'hello']], 'mobile input still reaches shared PTY')
+  console.log('legacy mobile resize blocked / remote input: passed')
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbench-terminal-check-'))
   await require('esbuild').build({
     stdin: { contents: fixture.replaceAll("'/src/", "'./src/"), resolveDir: process.cwd(), loader: 'tsx' },
@@ -85,7 +104,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ show: false, width: 390, height: 844, useContentSize: true, webPreferences: { backgroundThrottling: false, offscreen: true } })
   const run = code => win.webContents.executeJavaScript(code)
   const pause = () => new Promise(r => setTimeout(r, 400))
-  win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.log(message) })
+    win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) console.log(message) })
   try {
     await win.loadFile(path.join(cacheDir, 'index.html'))
     const deadline = Date.now() + 30000
@@ -157,9 +176,9 @@ app.whenReady().then(async () => {
         assert.equal(bounds.width, width)
         assert.ok(bounds.page <= width, JSON.stringify(bounds))
         assert.ok(bounds.screenWidth > 0, 'terminal really rendered')
-        assert.ok(bounds.right <= bounds.box - 9, 'all terminal columns inside phone: ' + JSON.stringify(bounds))
-        if (bounds.scroll > bounds.client) console.log(await run(`JSON.stringify({dims:mobileTerm._core._renderService.dimensions,paused:mobileTerm._core._renderService._isPaused,visibility:document.visibilityState, elements:Array.from(document.querySelectorAll('.xterm-box *')).slice(0,10).map(el=>({c:el.className,style:el.style.cssText,computed:getComputedStyle(el).width,rect:el.getBoundingClientRect().toJSON()}))})`))
-        assert.equal(bounds.scroll, bounds.client, 'no horizontal scroll range: ' + JSON.stringify(bounds))
+        assert.equal(bounds.cols, 160, 'phone preserves desktop ANSI column coordinates')
+        assert.equal(await run('mobileTerm.rows'), 40, 'phone preserves desktop ANSI row coordinates')
+        assert.ok(bounds.scroll > bounds.client, 'wide terminal scrolls inside the phone, never the page')
         const keys = await run(`(() => {
           const toolbar = document.querySelector('.keys'), box = toolbar.getBoundingClientRect()
           return {scroll:toolbar.scrollWidth, client:toolbar.clientWidth,
@@ -173,18 +192,32 @@ app.whenReady().then(async () => {
         assert.equal(keys.buttons.length, 8)
         assert.equal(new Set(keys.tops).size, 1, 'all eight keys stay in one row')
         assert.ok(keys.buttons.every(Boolean), 'all eight keys visible and touch-sized')
-        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} columns, no overflow`)
+        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} desktop columns, contained scrolling`)
       }
     }
     const cols = await run('mobileTerm.cols')
     await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'你好 '+ 'x'.repeat(300)})`)
     await pause()
-    assert.equal(await run('mobileTerm.cols'), cols, 'reconnect snapshot refits')
+    assert.equal(await run('mobileTerm.cols'), cols, 'reconnect preserves source dimensions')
     assert.ok(await run(`Array.from({length:mobileTerm.buffer.active.length}, (_,i)=>mobileTerm.buffer.active.getLine(i).translateToString(true)).join('').includes('x'.repeat(300))`), 'narrowing reflows all output without discarding text')
     await run(`window.deliver({t:'resized', id:'check', cols:160, rows:40})`)
     await pause()
-    assert.equal(await run('mobileTerm.cols'), cols, 'desktop resize cannot leave phone wide')
-    assert.ok(await run('requests.filter(m => m.t === "resize").length') < 40, 'no resize feedback loop')
+    assert.equal(await run('mobileTerm.cols'), cols, 'desktop remains the source of terminal dimensions')
+    assert.equal(await run('requests.filter(m => m.t === "resize").length'), 0, 'viewing/rotation/reconnect never resize desktop PTY')
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[40;150HLAST ROW'})`)
+    await pause()
+    assert.equal(await run('mobileTerm.buffer.active.getLine(39).translateToString(true).slice(149)'), 'LAST ROW', 'cursor-addressed redraw uses desktop coordinates')
+    // Opening the keyboard reduces the display without changing CLI geometry or hiding the last row.
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width:320, height:400, deviceScaleFactor:3, mobile:true})
+    await pause()
+    const clipped = await run(`(() => {
+      const scroll = document.querySelector('.xterm-scroll')
+      const screen = document.querySelector('.xterm-screen').getBoundingClientRect()
+      return {bottom:screen.bottom, visible:scroll.getBoundingClientRect().bottom, top:scroll.scrollTop}
+    })()`)
+    assert.ok(clipped.top > 0 && clipped.bottom <= clipped.visible, 'latest rows visible with keyboard open: ' + JSON.stringify(clipped))
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width:320, height:844, deviceScaleFactor:3, mobile:true})
+    await pause()
     console.log('mobile reconnect / desktop resize: passed')
     await run(`window.deliver({t:'data', id:'check', d:'\\r\\n' + Array.from({length:200}, (_,i) => 'line ' + i).join('\\r\\n')})`)
     await pause()
@@ -198,28 +231,38 @@ app.whenReady().then(async () => {
       }
       await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', {type:'touchEnd', touchPoints:[]})
     }
-    const position = () => run('mobileTerm.buffer.active.viewportY')
+    const position = () => run('document.querySelector(".xterm-scroll").scrollTop')
     for (const mouseMode of [false, true]) {
-      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?1000${mouseMode ? 'h' : 'l'}'}); mobileTerm.scrollToBottom()`)
+      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?1000${mouseMode ? 'h' : 'l'}'}); document.querySelector('.xterm-scroll').scrollTop = 1e9`)
       await pause()
       await win.webContents.capturePage()
-      await run('mobileTerm.scrollToTop()')
-      await pause()
-      await run('mobileTerm.scrollToBottom()')
-      await pause()
       const bottom = await position()
       await swipe(180)
       await pause()
       const up = await position()
       assert.ok(up < bottom, 'finger swipe reaches history, mouse mode=' + mouseMode)
+      assert.ok(await run('mobileTerm.buffer.active.viewportY < mobileTerm.buffer.active.baseY'), 'swipe actually renders historical rows')
       await run(`window.deliver({t:'data', id:'check', d:'\\r\\nnew output'})`)
       await pause()
       assert.equal(await position(), up, 'new output leaves history in place')
+      const history = await run('mobileTerm.buffer.active.baseY')
+      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[3J\\x1b[H\\x1b[2Jredrawn screen'})`)
+      await pause()
+      assert.equal(await run('mobileTerm.buffer.active.baseY'), history, 'CLI erase-scrollback redraw retains mobile history')
+      assert.equal(await position(), up, 'CLI redraw leaves reader in history')
       await swipe(-180)
       await pause()
       assert.ok(await position() > up, 'finger swipe returns toward latest output')
       assert.equal(await run('document.querySelector(".session-body").scrollTop'), 0, 'outer body does not compete with terminal scrolling')
     }
+    await run(`document.querySelector('.xterm-scroll').scrollTop = 1e9`)
+    await pause()
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[40;1H\\r\\nlatest output'})`)
+    await pause()
+    const followed = await run(`(() => { const s=document.querySelector('.xterm-scroll'); return {height:s.scrollHeight, client:s.clientHeight, top:s.scrollTop, base:mobileTerm.buffer.active.baseY, viewport:mobileTerm.buffer.active.viewportY} })()`)
+    assert.ok(followed.height - followed.client - followed.top <= 2, 'new output follows when reader is at bottom: ' + JSON.stringify(followed))
+    assert.equal(followed.viewport, followed.base, 'bottom renders the latest rows, including when phone is taller than desktop terminal')
+    fs.writeFileSync(path.join(cacheDir, 'terminal.png'), (await win.webContents.capturePage()).toPNG())
     console.log('mobile native touch scroll / mouse mode / history during output: passed')
     assert.deepEqual(await run('Array.from(document.querySelectorAll(".segmented button")).map(b => b.textContent)'), ['Status', '終端', 'File', '預覽'])
     await run('document.querySelectorAll(".segmented button")[0].click()')

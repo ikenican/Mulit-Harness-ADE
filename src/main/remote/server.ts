@@ -17,7 +17,6 @@ import {
   unsubscribePty,
   getPtyScrollback,
   writePty,
-  resizePty,
   killPty,
   spawnPty,
   listLaunchers,
@@ -649,7 +648,7 @@ export class RemoteBridge {
         if (typeof msg.data === 'string' && msg.data.length <= 64 * 1024) writePty(msg.id, msg.data)
         return
       case 'resize':
-        resizePty(msg.id, Math.min(500, Math.max(10, msg.cols | 0)), Math.min(200, Math.max(5, msg.rows | 0)))
+        // Older mobile pages still send resize. The desktop owns the shared PTY dimensions.
         return
       case 'kill':
         audit('session.kill', { deviceId: c.device?.id, session: msg.id })
