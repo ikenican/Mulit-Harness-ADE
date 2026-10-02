@@ -33,8 +33,8 @@ window.makeTerminal = (guarded) => {
   term.focus()
 }
 const messages = new Set(), states = new Set()
-const open = Terminal.prototype.open
-Terminal.prototype.open = function(el) { open.call(this, el); if (el.classList.contains('xterm-box')) window.mobileTerm = this }
+const write = Terminal.prototype.write
+Terminal.prototype.write = function(...args) { if (this.options.disableStdin) window.mobileTerm = this; return write.apply(this, args) }
 window.requests = []
 window.deliver = m => messages.forEach(fn => fn(m))
 const conn = {
@@ -46,17 +46,21 @@ const conn = {
   onMessage(fn) { messages.add(fn); return () => messages.delete(fn) },
   onState(fn) { states.add(fn); return () => states.delete(fn) }
 }
+window.renderMobile = (session = {}) => window.mobileRoot.render(<TerminalView conn={conn}
+  session={{id:'check', windowId:7, devPort:5173, title:'A'.repeat(300), workspaceName:'workspace', cols:160, rows:40, ...session}}
+  hostName="desktop" onBack={() => {}} />)
 window.mountMobile = () => {
+  window.mobileRoot?.unmount()
   window.term?.dispose()
   window.term = null
   document.body.innerHTML = '<div id="root"></div>'
-  createRoot(document.getElementById('root')).render(<TerminalView conn={conn}
-    session={{id:'check', windowId:7, devPort:5173, title:'A'.repeat(300), workspaceName:'workspace', cols:160, rows:40}}
-    hostName="desktop" onBack={() => {}} />)
+  window.mobileRoot = createRoot(document.getElementById('root'))
+  window.renderMobile()
 }
 window.mountHome = (activeHost = 'https://desktop:47600/', firstId = 1, workspace = 'C:/projects/business') => {
   window.homeRoot?.unmount()
-  window.mobileTerm?.dispose()
+  window.mobileRoot?.unmount()
+  window.mobileRoot = null
   window.mobileTerm = null
   document.body.innerHTML = '<div id="root"></div>'
   window.opened = []; window.newWindows = []
@@ -107,7 +111,7 @@ app.whenReady().then(async () => {
     })) } }],
     define: { 'process.env.NODE_ENV': '"development"' }, outfile: path.join(cacheDir, 'page.js')
   })
-  fs.writeFileSync(path.join(cacheDir, 'index.html'), '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="page.css"><script src="page.js"></script>')
+  fs.writeFileSync(path.join(cacheDir, 'index.html'), '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="page.css"><script src="page.js"></script>')
   const win = new BrowserWindow({ show: false, width: 390, height: 844, useContentSize: true, webPreferences: { backgroundThrottling: false, offscreen: true } })
   const run = code => win.webContents.executeJavaScript(code)
   const pause = () => new Promise(r => setTimeout(r, 400))
@@ -166,6 +170,77 @@ app.whenReady().then(async () => {
     await pause()
     await run('Array.from(document.querySelectorAll(".segmented button"))[1].click()')
     await pause()
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'before switching'}); window.originalMobileTerm = mobileTerm; void 0`)
+    await pause()
+    await run('window.renderMobile({cols:120, rows:34})')
+    await pause()
+    assert.equal(await run('mobileTerm === originalMobileTerm'), true, 'state dimension update keeps the terminal parser')
+    assert.ok(await run('mobileTerm.buffer.active.getLine(0).translateToString(true).includes("before switching")'), 'state update preserves screen content')
+    await run(`window.deliver({t:'resized', id:'check', cols:120, rows:34})`)
+    await pause()
+    assert.deepEqual(await run('({cols:mobileTerm.cols, rows:mobileTerm.rows})'), {cols:120, rows:34}, 'authoritative desktop resize updates parser without remounting')
+    await run('window.renderMobile({id:"other", cols:120, rows:34})')
+    await pause()
+    await run(`window.deliver({t:'snapshot', id:'other', cols:120, rows:34, data:'other session'})`)
+    await pause()
+    assert.equal(await run('document.querySelectorAll(".terminal-text").length'), 1, 'switching sessions keeps one output view')
+    assert.ok(await run('mobileTerm.buffer.active.getLine(0).translateToString(true).includes("other session")'), 'switched session renders its own snapshot')
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("other session")'), 'switched session is visible')
+    await run('window.renderMobile()')
+    await pause()
+    for (const mode of [0, 2, 3]) {
+      await run(`document.querySelectorAll('.segmented button')[${mode}].click()`)
+      await pause()
+      await run(`window.deliver({t:'resized', id:'check', cols:160, rows:40}); window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'restored screen'})`)
+      await pause()
+      await run(`document.querySelectorAll('.segmented button')[1].click()`)
+      await pause()
+      assert.ok(await run('mobileTerm.buffer.active.getLine(0).translateToString(true).includes("restored screen")'), 'tab return restores snapshot')
+      assert.ok(await run('document.querySelector(".terminal-text").getBoundingClientRect().width > 100'), 'tab return keeps full output width')
+      assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("restored screen")'), 'tab return shows the restored output')
+    }
+    await run('window.mountMobile()')
+    await pause()
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'reopened session'}); window.deliver({t:'data', id:'other', d:'wrong session'})`)
+    await pause()
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("reopened session") && !document.querySelector(".terminal-text").textContent.includes("wrong session")'), 'leaving and reopening a terminal restores only its own snapshot')
+    console.log('mobile session switching / state dimensions / hidden tab restore: passed')
+    const mobileText = '中文測試 😀 ' + '長文字'.repeat(70) + 'https://example.test/' + 'path'.repeat(80)
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:${JSON.stringify(mobileText)}})`)
+    await pause()
+    assert.ok(await run(`document.querySelector('.terminal-text').textContent.includes(${JSON.stringify(mobileText)})`), 'CJK, emoji and long URLs survive canonical soft-wraps')
+    assert.equal(await run('document.querySelector(".xterm-scroll").scrollWidth'), await run('document.querySelector(".xterm-scroll").clientWidth'), 'long unbroken text wraps without horizontal overflow')
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'\\x1b[?25l\\x1b[31;1mRED\\x1b[0m \\x1b[38;2;12;34;56mRGB\\x1b[0m \\x1b[38;5;196mPALETTE\\x1b[0m <img src=x>\\r\\n' + '─'.repeat(160) + '\\r\\nold progress\\r\\nready'})`)
+    await pause()
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[1A\\r\\x1b[2Knew progress\\x1b[1B'})`)
+    await pause()
+    const styled = await run(`(() => {
+      const out = document.querySelector('.terminal-text')
+      const spans = [...out.querySelectorAll('span')]
+      const style = text => { const s=spans.find(s => s.textContent===text); return s && {color:s.style.color, weight:s.style.fontWeight} }
+      return {text:out.textContent, red:style('RED'), rgb:style('RGB'), palette:style('PALETTE'), images:out.querySelectorAll('img').length,
+        rule:document.querySelector('.terminal-rule')?.getBoundingClientRect().height ?? -1, lineHeight:parseFloat(getComputedStyle(out).lineHeight),
+        cursors:spans.filter(s=>s.style.boxShadow).length}
+    })()`)
+    assert.ok(styled.text.includes('new progress') && !styled.text.includes('old progress'), 'relative ANSI redraw happens before mobile line wrapping')
+    assert.equal(styled.red.weight, 'bold', 'ANSI bold retained')
+    assert.equal(styled.rgb.color, 'rgb(12, 34, 56)', 'ANSI truecolor retained')
+    assert.equal(styled.palette.color, 'rgb(255, 0, 0)', 'ANSI 256-color palette retained')
+    assert.equal(styled.images, 0, 'terminal text cannot inject HTML')
+    assert.equal(styled.cursors, 0, 'CLI can hide cursor')
+    assert.ok(styled.rule > 0 && styled.rule <= styled.lineHeight + 1, 'desktop separator stays one mobile line: ' + JSON.stringify(styled))
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?25h'})`)
+    await pause()
+    assert.equal(await run('[...document.querySelectorAll(".terminal-text span")].filter(s=>s.style.boxShadow).length'), 1, 'CLI can restore cursor')
+    fs.writeFileSync(path.join(cacheDir, 'wrapped-terminal.png'), (await win.webContents.capturePage()).toPNG())
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?1049h\\x1b[2J\\x1b[40;1HALTERNATE SCREEN'})`)
+    await pause()
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("ALTERNATE SCREEN") && !document.querySelector(".terminal-text").textContent.includes("new progress")'), 'alternate screen uses canonical row coordinates and replaces normal output')
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?1049l'})`)
+    await pause()
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("new progress") && !document.querySelector(".terminal-text").textContent.includes("ALTERNATE SCREEN")'), 'leaving alternate screen restores normal output')
+    console.log('mobile wrapped CJK / long text / ANSI styles / relative redraw / cursor: passed')
     for (const scale of [1, 2, 3]) {
       for (const width of [320, 390, 768, 320]) {
         win.setContentSize(width, 844)
@@ -173,17 +248,19 @@ app.whenReady().then(async () => {
         await pause()
         await win.webContents.capturePage()
         const bounds = await run(`(() => {
-          const host = document.querySelector('.xterm-box')
-          const screen = host.querySelector('.xterm-screen').getBoundingClientRect()
+          const host = document.querySelector('.terminal-text')
+          const screen = host.getBoundingClientRect()
           return {width:innerWidth, page:document.documentElement.scrollWidth,
             box:host.getBoundingClientRect().right, right:screen.right, screenWidth:screen.width, cols:mobileTerm.cols,
+            font:parseFloat(getComputedStyle(host).fontSize),
             scroll:document.querySelector('.xterm-scroll').scrollWidth,
             client:document.querySelector('.xterm-scroll').clientWidth}
         })()`)
         assert.equal(bounds.width, width)
         assert.ok(bounds.page <= width, JSON.stringify(bounds))
         assert.ok(bounds.screenWidth > 0, 'terminal really rendered')
-        assert.ok(bounds.screenWidth <= bounds.client, 'terminal screen fits within mobile container')
+        assert.ok(bounds.screenWidth <= bounds.client + 1, 'terminal screen fits within mobile container: ' + JSON.stringify(bounds))
+        assert.ok(bounds.font >= 13, 'terminal stays readable instead of scaling desktop text down')
         assert.equal(bounds.cols, 160, 'phone preserves desktop ANSI column coordinates')
         assert.equal(await run('mobileTerm.rows'), 40, 'phone preserves desktop ANSI row coordinates')
         assert.equal(bounds.scroll, bounds.client, 'terminal never requires horizontal scrolling')
@@ -200,7 +277,7 @@ app.whenReady().then(async () => {
         assert.equal(keys.buttons.length, 8)
         assert.equal(new Set(keys.tops).size, 1, 'all eight keys stay in one row')
         assert.ok(keys.buttons.every(Boolean), 'all eight keys visible and touch-sized')
-        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} desktop columns, scaled fit without horizontal scroll`)
+        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} ANSI columns, readable wrapped text without horizontal scroll`)
       }
     }
     const cols = await run('mobileTerm.cols')
@@ -208,6 +285,7 @@ app.whenReady().then(async () => {
     await pause()
     assert.equal(await run('mobileTerm.cols'), 160, 'snapshot preserves desktop dimensions')
     assert.ok(await run(`Array.from({length:mobileTerm.buffer.active.length}, (_,i)=>mobileTerm.buffer.active.getLine(i).translateToString(true)).join('').includes('x'.repeat(300))`), 'preserves all output without discarding text')
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("x".repeat(300))'), 'desktop soft-wrapped lines join before mobile wrapping')
     await run(`window.deliver({t:'resized', id:'check', cols:160, rows:40})`)
     await pause()
     assert.equal(await run('mobileTerm.cols'), 160, 'desktop remains the source of terminal dimensions')
@@ -220,7 +298,7 @@ app.whenReady().then(async () => {
     await pause()
     const clipped = await run(`(() => {
       const scroll = document.querySelector('.xterm-scroll')
-      const screen = document.querySelector('.xterm-screen').getBoundingClientRect()
+      const screen = document.querySelector('.terminal-line:last-child').getBoundingClientRect()
       return {bottom:screen.bottom, visible:scroll.getBoundingClientRect().bottom, top:scroll.scrollTop}
     })()`)
     assert.ok(clipped.bottom <= clipped.visible, 'latest rows visible with keyboard open: ' + JSON.stringify(clipped))
@@ -248,7 +326,10 @@ app.whenReady().then(async () => {
       await pause()
       const up = await position()
       assert.ok(up < bottom, 'finger swipe reaches history, mouse mode=' + mouseMode)
-      assert.ok(await run('mobileTerm.buffer.active.viewportY < mobileTerm.buffer.active.baseY'), 'swipe actually renders historical rows')
+      assert.ok(await run(`(() => {
+        const scroll = document.querySelector('.xterm-scroll').getBoundingClientRect()
+        return [...document.querySelectorAll('.terminal-line')].some(line => line.textContent.startsWith('line ') && line.getBoundingClientRect().bottom > scroll.top && line.getBoundingClientRect().top < scroll.bottom)
+      })()`), 'swipe actually displays historical rows')
       await run(`window.deliver({t:'data', id:'check', d:'\\r\\nnew output'})`)
       await pause()
       assert.equal(await position(), up, 'new output leaves history in place')
@@ -259,7 +340,14 @@ app.whenReady().then(async () => {
       assert.equal(await position(), up, 'CLI redraw leaves reader in history')
       await swipe(-180)
       await pause()
-      assert.ok(await position() > up, 'finger swipe returns toward latest output')
+      const returned = await run(`(() => {
+        const scroll = document.querySelector('.xterm-scroll'), bounds = scroll.getBoundingClientRect()
+        const last = document.querySelector('.terminal-line:last-child').getBoundingClientRect()
+        return {top:scroll.scrollTop, atBottom:scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2,
+          latestVisible:last.bottom <= bounds.bottom + 1 && last.bottom > bounds.top}
+      })()`)
+      // A cleared screen can be shorter; reaching its latest text may reduce the absolute offset.
+      assert.ok(returned.top > up || (returned.atBottom && returned.latestVisible), 'finger swipe returns toward latest output: ' + JSON.stringify(returned))
       assert.equal(await run('document.querySelector(".session-body").scrollTop'), 0, 'outer body does not compete with terminal scrolling')
     }
     await run(`document.querySelector('.xterm-scroll').scrollTop = 1e9`)
@@ -268,7 +356,7 @@ app.whenReady().then(async () => {
     await pause()
     const followed = await run(`(() => { const s=document.querySelector('.xterm-scroll'); return {height:s.scrollHeight, client:s.clientHeight, top:s.scrollTop, base:mobileTerm.buffer.active.baseY, viewport:mobileTerm.buffer.active.viewportY} })()`)
     assert.ok(followed.height - followed.client - followed.top <= 2, 'new output follows when reader is at bottom: ' + JSON.stringify(followed))
-    assert.equal(followed.viewport, followed.base, 'bottom renders the latest rows, including when phone is taller than desktop terminal')
+    assert.ok(await run('document.querySelector(".terminal-line:last-child").textContent.includes("latest output")'), 'bottom renders the latest rows')
     fs.writeFileSync(path.join(cacheDir, 'terminal.png'), (await win.webContents.capturePage()).toPNG())
     console.log('mobile native touch scroll / mouse mode / history during output: passed')
     assert.deepEqual(await run('Array.from(document.querySelectorAll(".segmented button")).map(b => b.textContent)'), ['Status', '終端', 'File', '預覽'])

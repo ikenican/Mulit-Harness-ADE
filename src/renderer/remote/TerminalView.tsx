@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Terminal } from '@xterm/xterm'
-import '@xterm/xterm/css/xterm.css'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import { Terminal, type IBufferCell } from '@xterm/xterm'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
 import type { RemoteConnection } from './conn'
 import { t } from './i18n'
 import { parsePrompt, type ParsedPrompt } from './prompt'
 import { IArrowUp, IMore, IStop } from './icons'
 import { ConfirmSheet, Menu, NavBar } from './ui'
-import { currentTheme, onThemeChange } from './theme'
 import { FilePane, StatusPane } from './WorkspacePanes'
 
 // 手機上的終端畫面。
 //
-// 保留桌面的字元座標；手機以原生捲動查看歷史及超出寬度的內容。
+// 用桌面字元座標解析 ANSI，再以可讀字級換行；手機只需原生垂直捲動。
 //
 // 輸入不直接打進 xterm（iOS 軟鍵盤對 xterm 的隱藏 textarea 很不穩），改用下方輸入框與按鍵列。
 
@@ -27,13 +25,72 @@ const KEYS: Array<{ label: string; name: string; seq: string }> = [
   { label: '→', name: 'Right', seq: '\x1b[C' }
 ]
 
-const FONT = "ui-monospace, 'SF Mono', Menlo, monospace"
+const ANSI_COLORS = ['#2e3436', '#cc0000', '#4e9a06', '#c4a000', '#3465a4', '#75507b', '#06989a', '#d3d7cf',
+  '#555753', '#ef2929', '#8ae234', '#fce94f', '#729fcf', '#ad7fa8', '#34e2e2', '#eeeeec']
+type OutputRun = { text: string; style: CSSProperties; key: string }
+type OutputLine = { text: string; runs: OutputRun[] }
 
-function termTheme(): Record<string, string> {
-  const dark = currentTheme() === 'dark'
-  return dark
-    ? { background: '#00000000', foreground: '#e2ded6', cursor: '#79a3a3', selectionBackground: '#30363c' }
-    : { background: '#00000000', foreground: '#202428', cursor: '#486a6d', selectionBackground: '#dfd9cf' }
+function cellColor(cell: IBufferCell, foreground: boolean): string | undefined {
+  const value = foreground ? cell.getFgColor() : cell.getBgColor()
+  if (foreground ? cell.isFgRGB() : cell.isBgRGB()) return `#${value.toString(16).padStart(6, '0')}`
+  if (!(foreground ? cell.isFgPalette() : cell.isBgPalette())) return undefined
+  if (value < 16) return ANSI_COLORS[value]
+  if (value >= 232) return `rgb(${Array(3).fill(8 + (value - 232) * 10).join(',')})`
+  const n = value - 16
+  return `rgb(${[Math.floor(n / 36), Math.floor(n / 6) % 6, n % 6].map(v => v ? 55 + v * 40 : 0).join(',')})`
+}
+
+function cellStyle(cell: IBufferCell): CSSProperties {
+  const fg = cellColor(cell, true), bg = cellColor(cell, false)
+  return {
+    color: cell.isInverse() ? bg || 'var(--term-bg)' : fg,
+    backgroundColor: cell.isInverse() ? fg || 'var(--term-fg)' : bg,
+    fontWeight: cell.isBold() ? 'bold' : undefined,
+    fontStyle: cell.isItalic() ? 'italic' : undefined,
+    opacity: cell.isDim() ? 0.6 : undefined,
+    visibility: cell.isInvisible() ? 'hidden' : undefined,
+    textDecoration: [cell.isUnderline() && 'underline', cell.isStrikethrough() && 'line-through', cell.isOverline() && 'overline'].filter(Boolean).join(' ') || undefined
+  }
+}
+
+function outputLines(term: Terminal, cursorVisible: boolean): OutputLine[] {
+  const buf = term.buffer.active
+  const lines: OutputLine[] = []
+  const cell = buf.getNullCell()
+  let last = buf.length - 1
+  // Do not display the unused rows below the prompt as a large empty screen.
+  while (last > buf.baseY + buf.cursorY && !buf.getLine(last)?.translateToString(true)) last--
+  // ponytail: scan the existing 5000-line buffer at most every 120ms; incremental rows if profiling requires it.
+  for (let y = 0; y <= last; y++) {
+    const line = buf.getLine(y)
+    if (!line) continue
+    if (!line.isWrapped || !lines.length) lines.push({ text: '', runs: [] })
+    const out = lines[lines.length - 1]
+    let end = term.cols
+    if (buf.getLine(y + 1)?.isWrapped) {
+      // xterm leaves an empty last cell when a wide character wraps; it is not a space.
+      while (end > 0 && !line.getCell(end - 1, cell)?.getChars()) end--
+    } else {
+      while (end > 0 && !line.getCell(end - 1, cell)?.getChars().trim()) end--
+    }
+    const cursorX = cursorVisible && y === buf.baseY + buf.cursorY ? Math.min(buf.cursorX, term.cols - 1) : -1
+    end = Math.max(end, cursorX + 1)
+    for (let x = 0; x < end; x++) {
+      line.getCell(x, cell)
+      if (!cell.getWidth()) continue // second cell of a CJK character
+      const text = cell.getChars() || ' '
+      const attributes = cell.isAttributeDefault() ? '' : [cell.getFgColorMode(), cell.getFgColor(), cell.getBgColorMode(), cell.getBgColor(),
+        cell.isBold(), cell.isItalic(), cell.isDim(), cell.isInvisible(), cell.isInverse(), cell.isUnderline(), cell.isStrikethrough(), cell.isOverline()].join(',')
+      const cursor = x === cursorX
+      const key = attributes + (cursor ? ',cursor' : '')
+      const previous = out.runs[out.runs.length - 1]
+      if (previous?.key === key) previous.text += text
+      else out.runs.push({ text, key, style: { ...(attributes ? cellStyle(cell) : {}),
+        boxShadow: cursor ? 'inset 0 0 0 1px var(--accent)' : undefined } })
+      out.text += text
+    }
+  }
+  return lines
 }
 
 function screenText(term: Terminal, lines = 24): string {
@@ -60,15 +117,12 @@ export default function TerminalView({
 }): JSX.Element {
   const id = session.id
   const scrollRef = useRef<HTMLDivElement>(null)
-  const spaceRef = useRef<HTMLDivElement>(null)
-  const boxRef = useRef<HTMLDivElement>(null)
-  const scalerRef = useRef<HTMLDivElement>(null)
-  const xtermHost = useRef<HTMLDivElement>(null)
+  const outputRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
-  const opened = useRef(false)
   const followOutput = useRef(true)
-  const scaleRef = useRef(1)
-  const cellHeightRef = useRef(15)
+  const scrollPosition = useRef(0)
+  const cursorVisible = useRef(true)
+  const [output, setOutput] = useState<OutputLine[]>([])
   const [mode, setMode] = useState<'status' | 'term' | 'file' | 'preview'>('term')
   const [filePath, setFilePath] = useState('')
   const [preview, setPreview] = useState<{ url: string | null; error: string | null }>({ url: null, error: null })
@@ -77,84 +131,23 @@ export default function TerminalView({
   const [menu, setMenu] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [text, setText] = useState('')
-  const modeRef = useRef(mode)
-  modeRef.current = mode
 
-  const applyScale = useCallback((): void => {
-    const term = termRef.current
+  const scrollToLatest = useCallback((): void => {
     const scroll = scrollRef.current
-    const space = spaceRef.current
-    const box = boxRef.current
-    const scaler = scalerRef.current
-    const host = xtermHost.current
-    if (!term || !scroll || !space || !box || !scaler || !host || !opened.current || modeRef.current !== 'term') return
-
-    const screen = host.querySelector<HTMLElement>('.xterm-screen')
-    const rawCellWidth = screen && term.cols ? (screen.offsetWidth / term.cols) : 7.2
-    const rawCellHeight = screen && term.rows ? (screen.offsetHeight / term.rows) : 15
-    const unscaledWidth = screen ? screen.offsetWidth + 20 : (term.cols || 120) * rawCellWidth + 20
-    const unscaledHeight = screen ? screen.offsetHeight + 20 : (term.rows || 40) * rawCellHeight + 20
-    const containerWidth = Math.max(80, scroll.clientWidth)
-
-    const scale = unscaledWidth > 0 ? Math.min(1, containerWidth / unscaledWidth) : 1
-    scaleRef.current = scale
-    const scaledHeight = unscaledHeight * scale
-    const cellHeight = rawCellHeight * scale
-    cellHeightRef.current = cellHeight
-
-    scaler.style.width = `${unscaledWidth}px`
-    scaler.style.height = `${unscaledHeight}px`
-    scaler.style.transform = `scale(${scale})`
-    scaler.style.transformOrigin = 'top left'
-
-    box.style.width = '100%'
-    box.style.height = `${Math.max(scaledHeight, scroll.clientHeight)}px`
-
-    space.style.width = '100%'
-    space.style.height = `${term.buffer.active.baseY * cellHeight + Math.max(scaledHeight, scroll.clientHeight)}px`
-
-    if (followOutput.current && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) {
-      scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight
-    }
-    if (followOutput.current) {
-      term.scrollToBottom()
-    } else {
-      term.scrollToLine(Math.round(scroll.scrollTop / (cellHeight || 1)))
-    }
-  }, [])
-
-  const syncScroll = useCallback((): void => {
-    const term = termRef.current
-    const scroll = scrollRef.current
-    const space = spaceRef.current
-    const box = boxRef.current
-    if (!term || !scroll || !space || !box || modeRef.current !== 'term') return
-    const cellHeight = cellHeightRef.current || 15
-    const scaledHeight = box.offsetHeight || scroll.clientHeight
-
-    space.style.width = '100%'
-    space.style.height = `${term.buffer.active.baseY * cellHeight + Math.max(scaledHeight, scroll.clientHeight)}px`
-
-    if (followOutput.current && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) {
-      scroll.scrollTop = scroll.scrollHeight - scroll.clientHeight
-    }
-    if (followOutput.current) {
-      term.scrollToBottom()
-    } else {
-      term.scrollToLine(Math.round(scroll.scrollTop / (cellHeight || 1)))
-    }
+    const output = outputRef.current
+    if (!scroll?.clientHeight || !output) return
+    // A CLI clear-screen can shorten the output. Do not clamp a reader out of history.
+    output.style.minHeight = followOutput.current ? '' : `${scrollPosition.current + scroll.clientHeight + 3}px`
+    scroll.scrollTop = followOutput.current ? scroll.scrollHeight : scrollPosition.current
   }, [])
 
   const onScroll = (): void => {
     const scroll = scrollRef.current
-    const term = termRef.current
-    if (!scroll || !term) return
-    const cellHeight = cellHeightRef.current || 15
-    followOutput.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2
-    if (followOutput.current) {
-      term.scrollToBottom()
-    } else {
-      term.scrollToLine(Math.round(scroll.scrollTop / (cellHeight || 1)))
+    // Hidden panes have no scroll geometry; retain the reader's position.
+    if (scroll?.clientHeight) {
+      scrollPosition.current = scroll.scrollTop
+      followOutput.current = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2
+      if (followOutput.current && outputRef.current?.style.minHeight) scrollToLatest()
     }
   }
 
@@ -166,6 +159,7 @@ export default function TerminalView({
       refreshTimer.current = null
       const term = termRef.current
       if (!term) return
+      setOutput(outputLines(term, cursorVisible.current))
       setPrompt(parsePrompt(screenText(term)))
     }, 120)
   }, [])
@@ -174,33 +168,31 @@ export default function TerminalView({
     const term = new Terminal({
       cols: session.cols || 120,
       rows: session.rows || 40,
-      fontFamily: FONT,
-      fontSize: 12,
       disableStdin: true,
-      cursorBlink: false,
-      scrollback: 5000,
-      allowTransparency: true, // 讓後面的玻璃透出來
-      theme: termTheme()
+      scrollback: 5000
     })
     termRef.current = term
     followOutput.current = true
-    const rendered = term.onRender(applyScale)
+    scrollPosition.current = 0
+    setOutput([])
+    cursorVisible.current = true
     // CLI redraws may erase saved lines. Keep the mobile history available to read.
     const keepHistory = term.parser.registerCsiHandler({ final: 'J' }, params => params[0] === 3)
+    const cursorModes = ['h', 'l'].map(final => term.parser.registerCsiHandler({ prefix: '?', final }, params => {
+      if (params.includes(25)) cursorVisible.current = final === 'h'
+      return false // xterm still processes the mode for the canonical buffer
+    }))
 
     const off = conn.onMessage((m: ServerMessage) => {
       if (m.t === 'snapshot' && m.id === id) {
         term.reset()
+        cursorVisible.current = true
         if (m.cols && m.rows) term.resize(m.cols, m.rows)
-        term.write(m.data, () => {
-          applyScale()
-          refresh()
-        })
+        term.write(m.data, refresh)
       } else if (m.t === 'data' && m.id === id) {
-        term.write(m.d, () => { syncScroll(); refresh() })
+        term.write(m.d, refresh)
       } else if (m.t === 'resized' && m.id === id) {
         if (m.cols && m.rows) term.resize(m.cols, m.rows)
-        applyScale()
         refresh()
       } else if (m.t === 'preview' && m.id === id) {
         setPreview({ url: m.url, error: m.url ? null : m.error || 'preview unavailable' })
@@ -211,49 +203,30 @@ export default function TerminalView({
       if (s === 'open') conn.send({ t: 'attach', id })
     })
     if (conn.state === 'open') conn.send({ t: 'attach', id })
-    const offTheme = onThemeChange(() => {
-      term.options.theme = termTheme()
-    })
 
     return () => {
       off()
       offState()
-      rendered.dispose()
       keepHistory.dispose()
-      offTheme()
+      cursorModes.forEach(handler => handler.dispose())
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
+      refreshTimer.current = null
       conn.send({ t: 'detach', id })
       term.dispose()
       termRef.current = null
-      opened.current = false
     }
-  }, [id, applyScale, syncScroll, session.cols, session.rows])
+    // Snapshot/resized messages own geometry; state broadcasts must not recreate the parser.
+  }, [conn, id, refresh])
 
-  // 第一次切到「終端」才真的把 xterm 掛上 DOM（在隱藏狀態下 open 會量不到字寬）
-  useEffect(() => {
-    const term = termRef.current
-    if (mode === 'term' && term && xtermHost.current && !opened.current) {
-      term.open(xtermHost.current)
-      opened.current = true
-    }
-    if (mode === 'term') applyScale()
-  }, [mode, applyScale])
+  useLayoutEffect(scrollToLatest, [output, mode, scrollToLatest])
 
-  // The body changes on rotation and when the mobile keyboard/dock opens.
+  // CSS wraps on rotation/keyboard changes; only the native scroll position needs syncing.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const observer = new ResizeObserver(() => {
-      clearTimeout(timer)
-      timer = setTimeout(applyScale, 50)
-    })
+    const observer = new ResizeObserver(scrollToLatest)
     if (scrollRef.current) observer.observe(scrollRef.current)
-    document.fonts.addEventListener('loadingdone', applyScale)
-    return () => {
-      clearTimeout(timer)
-      observer.disconnect()
-      document.fonts.removeEventListener('loadingdone', applyScale)
-    }
-  }, [applyScale])
+    if (outputRef.current) observer.observe(outputRef.current)
+    return () => observer.disconnect()
+  }, [scrollToLatest])
 
   // 新的審批出現就重新可以按
   useEffect(() => {
@@ -332,18 +305,12 @@ export default function TerminalView({
       >
         <div className="output">
           <div className="xterm-scroll" ref={scrollRef} onScroll={onScroll}>
-            <div className="terminal-scroll-space" ref={spaceRef}>
-              <div
-                className="xterm-scaler-box"
-                ref={boxRef}
-                onTouchStartCapture={(e) => e.stopPropagation()}
-                onTouchMoveCapture={(e) => e.stopPropagation()}
-                onWheelCapture={(e) => e.stopPropagation()}
-              >
-                <div className="xterm-scaler" ref={scalerRef}>
-                  <div className="xterm-box" ref={xtermHost} />
+            <div className="terminal-text" ref={outputRef} role="log" aria-live="off" aria-label={t('terminal')}>
+              {output.map((line, y) => (
+                <div key={y} className={/^[\s─━═┄┅┈┉╌╍-]{8,}$/.test(line.text) ? 'terminal-line terminal-rule' : 'terminal-line'}>
+                  {line.runs.length ? line.runs.map((run, x) => <span key={x} style={run.style}>{run.text}</span>) : '\u00a0'}
                 </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
