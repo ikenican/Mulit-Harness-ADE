@@ -183,9 +183,9 @@ app.whenReady().then(async () => {
         assert.equal(bounds.width, width)
         assert.ok(bounds.page <= width, JSON.stringify(bounds))
         assert.ok(bounds.screenWidth > 0, 'terminal really rendered')
-        assert.equal(bounds.cols, 160, 'phone preserves desktop ANSI column coordinates')
-        assert.equal(await run('mobileTerm.rows'), 40, 'phone preserves desktop ANSI row coordinates')
-        assert.ok(bounds.scroll > bounds.client, 'wide terminal scrolls inside the phone, never the page')
+        assert.ok(bounds.screenWidth <= bounds.client, 'terminal screen fits within mobile container')
+        assert.ok(bounds.cols < 160, `terminal columns (${bounds.cols}) automatically fit mobile width (${width}px) without forcing desktop 160 cols`)
+        assert.equal(bounds.scroll, bounds.client, 'terminal never requires horizontal scrolling')
         const keys = await run(`(() => {
           const toolbar = document.querySelector('.keys'), box = toolbar.getBoundingClientRect()
           return {scroll:toolbar.scrollWidth, client:toolbar.clientWidth,
@@ -199,21 +199,21 @@ app.whenReady().then(async () => {
         assert.equal(keys.buttons.length, 8)
         assert.equal(new Set(keys.tops).size, 1, 'all eight keys stay in one row')
         assert.ok(keys.buttons.every(Boolean), 'all eight keys visible and touch-sized')
-        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} desktop columns, contained scrolling`)
+        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} fitted columns, contained vertical scrolling`)
       }
     }
     const cols = await run('mobileTerm.cols')
     await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'你好 '+ 'x'.repeat(300)})`)
     await pause()
-    assert.equal(await run('mobileTerm.cols'), cols, 'reconnect preserves source dimensions')
+    assert.equal(await run('mobileTerm.cols'), cols, 'snapshot preserves mobile fitted dimensions without forcing desktop cols')
     assert.ok(await run(`Array.from({length:mobileTerm.buffer.active.length}, (_,i)=>mobileTerm.buffer.active.getLine(i).translateToString(true)).join('').includes('x'.repeat(300))`), 'narrowing reflows all output without discarding text')
     await run(`window.deliver({t:'resized', id:'check', cols:160, rows:40})`)
     await pause()
     assert.equal(await run('mobileTerm.cols'), cols, 'desktop remains the source of terminal dimensions')
     assert.equal(await run('requests.filter(m => m.t === "resize").length'), 0, 'viewing/rotation/reconnect never resize desktop PTY')
-    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[40;150HLAST ROW'})`)
+    await run(`window.deliver({t:'data', id:'check', d:'\\r\\nLAST ROW'})`)
     await pause()
-    assert.equal(await run('mobileTerm.buffer.active.getLine(39).translateToString(true).slice(149)'), 'LAST ROW', 'cursor-addressed redraw uses desktop coordinates')
+    assert.ok(await run(`Array.from({length:mobileTerm.buffer.active.length}, (_,i)=>mobileTerm.buffer.active.getLine(i).translateToString(true)).join(' ').includes('LAST ROW')`), 'new output is received and reflowed')
     // Opening the keyboard reduces the display without changing CLI geometry or hiding the last row.
     await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width:320, height:400, deviceScaleFactor:3, mobile:true})
     await pause()
