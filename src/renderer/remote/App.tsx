@@ -605,6 +605,17 @@ function Home({
 }): JSX.Element {
   const scrolled = useScrolled(44)
   const [picker, setPicker] = useState(false)
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem('aw.remote.collapsed-workspaces') || '[]')
+      return new Set(Array.isArray(saved) ? saved.filter((key): key is string => typeof key === 'string') : [])
+    } catch {
+      return new Set()
+    }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('aw.remote.collapsed-workspaces', JSON.stringify([...collapsed])) } catch { /* This visit still works without storage. */ }
+  }, [collapsed])
   // 下拉：記住的每一台（打勾的是現在連著的）＋管理。切換只是換連線目標，不換頁。
   const hostMenu: MenuItem[] = [
     ...hosts.map((h) => ({
@@ -709,12 +720,25 @@ function Home({
 
         {windows.map((w) => {
           const list = (byWindow.get(w.id) || []).sort((a, b) => a.startTime - b.startTime)
+          const key = JSON.stringify([activeHost, w.workspace.replace(/\\/g, '/').toLowerCase()])
+          const waitingCount = list.filter((s) => s.needsApproval).length
           return (
-            <section key={w.id} className="section" aria-label={w.workspaceName}>
-              <div className="section-head">
-                <h2>{w.workspaceName}</h2>
+            <details key={w.id} className="section workspace-group" open={!collapsed.has(key)} onToggle={(e) => {
+              const isOpen = e.currentTarget.open
+              setCollapsed((prev) => {
+                if (prev.has(key) === !isOpen) return prev
+                const next = new Set(prev)
+                if (isOpen) next.delete(key)
+                else next.add(key)
+                return next
+              })
+            }}>
+              <summary className="section-head workspace-summary press">
+                <IChevronRight size={18} className="workspace-chevron" />
+                <h2 title={w.workspaceName}>{w.workspaceName}</h2>
                 {list.length > 0 && <span className="count">{list.length}</span>}
-              </div>
+                {waitingCount > 0 && <span className="pill wait">{t('waitingCount', { n: waitingCount })}</span>}
+              </summary>
               <div className="stack">
                 {list.map((s) => (
                   <button key={s.id} className="bubble session-card press" onClick={() => onOpen({ kind: 'session', id: s.id })}>
@@ -756,7 +780,7 @@ function Home({
                   {t('git')}
                 </button>
               </div>
-            </section>
+            </details>
           )
         })}
 

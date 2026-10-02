@@ -54,13 +54,20 @@ window.mountMobile = () => {
     session={{id:'check', windowId:7, devPort:5173, title:'A'.repeat(300), workspaceName:'workspace', cols:160, rows:40}}
     hostName="desktop" onBack={() => {}} />)
 }
-window.mountHome = () => {
+window.mountHome = (activeHost = 'https://desktop:47600/', firstId = 1, workspace = 'C:/projects/business') => {
+  window.homeRoot?.unmount()
   window.mobileTerm?.dispose()
+  window.mobileTerm = null
   document.body.innerHTML = '<div id="root"></div>'
-  createRoot(document.getElementById('root')).render(<Home host="DESKTOP-B6JV938" connState="open" loaded
-    sessions={[{id:'long', windowId:1, title:'@claude: <command-message>' + 'long-session-name'.repeat(40), launcherKey:'claude', startTime:Date.now(), needsApproval:false}]}
-    windows={[{id:1, workspaceName:'Business harness'}]} workspaces={[]} hosts={[]} tails={{}} busy={{}}
-    onOpen={() => {}} onNew={() => {}} onSettings={() => {}} />)
+  window.opened = []; window.newWindows = []
+  window.homeRoot = createRoot(document.getElementById('root'))
+  window.homeRoot.render(<Home host="DESKTOP-B6JV938" connState="open" loaded activeHost={activeHost}
+    sessions={[{id:'long', windowId:firstId, title:'@claude: <command-message>' + 'long-session-name'.repeat(40), launcherKey:'claude', startTime:Date.now(), needsApproval:false},
+      {id:'waiting', windowId:2, workspaceName:'Design sandbox', title:'Needs approval', launcherKey:'codex', startTime:Date.now(), needsApproval:true}]}
+    windows={[{id:firstId, workspaceName:'Business harness', workspace},
+      {id:2, workspaceName:'Design sandbox', workspace:'C:/projects/design'},
+      {id:3, workspaceName:'Business harness', workspace:'D:/other/business'}]} workspaces={[]} hosts={[]} tails={{}} busy={{}}
+    onOpen={v => window.opened.push(v)} onNew={id => window.newWindows.push(id)} onSettings={() => {}} />)
 }
 window.mountSettings = () => {
   document.body.innerHTML = '<div id="root"></div>'
@@ -301,18 +308,57 @@ app.whenReady().then(async () => {
     assert.equal(await run('document.querySelector(".remote-file-frame")?.getAttribute("sandbox")'), 'allow-scripts', 'HTML preview isolated from paired app')
     assert.equal(await run('document.querySelectorAll(".remote-files textarea, .remote-files [contenteditable]").length'), 0, 'files have no editor')
     console.log('mobile Status / file navigation / Markdown / PDF / sandboxed HTML: passed')
-    await run('window.mountHome()')
+    await run('localStorage.removeItem("aw.remote.collapsed-workspaces"); window.mountHome()')
     await pause()
     await win.webContents.capturePage()
     const home = await run(`({page:document.documentElement.scrollWidth, width:innerWidth,
       card:document.querySelector('.session-card').getBoundingClientRect().right,
       add:document.querySelector('.add-card').getBoundingClientRect().right,
-      title:document.querySelector('.card-title').scrollWidth,
-      visible:document.querySelector('.card-title').clientWidth})`)
+      title:document.querySelector('.session-card .card-title').scrollWidth,
+      visible:document.querySelector('.session-card .card-title').clientWidth})`)
     assert.ok(home.title > home.visible, 'long title needs ellipsis')
     assert.ok(home.page <= home.width && home.card <= home.width - 16 && home.add <= home.width - 16, 'home card and row fit: ' + JSON.stringify(home))
     assert.equal(await run('getComputedStyle(document.querySelector(".session-card")).minWidth'), '0px', 'button intrinsic width cannot widen the grid')
     console.log('home long session name: passed')
+    for (const width of [320, 390, 768]) {
+      await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width, height:844, deviceScaleFactor:3, mobile:true})
+      await pause()
+      const headers = await run(`({width:innerWidth, page:document.documentElement.scrollWidth,
+        bounds:Array.from(document.querySelectorAll('.workspace-summary')).map(el => el.getBoundingClientRect().toJSON())})`)
+      assert.ok(headers.bounds.every(r => r.height >= 44 && r.left >= 15 && r.right <= headers.width - 15) && headers.page <= headers.width,
+        'workspace headers fit and have 44px touch targets at ' + width + ': ' + JSON.stringify(headers))
+    }
+    await run('document.querySelectorAll(".workspace-summary")[1].click()')
+    await pause()
+    assert.deepEqual(await run('Array.from(document.querySelectorAll(".workspace-group")).map(el => el.open)'), [true, false, true], 'workspace folds independently')
+    assert.equal(await run('document.querySelectorAll(".workspace-group")[1].querySelector(".session-card").checkVisibility()'), false, 'folded sessions hidden')
+    assert.ok(await run('document.querySelectorAll(".workspace-summary")[1].querySelector(".pill.wait")?.textContent.includes("1")'), 'waiting badge remains in folded header')
+    await run('document.querySelector(".wait-card").click()')
+    assert.deepEqual(await run('opened'), [{kind:'session', id:'waiting'}], 'approval remains reachable while workspace is folded')
+    await run('document.querySelectorAll(".workspace-summary")[0].click(); document.querySelectorAll(".workspace-summary")[2].click()')
+    await pause()
+    await run('window.mountHome("https://desktop:47600/", 11, "c:/PROJECTS/BUSINESS")')
+    await pause()
+    assert.deepEqual(await run('Array.from(document.querySelectorAll(".workspace-group")).map(el => el.open)'), [false, false, false], 'folding survives navigation, new window ids, and path casing')
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', {enabled:true})
+    await run('document.querySelector(".workspace-summary").focus()')
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, text:'\r'})
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13})
+    await pause()
+    assert.equal(await run('document.querySelector(".workspace-group").open'), true, 'native disclosure supports keyboard Enter')
+    await run('document.querySelector(".workspace-group .add-card").click()')
+    assert.deepEqual(await run('newWindows'), [11], 'expanded group keeps correct workspace actions')
+    await run('window.mountHome("https://other-computer:47600/")')
+    await pause()
+    assert.deepEqual(await run('Array.from(document.querySelectorAll(".workspace-group")).map(el => el.open)'), [true, true, true], 'other computer has independent folding')
+    await run('localStorage.setItem("aw.remote.collapsed-workspaces", "{}"); window.mountHome()')
+    await pause()
+    assert.equal(await run('document.querySelector(".workspace-group").open'), true, 'invalid saved preference safely defaults to expanded')
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {width:320, height:844, deviceScaleFactor:3, mobile:true})
+    await run('document.querySelectorAll(".workspace-summary").forEach(el => el.click())')
+    await pause()
+    fs.writeFileSync(path.join(cacheDir, 'workspaces.png'), (await win.webContents.capturePage()).toPNG())
+    console.log('workspace native folding / persistence / host isolation / approval / keyboard: passed')
     await run('window.mountSettings()')
     await pause()
     assert.ok(await run(`document.body.textContent.includes(${JSON.stringify('v' + version)})`), 'show loaded mobile interface version')
