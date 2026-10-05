@@ -102,6 +102,19 @@ app.whenReady().then(async () => {
   await bridge.handleMessage(oldPhone, {t:'input', id:'desktop', data:'hello'})
   assert.deepEqual(remoteInputs, [['desktop', 'hello']], 'mobile input still reaches shared PTY')
   console.log('legacy mobile resize blocked / remote input: passed')
+  const ptyModule = { exports: {} }
+  const ptyCode = await require('esbuild').transform(fs.readFileSync('src/main/ipc/pty.ts', 'utf8'), {loader:'ts', format:'cjs'})
+  new Function('require', 'module', 'exports', ptyCode.code)(id => {
+    if (id === './settings') return { isCliBypassPermissions: () => false, getCustomCliPath: () => '' }
+    if (id === '../ext/paths') return { findAgentCli: () => '' }
+    if (id.startsWith('.')) return {}
+    return require(id)
+  }, ptyModule, ptyModule.exports)
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('codex', []), ['--no-alt-screen'], 'codex receives --no-alt-screen')
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('codex', ['resume', '123']), ['resume', '123', '--no-alt-screen'], 'codex resume receives --no-alt-screen')
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('codex', ['--no-alt-screen']), ['--no-alt-screen'], 'codex does not duplicate --no-alt-screen')
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('claude', ['--resume', '123']), ['--resume', '123'], 'other agents left untouched')
+  console.log('codex --no-alt-screen default inline mode: passed')
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbench-terminal-check-'))
   await require('esbuild').build({
     stdin: { contents: fixture.replaceAll("'/src/", "'./src/"), resolveDir: process.cwd(), loader: 'tsx' },
@@ -241,6 +254,17 @@ app.whenReady().then(async () => {
     await pause()
     assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("new progress") && !document.querySelector(".terminal-text").textContent.includes("ALTERNATE SCREEN")'), 'leaving alternate screen restores normal output')
     console.log('mobile wrapped CJK / long text / ANSI styles / relative redraw / cursor: passed')
+    await run(`window.renderMobile({id:'claude-check', launcherKey:'claude', title:'@claude: session', cols:160, rows:40})`)
+    await pause()
+    await run(`window.deliver({t:'snapshot', id:'claude-check', cols:160, rows:40, data:'Turn 1: User prompt\\r\\nClaude: Turn 1 response\\r\\n\\x1b[?25l\\x1b[2J\\x1b[m\\x1b[H\\x1b[?25hTurn 2: Next task\\r\\nClaude: Turn 2 response\\r\\n'})`)
+    await pause()
+    assert.ok(await run(`document.querySelector('.terminal-text').textContent.includes('Turn 1: User prompt') && document.querySelector('.terminal-text').textContent.includes('Turn 2: Next task')`), 'Claude Code multi-turn history preserved in snapshot')
+    await run(`window.deliver({t:'data', id:'claude-check', d:'\\x1b[?25l\\x1b[2J\\x1b[m\\x1b[H\\x1b[?25hTurn 3: Third prompt\\r\\nClaude: Third response\\r\\n'})`)
+    await pause()
+    assert.ok(await run(`document.querySelector('.terminal-text').textContent.includes('Turn 1: User prompt') && document.querySelector('.terminal-text').textContent.includes('Turn 3: Third prompt')`), 'Claude Code live turn preserved across clear-screen')
+    await run(`window.renderMobile()`)
+    await pause()
+    console.log('Claude Code multi-turn history preservation across clear-screen: passed')
     for (const scale of [1, 2, 3]) {
       for (const width of [320, 390, 768, 320]) {
         win.setContentSize(width, 844)
