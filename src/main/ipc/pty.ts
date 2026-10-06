@@ -289,6 +289,19 @@ export function applyAgentBypassArgs(agent: string, currentArgs: string[]): stri
 }
 
 /**
+ * 依 Agent 類別套用預設通用參數：
+ * - Codex: 注入 --no-alt-screen 停用備用螢幕緩衝區，改為 inline 串流模式以完整保留 scrollback 歷史
+ */
+export function applyAgentDefaultArgs(commandOrAgent: string, currentArgs: string[], targetAgent?: AgentId | null): string[] {
+  const result = [...currentArgs]
+  const isCodex = targetAgent === 'codex' || commandOrAgent.toLowerCase().includes('codex')
+  if (isCodex && !result.includes('--no-alt-screen')) {
+    result.push('--no-alt-screen')
+  }
+  return result
+}
+
+/**
  * 邏輯名稱 → 實際執行檔與前置參數。
  * 優先讀取 settings 中的自訂路徑，Windows 腳本自動帶起正確的解譯器。
  */
@@ -482,6 +495,9 @@ export function spawnPty(
       }
     }
   }
+
+  // Agent 通用預設參數注入（例如 Codex 自動注入 --no-alt-screen 保留 scrollback 歷史）
+  args = applyAgentDefaultArgs(opts.command || command, args, targetAgent)
 
   // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
   // 因此不需要（也不該）把明文寫進任何 agent 設定檔。

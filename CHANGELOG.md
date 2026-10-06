@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.36] - 2026-10-05
+
+### Added / 新增
+- 終端跨 Agent 歷史回溯強化（DEC-007）：
+  - **Codex CLI**：自動注入 `--no-alt-screen` 通用參數，停用備用螢幕模式（Alternate Screen Mode），切換為 inline 串流輸出，完整保留 xterm scrollback 歷史。
+  - **Claude Code CLI**：在手機端終端視圖實作 `ClaudeHistoryStream`，攔截 React Ink 產生的 ANSI 清螢幕序列（`\x1b[2J\x1b[H`），轉化為向 scrollback 推進換行並自動繪製淡色橫向回合分隔線（`─`），使前幾回合的交談與工具輸出自然保留在卷軸緩衝區中，隨時可向上滑動回顧多回合交談紀錄。
+  - 手機端 upstream prompt 輸入框、快捷按鍵（如 Tab、Ctrl+C）與審批按鈕走獨立管道，完全不受影響，保持 100% 正常操作。
+
 ## [0.1.35] - 2026-10-02
 
 ### Fixed / 修復
