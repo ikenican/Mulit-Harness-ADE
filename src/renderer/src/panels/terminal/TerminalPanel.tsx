@@ -17,6 +17,8 @@ import { looksLikeApprovalPrompt } from './approvalDetect'
 import { detectDevUrl } from './portDetect'
 import { focusTerm, isComposing, isImeKey, trackComposition } from './imeGuard'
 import AgentMark from '@/components/AgentMark'
+import CoworkPanel from '@panels/cowork/CoworkPanel'
+import type { CoworkAgent, CoworkPhase } from '../../../../shared/cowork'
 import {
   IconPlus,
   IconChevronDown,
@@ -31,7 +33,8 @@ import {
   IconSplitVertical,
   IconSplitGrid,
   IconSparkles,
-  IconSend
+  IconSend,
+  IconCowork
 } from '@/components/Icons'
 import type { CliLauncher, WorkbenchSettings } from '../../../../preload/index'
 
@@ -219,6 +222,10 @@ export default function TerminalPanel(): JSX.Element {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [splitMode, setSplitMode] = useState<SplitMode>('single')
+  // Cowork 是終端區的一個兄弟分頁：開著時蓋在終端畫面上，終端本身保持掛載
+  const [coworkOpen, setCoworkOpen] = useState(false)
+  const [coworkActive, setCoworkActive] = useState(false)
+  const [coworkPhase, setCoworkPhase] = useState<CoworkPhase | null>(null)
   // 最近使用順序：分割時就顯示最近用過的前 N 個，不必再另外挑面板
   const [mru, setMru] = useState<string[]>([])
 
@@ -385,6 +392,31 @@ export default function TerminalPanel(): JSX.Element {
     tryOnce()
   }, [])
 
+  /**
+   * 剛開的 CLI 還沒畫完畫面、還沒開 bracketed paste 時就貼，開頭幾行的換行會被當成一般按鍵吃掉
+   * （2026-10-07 實測 Codex）。等它的輸出靜止 1.5 秒（最多 20 秒）才貼。
+   */
+  const pasteWhenReady = useCallback(
+    (sessionId: string, text: string): void => {
+      const t0 = Date.now()
+      let lastWrite = 0
+      let sub: { dispose(): void } | null = null
+      const tick = (): void => {
+        const s = sessionsRef.current.find((x) => x.id === sessionId)
+        if (s && !sub) sub = s.term.onWriteParsed(() => (lastWrite = Date.now()))
+        const settled = lastWrite > 0 && Date.now() - lastWrite > 1500
+        if (settled || Date.now() - t0 > 20000) {
+          sub?.dispose()
+          sendToSession(sessionId, text)
+          return
+        }
+        setTimeout(tick, 200)
+      }
+      tick()
+    },
+    [sendToSession]
+  )
+
   const termTheme = useMemo(() => {
     switch (theme) {
       case 'light-morandi':
@@ -519,6 +551,7 @@ export default function TerminalPanel(): JSX.Element {
 
   // 切到某分頁即視為使用者已看到，清掉紅點；同時把它移到 MRU 最前面
   const selectSession = useCallback((id: string): void => {
+    setCoworkActive(false)
     setActiveSessionId(id)
     setMru((prev) => [id, ...prev.filter((x) => x !== id)])
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, needsApproval: false } : s)))
@@ -1435,6 +1468,18 @@ export default function TerminalPanel(): JSX.Element {
           <span className="term-idle-title">Terminals</span>
           {renderAddMenu()}
           {renderAgentDispatch()}
+          <button
+            type="button"
+            className={`term-btn-action ${coworkOpen && coworkActive ? 'active' : ''}`}
+            onClick={() => {
+              setCoworkOpen(true)
+              setCoworkActive(true)
+            }}
+            title={t('cowork.buttonTitle')}
+          >
+            <IconCowork size={12} />
+            <span>{t('cowork.tab')}</span>
+          </button>
         </div>
 
         {/* Action Controls: Popout, Clear, Delete, Handoff, Split */}
@@ -1521,7 +1566,7 @@ export default function TerminalPanel(): JSX.Element {
       </div>
 
       {/* Row 2: Dedicated Session Tabs Bar (Displayed when one or more sessions exist) */}
-      {sessions.length > 0 && (
+      {(sessions.length > 0 || coworkOpen) && (
         <div
           className="term-tabs-row"
           onDragOver={(e) => {
@@ -1537,6 +1582,28 @@ export default function TerminalPanel(): JSX.Element {
           }}
         >
           <div className="term-strip-tabs">
+            {coworkOpen && (
+              <div
+                className={`term-unified-tab term-cowork-tab ${coworkActive ? 'active' : ''}`}
+                onClick={() => setCoworkActive(true)}
+                title={t('cowork.buttonTitle')}
+              >
+                <IconCowork size={12} />
+                <span className="term-tab-title">{t('cowork.tab')}</span>
+                {coworkPhase && <span className={`cw-tab-dot phase-${coworkPhase}`} title={t(`cowork.phase_${coworkPhase}`)} />}
+                <button
+                  className="term-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setCoworkOpen(false)
+                    setCoworkActive(false)
+                  }}
+                  title={t('cowork.close')}
+                >
+                  <IconClose size={10} />
+                </button>
+              </div>
+            )}
             {sessions.map((s) => {
               const isHovered = hoveredTabId === s.id
               const dragged = getDraggedSession()
@@ -1617,6 +1684,31 @@ export default function TerminalPanel(): JSX.Element {
         onDragOver={handleStageDragOver}
         onDrop={handleStageDrop}
       >
+        {coworkOpen && (
+          <div className="cw-host" hidden={!coworkActive}>
+            <CoworkPanel
+              sessions={sessions.map((s) => ({
+                id: s.id,
+                title: s.title,
+                launcherKey: s.launcherKey,
+                isExited: s.isExited,
+                needsApproval: s.needsApproval
+              }))}
+              onPaste={(id, text, fresh) => {
+                // 只貼上、不送 Enter：使用者在終端裡確認內容後自己送出（cowork.md §5.1）
+                if (fresh) pasteWhenReady(id, text)
+                else sendToSession(id, text)
+                selectSession(id)
+              }}
+              onOpenAgent={(agent: CoworkAgent) => handleNewTerminal(agent)}
+              onClose={() => {
+                setCoworkOpen(false)
+                setCoworkActive(false)
+              }}
+              onPhase={setCoworkPhase}
+            />
+          </div>
+        )}
         {dragOverInfo && (
           <div className={`term-drag-overlay mode-${dragOverInfo.mode}`}>
             <div className={`term-drag-pill mode-${dragOverInfo.mode}`}>
