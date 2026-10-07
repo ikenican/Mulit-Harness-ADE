@@ -132,6 +132,30 @@ assert.deepEqual(yn.options.map((o) => [o.key, o.selected]), [['y', false], ['n'
 assert.equal(parsePrompt('just output\n1. not a menu'), null)
 assert.equal(questionPreview('foo\n│ Do you want to proceed? │\n│ ❯ 1. Yes │'), 'Do you want to proceed?')
 
+// 互動問答的選項間有空行，每個選項另有多行說明。
+const questionScreen = [
+  '要使用哪種登入方式？', '',
+  '❯ 1. 電子郵件（建議）',
+  '     使用信箱收取登入連結。',
+  '     不需要記住密碼，',
+  '     適合一般使用者。', '',
+  '  2. 公司帳號',
+  '     使用公司提供的單一登入。', '',
+  '  3. 其他方式',
+  '     輸入你偏好的方式。', '',
+  'Enter to select · Tab/Arrow keys to navigate · Esc to cancel'
+].join('\n')
+const qp = parsePrompt(questionScreen)!
+assert.ok(qp, '空行與多行說明不應讓問答選項退回數字鍵')
+assert.equal(qp.question, '要使用哪種登入方式？')
+assert.deepEqual(qp.options.map(o => [o.key, o.label, o.selected]), [
+  ['1', '電子郵件（建議） 使用信箱收取登入連結。 不需要記住密碼， 適合一般使用者。', true],
+  ['2', '公司帳號 使用公司提供的單一登入。', false],
+  ['3', '其他方式 輸入你偏好的方式。', false]
+])
+assert.equal(parsePrompt('old output\n1. Old item\n2. Old item\n\nNew question?\n3. Incomplete menu'), null)
+assert.deepEqual(parsePrompt('old output\n1. Old\n2. Old\n\nNew question?\n1. New\n\n2. Other')?.options.map(o => o.label), ['New', 'Other'])
+
 // —— WebSocket 來源：自己的 PWA，或同一個 App 在區網另一台電腦上的 origin ——
 {
   const HOST = '192.168.50.7:47600'

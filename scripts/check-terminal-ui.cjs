@@ -322,9 +322,30 @@ app.whenReady().then(async () => {
     await pause()
     const choices = await run('[...document.querySelectorAll(".approval .choice")].map(b => b.textContent)')
     assert.deepEqual(choices, ['1Yes', '2Yes, and always allow', '3No'], 'approval reads options below a parked cursor: ' + JSON.stringify(choices))
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'Which login method?\\r\\n● Email link\\r\\n○ Company account\\r\\nUse arrow keys to choose'})`)
+    await pause()
+    assert.equal(await run('document.querySelectorAll(".approval .choice").length'), 0, 'unrecognized formats never show unlabeled 1/2/3 buttons')
+    assert.ok(await run('document.querySelector(".approval-details").textContent.includes("● Email link")'), 'unrecognized menu retains original option text')
+    assert.ok(await run('document.getElementById(document.querySelector(".approval").getAttribute("aria-labelledby"))'), 'fallback dialog retains an accessible title')
+    await run('requests.length = 0; [...document.querySelectorAll(".keys button")].find(b => b.getAttribute("aria-label") === "Down").click(); document.querySelector(".send").click()')
+    assert.deepEqual(await run('requests.filter(m => m.t === "input").map(m => m.data)'), ['\x1b[B', '\r'], 'fallback supports arrow selection and Enter confirmation')
+
+    // A full-height question with blank rows and multi-line descriptions exceeds the old 24-row tail.
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'\x1b[?25l\x1b[3;2H要使用哪種登入方式？\x1b[5;2H❯ 1. 電子郵件（建議）\x1b[6;6H使用信箱收取登入連結。\x1b[7;6H不需要記住密碼，\x1b[8;6H適合一般使用者。\x1b[19;4H2. 公司帳號\x1b[20;6H使用公司提供的單一登入。\x1b[32;4H3. 其他方式\x1b[33;6H輸入你偏好的方式。\x1b[38;2HEnter to select · Tab/Arrow keys to navigate · Esc to cancel\x1b[2;1H'})`)
+    await pause()
+    assert.equal(await run('document.querySelector(".approval-q").textContent'), '要使用哪種登入方式？', 'full-height question is visible')
+    assert.deepEqual(await run('[...document.querySelectorAll(".approval .choice")].map(b => b.textContent)'), [
+      '1電子郵件（建議） 使用信箱收取登入連結。 不需要記住密碼， 適合一般使用者。',
+      '2公司帳號 使用公司提供的單一登入。', '3其他方式 輸入你偏好的方式。'
+    ], 'spaced question choices retain labels and descriptions across the full screen')
+    await run('requests.length = 0; document.querySelectorAll(".approval .choice")[1].click()')
+    await pause()
+    assert.deepEqual(await run('requests.filter(m => m.t === "input").map(m => m.data)'), ['2'], 'labeled option sends its original CLI key')
     await run(`window.renderMobile()`)
     await pause()
-    console.log('approval options below parked TUI cursor: passed')
+    console.log('approval parked cursor / spaced questions / full-height screen / fallback text and input: passed')
     for (const scale of [1, 2, 3]) {
       for (const width of [320, 390, 768, 320]) {
         win.setContentSize(width, 844)
@@ -443,7 +464,8 @@ app.whenReady().then(async () => {
     assert.ok(await run('document.querySelector(".terminal-line:last-child").textContent.includes("latest output")'), 'bottom renders the latest rows')
     fs.writeFileSync(path.join(cacheDir, 'terminal.png'), (await win.webContents.capturePage()).toPNG())
     console.log('mobile native touch scroll / mouse mode / history during output: passed')
-    assert.deepEqual(await run('Array.from(document.querySelectorAll(".segmented button")).map(b => b.textContent)'), ['Status', '終端', 'File', '預覽'])
+    assert.deepEqual(await run('Array.from(document.querySelectorAll(".segmented button")).map(b => b.textContent)'),
+      await run('document.documentElement.lang === "en" ? ["Status", "Terminal", "File", "Preview"] : ["Status", "終端", "File", "預覽"]'))
     await run('document.querySelectorAll(".segmented button")[0].click()')
     await pause()
     await run(`window.deliver({t:'status', windowId:7, status:{workspace:'C:/project', agentBusy:true, agentCount:2,
