@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.37] - 2026-10-07
+
+### Fixed / 修復
+- 手機端 Claude Code 終端：Claude Code 的 fullscreen TUI（`"tui": "fullscreen"`）會進入備用螢幕＋滑鼠模式，手機只剩一頁、無 scrollback。現在啟動 Claude 時自動注入 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`（等同 Codex 的 `--no-alt-screen`；launcher 自訂 env 優先）。
+- 手機審批面板只顯示「1 / 2 / 3」：Claude 把游標停在 spinner 列（選項上方），解析只往游標上方讀而抓不到選項；改為讀到畫面最後一列有內容處，選項文字恢復顯示。
+- 移除 v0.1.36 的 `ClaudeHistoryStream`：它把每次清螢幕轉成分隔線＋整頁空行，造成手機畫面重複畫面與大段空白。
+
 ## [0.1.36] - 2026-10-05
 
 ### Added / 新增
