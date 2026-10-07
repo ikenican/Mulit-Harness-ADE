@@ -498,6 +498,11 @@ export function spawnPty(
 
   // Agent 通用預設參數注入（例如 Codex 自動注入 --no-alt-screen 保留 scrollback 歷史）
   args = applyAgentDefaultArgs(opts.command || command, args, targetAgent)
+  // Claude Code 的 fullscreen TUI（settings "tui": "fullscreen"）走備用螢幕＋滑鼠模式：沒有 scrollback、游標停在畫面中段，
+  // 手機只看得到一頁且審批選項解析不到。等同 Codex 的 --no-alt-screen；launcher 自己有設就尊重。
+  if (targetAgent === 'claude' || (opts.command || command).toLowerCase().includes('claude')) {
+    env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN ??= '1'
+  }
 
   // 憑證只在此刻注入：MCP server 由 CLI 子行程繼承 env 取得，
   // 因此不需要（也不該）把明文寫進任何 agent 設定檔。

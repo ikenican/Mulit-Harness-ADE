@@ -254,17 +254,17 @@ app.whenReady().then(async () => {
     await pause()
     assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("new progress") && !document.querySelector(".terminal-text").textContent.includes("ALTERNATE SCREEN")'), 'leaving alternate screen restores normal output')
     console.log('mobile wrapped CJK / long text / ANSI styles / relative redraw / cursor: passed')
-    await run(`window.renderMobile({id:'claude-check', launcherKey:'claude', title:'@claude: session', cols:160, rows:40})`)
+    await run(`window.renderMobile({needsApproval:true})`)
     await pause()
-    await run(`window.deliver({t:'snapshot', id:'claude-check', cols:160, rows:40, data:'Turn 1: User prompt\\r\\nClaude: Turn 1 response\\r\\n\\x1b[?25l\\x1b[2J\\x1b[m\\x1b[H\\x1b[?25hTurn 2: Next task\\r\\nClaude: Turn 2 response\\r\\n'})`)
+    // Claude Code parks the cursor on its spinner row, above the permission prompt.
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'\x1b[?25l\x1b[3;1H● Writing\x1b[20;2HDo you want to proceed?\x1b[21;2H❯ 1. Yes\x1b[22;4H2. Yes, and always allow\x1b[23;4H3. No\x1b[25;2HEsc to cancel\x1b[3;3H'})`)
     await pause()
-    assert.ok(await run(`document.querySelector('.terminal-text').textContent.includes('Turn 1: User prompt') && document.querySelector('.terminal-text').textContent.includes('Turn 2: Next task')`), 'Claude Code multi-turn history preserved in snapshot')
-    await run(`window.deliver({t:'data', id:'claude-check', d:'\\x1b[?25l\\x1b[2J\\x1b[m\\x1b[H\\x1b[?25hTurn 3: Third prompt\\r\\nClaude: Third response\\r\\n'})`)
-    await pause()
-    assert.ok(await run(`document.querySelector('.terminal-text').textContent.includes('Turn 1: User prompt') && document.querySelector('.terminal-text').textContent.includes('Turn 3: Third prompt')`), 'Claude Code live turn preserved across clear-screen')
+    const choices = await run('[...document.querySelectorAll(".approval .choice")].map(b => b.textContent)')
+    assert.deepEqual(choices, ['1Yes', '2Yes, and always allow', '3No'], 'approval reads options below a parked cursor: ' + JSON.stringify(choices))
     await run(`window.renderMobile()`)
     await pause()
-    console.log('Claude Code multi-turn history preservation across clear-screen: passed')
+    console.log('approval options below parked TUI cursor: passed')
     for (const scale of [1, 2, 3]) {
       for (const width of [320, 390, 768, 320]) {
         win.setContentSize(width, 844)
