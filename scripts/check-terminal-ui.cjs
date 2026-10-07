@@ -160,6 +160,18 @@ app.whenReady().then(async () => {
       await pause()
     }
     assert.deepEqual(await run('sent'), ['中文測試', '中文測試', '，', '😀'], 'native compositions exactly once')
+    // 微軟注音組字緩衝區滿了：先送出前段，後段繼續組字。
+    await run('sent.length = 0')
+    const ime = (cmd, args) => win.webContents.debugger.sendCommand(cmd, args)
+    await ime('Input.imeSetComposition', {text:'一二三四五六', selectionStart:6, selectionEnd:6})
+    await pause()
+    assert.equal(await run('document.querySelector(".composition-view.active")?.textContent'), '一二三四五六', 'composition preview visible')
+    await ime('Input.insertText', {text:'一二三'})
+    await ime('Input.imeSetComposition', {text:'四五六七', selectionStart:4, selectionEnd:4})
+    await pause()
+    await ime('Input.insertText', {text:'四五六七'})
+    await pause()
+    assert.deepEqual(await run('sent'), ['一二三', '四五六七'], 'IME partial commit sends each part once')
     assert.equal(await run('term.textarea.value'), '', 'no retained IME text')
     // IME passthrough punctuation must not diff/re-emit previously typed content.
     assert.deepEqual(await run(`(async () => {
