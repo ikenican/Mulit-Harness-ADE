@@ -31,12 +31,14 @@ import {
   checkTasks,
   collectIssues,
   currentBoard,
+  parseAgyOutput,
   parseClaudeOutput,
   parseCodexOutput,
   plannerInvocation,
   reviewersOf,
   schemaFor,
   summarizeRun,
+  withToolNote,
   type CoworkAgent,
   type CoworkBlockKind,
   type CoworkCall,
@@ -57,6 +59,8 @@ export interface ResolvedCli {
   prefixArgs?: string[]
   /** codex 在 Windows 需要的 sandbox 模式（從使用者設定讀出來） */
   windowsSandbox?: string | null
+  /** 額外環境變數（agy 用隔離家目錄：USERPROFILE／HOME） */
+  env?: Record<string, string>
 }
 
 export interface CoworkDeps {
@@ -533,6 +537,8 @@ export class CoworkService {
       return { ok: false, kind: 'failed', error: (e as Error).message }
     }
 
+    // 依各家實際可用的工具補一段說明，免得模型浪費步數去試被擋的工具
+    const sent = withToolNote(prompt, agent)
     const call: CoworkCall = {
       id: callId,
       agent,
@@ -541,7 +547,8 @@ export class CoworkService {
       planRevision: run.planRevision,
       startedAt: this.now(),
       outputBytes: 0,
-      timeoutMs: run.limits.callTimeoutSec * 1000,
+      // agy 一次覆核實測要 7 分多鐘：各家可以要求更長的下限
+      timeoutMs: Math.max(run.limits.callTimeoutSec, inv.minTimeoutSec ?? 0) * 1000,
       status: 'running'
     }
     run.calls.push(call)
@@ -560,8 +567,10 @@ export class CoworkService {
           command: cli.command,
           args: [...(cli.prefixArgs || []), ...inv.args],
           cwd: run.snapshotDir,
-          stdin: prompt,
+          stdin: inv.stdin ? inv.stdin(sent) : sent,
           timeoutMs: call.timeoutMs,
+          env: cli.env ? { ...process.env, ...cli.env } : undefined,
+          onStdoutLine: inv.guard,
           maxBytes: run.limits.maxOutputBytes,
           onActivity: (bytes) => {
             call.outputBytes = bytes
@@ -583,12 +592,18 @@ export class CoworkService {
 
     let parsed: ParsedOutput
     if (result.spawnError) parsed = { ok: false, error: `Could not start ${agent}: ${result.spawnError}`, raw: '' }
+    else if (result.guardReason) parsed = { ok: false, error: result.guardReason, raw: result.stdout }
     else if (result.cancelled) parsed = { ok: false, error: 'cancelled', raw: result.stdout }
-    else if (result.timedOut) parsed = { ok: false, error: `${agent} timed out after ${run.limits.callTimeoutSec}s`, raw: result.stdout }
+    else if (result.timedOut) parsed = { ok: false, error: `${agent} timed out after ${Math.round(call.timeoutMs / 1000)}s`, raw: result.stdout }
     else if (result.truncated) parsed = { ok: false, error: `${agent} produced more output than the ${run.limits.maxOutputBytes} byte limit`, raw: '' }
     else {
       const lastMsg = inv.outFile && fs.existsSync(inv.outFile) ? fs.readFileSync(inv.outFile, 'utf8') : null
-      parsed = agent === 'codex' ? parseCodexOutput(result.stdout, lastMsg) : parseClaudeOutput(result.stdout)
+      parsed =
+        agent === 'codex'
+          ? parseCodexOutput(result.stdout, lastMsg)
+          : agent === 'antigravity'
+            ? parseAgyOutput(result.stdout)
+            : parseClaudeOutput(result.stdout)
       if (!parsed.ok && result.code !== 0 && result.stderr.trim()) {
         parsed = { ...parsed, error: `${parsed.error} (exit ${result.code}: ${result.stderr.trim().slice(-400)})` }
       }
@@ -598,7 +613,7 @@ export class CoworkService {
       run.budget.costUsd += parsed.usage.costUsd || 0
       run.budget.tokens += (parsed.usage.inputTokens || 0) + (parsed.usage.outputTokens || 0)
     }
-    this.saveRaw(meetingDir, callId, { agent, step, repair, prompt, stdout: result.stdout, stderr: result.stderr, parsed })
+    this.saveRaw(meetingDir, callId, { agent, step, repair, prompt: sent, stdout: result.stdout, stderr: result.stderr, parsed })
 
     // 每次呼叫後都核對快照：任何變動都代表 CLI 沒守住唯讀，這次規劃作廢並保留 diff
     let changes: string[] = []

@@ -33,7 +33,7 @@ export interface CoworkLimits {
 
 export const DEFAULT_COWORK_LIMITS: CoworkLimits = {
   maxPlanningCalls: 6,
-  maxPlanningMinutes: 10,
+  maxPlanningMinutes: 20,
   maxExecutionMinutes: 60,
   callTimeoutSec: 180,
   maxOutputBytes: 1024 * 1024,
@@ -241,7 +241,7 @@ export interface CoworkCapability {
   enabled: boolean
   path: string | null
   planning: boolean
-  reason?: 'not-installed' | 'cli-too-old' | 'codex-no-windows-sandbox' | 'antigravity-unsupported'
+  reason?: 'not-installed' | 'cli-too-old' | 'codex-no-windows-sandbox'
 }
 
 export type CoworkBaselineInfo =
@@ -827,6 +827,68 @@ export interface PlannerInvocation {
   /** codex 需要把 schema 寫成檔案、最後一則訊息寫到 -o 檔 */
   schemaFile?: string
   outFile?: string
+  /** prompt 送進 stdin 前的包裝（agy 要 NDJSON）；沒有就原樣送 */
+  stdin?: (prompt: string) => string
+  /** stdout 每一行的即時檢查；回傳理由就立刻終止行程 */
+  guard?: (line: string) => string | null
+  /** 這家 CLI 單次呼叫至少要給多少秒（agy 實測一次覆核 7 分多鐘） */
+  minTimeoutSec?: number
+}
+
+/**
+ * Antigravity 規劃時允許的工具。實測（2026-10-08）：權限規則能拒絕 command／write_file／mcp／url，
+ * 被拒時模型收到錯誤會繼續；但 agy 還有 schedule、send_message、browser_*、invoke_subagent…
+ * 這類不一定受權限規則管的工具，所以另外即時盯 stream：出現白名單以外的工具就終止。
+ */
+export const AGY_READ_TOOLS = ['view_file', 'list_dir', 'grep_search', 'find_by_name', 'finish']
+/** 已實測會被 deny 規則溫和拒絕的工具：模型會收到錯誤並改用別的工具，不必終止 */
+export const AGY_RULE_DENIED_TOOLS = ['run_command']
+
+export function agyToolGuard(line: string): string | null {
+  if (!line.includes('"tool_name"')) return null
+  let e: Record<string, any>
+  try {
+    e = JSON.parse(line)
+  } catch {
+    return null
+  }
+  const u = e.event === 'step_update' ? e.step_update : null
+  const tool = u?.tool_name
+  if (!tool || u.state !== 'ACTIVE') return null
+  if (AGY_READ_TOOLS.includes(tool) || AGY_RULE_DENIED_TOOLS.includes(tool)) return null
+  return `Antigravity tried to use "${tool}", which is not allowed while planning read-only`
+}
+
+/**
+ * agy 隔離家目錄的 settings.json。家目錄換掉後它讀不到使用者的 MCP、外掛與 hooks
+ * （登入憑證在 OS 認證管理員，不受影響）；這裡再用權限規則拒絕有副作用的動作。
+ * 工作目錄（快照）內的讀取 agy 預設就允許；只額外放行它自己內建 skill 檔的讀取。
+ */
+export function agyIsolationSettings(homeDir: string): Record<string, unknown> {
+  const home = homeDir.split('\\').join('/')
+  return {
+    permissions: {
+      allow: [`read_file(${home}/.gemini/antigravity-cli/builtin/**)`],
+      deny: ['command(*)', 'write_file(*)', 'mcp(*)', 'read_url(*)', 'execute_url(*)']
+    }
+  }
+}
+
+/** 依各家實際可用的工具說明，免得模型浪費步數去試被擋的工具 */
+export function toolNote(agent: CoworkAgent): string {
+  if (agent === 'claude') return 'Your tools: Read, Grep and Glob, limited to the current directory.'
+  if (agent === 'codex') return 'Explore with read-only shell commands such as rg, ls, cat and git log; the sandbox blocks writes.'
+  return (
+    'Shell commands, file writes, web access and subagents are disabled for you in this meeting. ' +
+    'Use only list_dir, view_file, grep_search and find_by_name, and only inside the current directory. ' +
+    'Do not create artifacts or files.'
+  )
+}
+
+/** 把工具說明放在「Cowork step:」那行後面（步驟標記維持在第一行） */
+export function withToolNote(prompt: string, agent: CoworkAgent): string {
+  const i = prompt.indexOf('\n')
+  return i < 0 ? `${prompt}\n\n${toolNote(agent)}` : `${prompt.slice(0, i)}\n\n${toolNote(agent)}${prompt.slice(i)}`
 }
 
 /**
@@ -874,7 +936,22 @@ export function plannerInvocation(
     args.push('-')
     return { args, schemaFile: o.schemaFile, outFile: o.outFile }
   }
-  throw new Error(`${agent} is not supported for Cowork planning`)
+  // antigravity：-p 一定要接值，prompt 改走 stream-json 的 stdin（命令列放不下長 prompt）。
+  // 唯讀靠隔離家目錄 + 權限規則（agyIsolationSettings）+ 即時工具白名單（agyToolGuard）。
+  return {
+    args: [
+      '--input-format', 'stream-json',
+      '--output-format', 'stream-json',
+      '--json-schema', o.schemaFile,
+      '--effort', 'medium',
+      '--sandbox',
+      '-p='
+    ],
+    schemaFile: o.schemaFile,
+    stdin: (prompt) => JSON.stringify({ event: 'user', message: { role: 'user', content: prompt } }) + '\n',
+    guard: agyToolGuard,
+    minTimeoutSec: 600
+  }
 }
 
 export type ParsedOutput = { ok: true; value: unknown; raw: string; usage?: CallUsage } | { ok: false; error: string; raw: string; usage?: CallUsage }
@@ -910,6 +987,45 @@ const DENIED = /access to the path .* is denied|unauthorizedaccessexception|bloc
  * codex exec --json：stdout 是事件 JSONL，最終訊息另寫在 -o 檔。
  * 不從 stdout 抓「第一個合法 JSON」：那可能是工具參數或中途輸出。
  */
+/**
+ * agy --output-format stream-json：逐行事件，最後一行是 {"event":"result","result":{...}}，
+ * 依 schema 驗證過的結果在 result.structured_output。
+ */
+export function parseAgyOutput(stdout: string): ParsedOutput {
+  let result: Record<string, any> | null = null
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes('"result"')) continue
+    try {
+      const e = JSON.parse(line)
+      if (e.event === 'result' && e.result) result = e.result
+    } catch {
+      /* 不是完整的一行 */
+    }
+  }
+  if (!result) return { ok: false, error: 'Antigravity produced no result event', raw: stdout }
+  const u = result.usage || {}
+  const usage: CallUsage = {
+    inputTokens: num(u.input_tokens),
+    cachedInputTokens: num(u.cache_read_tokens),
+    outputTokens: num(u.output_tokens)
+  }
+  if (result.status !== 'SUCCESS') {
+    return { ok: false, error: `Antigravity reported an error: ${String(result.error || result.status).slice(0, 500)}`, raw: stdout, usage }
+  }
+  if (result.structured_output === undefined || result.structured_output === null) {
+    const denied = Array.isArray(result.denied_actions) ? result.denied_actions.map((d: any) => d?.action).filter(Boolean) : []
+    return {
+      ok: false,
+      error: denied.length
+        ? `Antigravity stopped: it needed a permission that read-only planning does not grant (${denied.join(', ')}), e.g. reading outside the snapshot`
+        : 'Antigravity returned no structured output',
+      raw: stdout,
+      usage
+    }
+  }
+  return { ok: true, value: result.structured_output, raw: JSON.stringify(result.structured_output), usage }
+}
+
 export function parseCodexOutput(stdout: string, lastMessage: string | null): ParsedOutput {
   let usage: CallUsage | undefined
   let failure: string | null = null

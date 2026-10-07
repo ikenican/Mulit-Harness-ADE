@@ -110,7 +110,7 @@ worktree 隔開的是檔案與 index；git refs 仍然共用，全域設定、�
 | CLI | 確認來源 | 非互動／輸出 | Schema | 權限候選與限制 |
 |---|---|---|---|---|
 | Codex | ✅ 本機 `codex exec --help` | `codex exec`；`--json` 輸出事件 JSONL；`-o` 保存最後一則訊息 | `--output-schema <FILE>` | `--sandbox read-only`；外部 MCP/hooks 仍須另外排除，不能只靠這個 flag |
-| Antigravity | ✅ 本機 `agy --help` | `agy -p`；`--output-format json`／`stream-json` | `--json-schema`，可給字串或檔案 | 有 `--mode plan`、`--sandbox`；唯讀與 MCP/hooks 的實際行為 ⚠️ 待實測 |
+| Antigravity | ✅ 本機 `agy --help`；✅ 唯讀方案實測（§12.1） | `--input-format stream-json --output-format stream-json -p=`，prompt 走 stdin | `--json-schema`，可給字串或檔案；結果在 `structured_output` | 隔離家目錄 + 權限規則 + 即時工具白名單，見 §12.1 |
 | Claude Code | 📖 [CLI reference](https://code.claude.com/docs/en/cli-reference)、[programmatic usage](https://code.claude.com/docs/en/headless)；本機 PATH 上找不到 | `claude -p --output-format json`，附 metadata | `--json-schema`，結果在 `structured_output` | 可設定工具與 MCP 限制；`plan` 模式不是 OS sandbox，⚠️ 本機待實測 |
 
 **原稿的錯誤已修正**：原稿說只有 agy 有 schema，Codex 用 `--output-format`，兩者都錯。三家的外層格式（envelope）與最終結果要分開處理。help 或文件裡有，不等於登入、schema、唯讀與 Windows 啟動都已驗收。
@@ -392,7 +392,7 @@ type CoworkSettings = {
   chairExecutes: boolean,           // 預設 true；規劃與執行的 context 分開
   limits: {
     maxPlanningCalls: number,       // 預設 6，規劃、修正、改板、復會合計
-    maxPlanningMinutes: number,     // 預設 10
+    maxPlanningMinutes: number,     // 預設 20（agy 一次覆核實測 7 分多鐘）
     maxExecutionMinutes: number     // 預設 60
   }
 }
@@ -468,7 +468,16 @@ type CoworkSettings = {
 |---|---|---|---|
 | Claude Code 2.1.292 | ✅ | `-p --output-format json --json-schema <inline> --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --restricted --strict-mcp-config --safe-mode --permission-prompts none --no-session-persistence --disable-slash-commands` | 只給 `--tools` 不夠：搭配 `--permission-prompts none` 時連 `Glob` 都會被拒，必須再用 `--allowedTools` 預先放行。`--restricted` 會擋下工作目錄外的讀取。沒有寫入工具，寫檔要求無效 |
 | Codex 0.160.1 | ✅ | `exec --sandbox read-only --ignore-user-config --ignore-rules --ephemeral --json --output-schema <file> -o <file> -C <snapshot> -c windows.sandbox="<使用者設定值>" -` | `--ignore-user-config` 用來排除使用者的 MCP 與外掛（本機有 `agent-hub`），但 Windows sandbox 設定也一起丟了，結果**連讀檔都被擋**，所以要從 `~/.codex/config.toml` 讀回 `[windows] sandbox` 再用 `-c` 補上。**elevated sandbox 讀不到使用者目錄（AppData、Temp）**，D 槽上的 repo 可以 |
-| Antigravity 1.2.14 | ❌ | — | 沒有 flag 能在單次執行時停用全域 MCP；本機 `mcp_config.json` 啟用了 `agent-hub`（可以派工、做 git 操作）。依 ADR-03 不參與自動規劃，UI 會顯示原因 |
+| Antigravity 1.2.14 | ✅（2026-10-08 補上） | `--input-format stream-json --output-format stream-json --json-schema <file> --effort medium --sandbox -p=`，stdin 送 `{"event":"user","message":{"role":"user","content":…}}`；環境變數 `USERPROFILE`／`HOME` 指向隔離家目錄 | 見下方「Antigravity 的唯讀方案」 |
+
+**Antigravity 的唯讀方案**（agy 沒有任何 flag 能在單次執行時停用全域 MCP、外掛與 hooks，所以分四層）：
+
+1. **隔離家目錄**：Go 在 Windows 以 `USERPROFILE` 找家目錄。指到 `userData/cowork/agy-home` 後，`agy mcp list` 回報「No MCP servers configured」，log 也顯示 `mcp_servers`、`command_assessor` hook 皆為空。**登入不受影響**：憑證在 Windows 認證管理員（`gemini:antigravity`），不在家目錄。
+2. **權限規則**（隔離家目錄的 `.gemini/antigravity-cli/settings.json`）：deny `command(*)`、`write_file(*)`、`mcp(*)`、`read_url(*)`、`execute_url(*)`。實測被 deny 規則拒絕時，模型收到「Matches user-configured deny rule」的錯誤會改用別的工具，**不會中止**；沒有規則、需要確認的動作則在 headless 模式被直接拒絕並**中止整次執行**。工作目錄（快照）內的 `view_file` 預設允許；快照外的讀取（實測它曾試圖讀真正 repo 的 `.git/config`）會被擋。另外放行 agy 自己內建 skill 檔的讀取，否則它查自己的說明文件時會中止。
+3. **即時工具白名單**：stream 的 `step_update` 在工具開始時就帶 `tool_name`。agy 還有 `schedule`、`send_message`、`browser_*`、`invoke_subagent`、`search_web` 等不一定受權限規則管的工具，所以只允許 `view_file`、`list_dir`、`grep_search`、`find_by_name`、`finish`（加上已實測會被規則溫和拒絕的 `run_command`），其他一出現就立刻終止行程，那次呼叫算失敗。
+4. **快照核對**：與另外兩家相同。
+
+實測：讓 agy 覆核真實會議裡 Claude 的計畫，它只用了 `view_file`（40 次），輸出通過 schema 與 `checkR2` 驗證，快照乾淨；它獨立找到了 Codex 當時找到的同一個漏洞，還多抓到一個正規式邊界問題。**代價**：那次 441 秒、約 24.6 萬 token（另有 194 萬快取讀取），所以 agy 的單次逾時下限是 600 秒、加上 `--effort medium`，預設規劃時間也從 10 分鐘調成 20 分鐘。不加 `--mode plan`：它會讓模型想把計畫寫成檔案。
 
 ### 12.2 與設計文件的偏離
 
@@ -507,4 +516,5 @@ type CoworkSettings = {
 | 覆核修訂（Codex） | `c169608` | 強制 worktree、R3/R4 合併並修正兩人時的仲裁漏洞、規劃唯讀、userData 儲存、attempt/ACK/恢復機制；修正三項事實錯誤（codex 的 schema flag、adapters.ts 缺少 Codex MCP 輸出） |
 | 合併定稿（Claude Opus 5.5） | `171b056` | 新增「設計主軸」；補回自由討論的反對理由（§4.1）與協議標記（§6.2）；把 worktree 的使用者可見後果列為 P2 必做（§2.4，含 `preparing` 階段與 diff 檢視）；回報介面改為只帶 attemptId（由 attempt 綁定 revision）；崩潰恢復的候選 commit 改為一律交人確認；恢復 herdr 授權的已驗證事實；明示 P2 是輪流執行 |
 | 會議室呈現層（Claude Opus 5.5） | `bf14bb8` | 新增 §6.3：與會者列、進行中指示、「輪到你」卡片、R2 並排、訊息與任務板連動；列出不做的擬真元素與理由 |
-| P1 實作紀錄（Claude Opus 5.5） | 本版 | 新增 §12：P0 探測結果、與設計的偏離（快照位置、`approved` 階段、新終端派送要等就緒）、驗證與已知限制 |
+| P1 實作紀錄（Claude Opus 5.5） | `a77eef1` | 新增 §12：P0 探測結果、與設計的偏離（快照位置、`approved` 階段、新終端派送要等就緒）、驗證與已知限制 |
+| Antigravity 參與規劃（Claude Opus 5.5） | 本版 | §12.1 補上 Antigravity 的四層唯讀方案與實測；§3.1 能力表更新；預設規劃時間改為 20 分鐘 |

@@ -6,12 +6,27 @@ import { join } from 'node:path'
 
 const argv = process.argv.slice(2)
 const isCodex = argv.includes('exec')
-const me = isCodex ? 'codex' : 'claude'
+// agy：stream-json 輸入輸出（2026-10-08 實測格式）
+const isAgy = argv.includes('--input-format')
+const me = isCodex ? 'codex' : isAgy ? 'antigravity' : 'claude'
 const cfg = JSON.parse(process.env.FAKE_COWORK || '{}')
 
 const chunks = []
 for await (const c of process.stdin) chunks.push(c)
-const prompt = Buffer.concat(chunks).toString('utf8')
+let prompt = Buffer.concat(chunks).toString('utf8')
+if (isAgy) {
+  // 第一行是 {"event":"user","message":{"role":"user","content":"..."}}
+  const msg = JSON.parse(prompt.split('\n')[0])
+  if (msg.event !== 'user' || typeof msg.message?.content !== 'string') {
+    process.stderr.write('bad stream input\n')
+    process.exit(4)
+  }
+  prompt = msg.message.content
+  if (cfg.expectHome && process.env.USERPROFILE !== cfg.expectHome) {
+    process.stderr.write(`USERPROFILE not isolated: ${process.env.USERPROFILE}\n`)
+    process.exit(3)
+  }
+}
 if (cfg.logFile) appendFileSync(cfg.logFile, `${me}\t${(prompt.match(/^Cowork step: (.+)$/m) || [])[1]}\n`)
 
 const step = (prompt.match(/^Cowork step: (\S+)/m) || [])[1]
@@ -83,7 +98,24 @@ if (step === 'R1') {
   process.exit(2)
 }
 
-if (isCodex) {
+if (isAgy) {
+  const ev = (e) => process.stdout.write(JSON.stringify(e) + '\n')
+  ev({ event: 'init', conversation_id: 'fake', init: { cwd: process.cwd(), tools: ['view_file', 'run_command', 'schedule'] } })
+  const tool = cfg.agyBadTool || 'view_file'
+  ev({ event: 'step_update', step_update: { step_index: 1, state: 'ACTIVE', step_type: 'tool', tool_name: tool, tool_info: { name: tool, parameters: {} } } })
+  if (cfg.agyBadTool) {
+    // 違規工具：照理會被 orchestrator 立刻終止；等著，證明是被殺掉而不是自己結束
+    await new Promise((r) => setTimeout(r, 30000))
+  }
+  ev({ event: 'step_update', step_update: { step_index: 1, state: 'DONE', step_type: 'tool', tool_name: tool } })
+  const usage = { input_tokens: 900, output_tokens: 40, thinking_tokens: 30, cache_read_tokens: 300, total_tokens: 940 }
+  ev({
+    event: 'result',
+    result: cfg.agyNoOutput
+      ? { status: 'SUCCESS', response: '', usage, denied_actions: [{ action: 'read_file', display_name: 'ViewFile' }] }
+      : { status: 'SUCCESS', response: JSON.stringify(out), structured_output: out, usage }
+  })
+} else if (isCodex) {
   const o = argv[argv.indexOf('-o') + 1]
   writeFileSync(o, JSON.stringify(out))
   const ev = (e) => process.stdout.write(JSON.stringify(e) + '\n')

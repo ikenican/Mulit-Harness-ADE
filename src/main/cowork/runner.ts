@@ -13,6 +13,8 @@ export interface RunSpec {
   env?: NodeJS.ProcessEnv
   /** 收到輸出時通知（給 UI 顯示「還活著」） */
   onActivity?: (totalBytes: number) => void
+  /** stdout 每一完整行的即時檢查；回傳理由就立刻終止（agy 的工具白名單） */
+  onStdoutLine?: (line: string) => string | null
 }
 
 export interface RunResult {
@@ -25,6 +27,8 @@ export interface RunResult {
   ms: number
   /** 根本沒跑起來（找不到執行檔、參數不安全…） */
   spawnError?: string
+  /** onStdoutLine 判定違規而終止的理由 */
+  guardReason?: string
 }
 
 // cmd.exe 在引號內仍會展開 %VAR%，引號本身也拆不乾淨；含這些字元的參數不交給 cmd
@@ -83,6 +87,8 @@ export function runProcess(spec: RunSpec, signal?: AbortSignal): Promise<RunResu
     let cancelled = false
     let truncated = false
     let settled = false
+    let guardReason: string | undefined
+    let lineBuf = ''
 
     let child: ReturnType<typeof spawn>
     try {
@@ -127,6 +133,20 @@ export function runProcess(spec: RunSpec, signal?: AbortSignal): Promise<RunResu
       }
       stdout += d
       spec.onActivity?.(outBytes + errBytes)
+      if (spec.onStdoutLine && !guardReason) {
+        lineBuf += d
+        let i: number
+        while ((i = lineBuf.indexOf('\n')) >= 0) {
+          const line = lineBuf.slice(0, i)
+          lineBuf = lineBuf.slice(i + 1)
+          const why = spec.onStdoutLine(line)
+          if (why) {
+            guardReason = why
+            stop()
+            break
+          }
+        }
+      }
     })
     child.stderr!.on('data', (d: string) => {
       errBytes += Buffer.byteLength(d)
@@ -146,7 +166,7 @@ export function runProcess(spec: RunSpec, signal?: AbortSignal): Promise<RunResu
       settled = true
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
-      resolve({ code, stdout, stderr, timedOut, cancelled, truncated, ms: Date.now() - t0, spawnError })
+      resolve({ code, stdout, stderr, timedOut, cancelled, truncated, ms: Date.now() - t0, spawnError, guardReason })
     }
     child.on('error', (e) => finish(null, e.message))
     child.on('close', (code) => finish(code))

@@ -309,7 +309,7 @@ function StartForm({
                   <AgentMark agent={a} size={16} />
                   <span className="cw-agent-card-text">
                     <span className="cw-agent-card-name">{agentLabel(a)}</span>
-                    <span className="cw-agent-card-sub">{ok ? t('cowork.eligible') : reason}</span>
+                    <span className="cw-agent-card-sub">{ok ? (a === 'antigravity' ? t('cowork.eligibleSlow') : t('cowork.eligible')) : reason}</span>
                   </span>
                 </button>
                 {on && (

@@ -13,6 +13,7 @@ import { loadSettings, saveSettings } from './settings'
 import { getWorkspaceForEvent } from '../index'
 import {
   COWORK_AGENTS,
+  agyIsolationSettings,
   sanitizeCoworkSettings,
   type CoworkAgent,
   type CoworkCapability,
@@ -24,7 +25,8 @@ import {
 /** 每家 CLI 規劃時必須支援的 flag；舊版沒有就不能保證唯讀（cowork.md §3） */
 const REQUIRED_FLAGS: Partial<Record<CoworkAgent, { args: string[]; flags: string[] }>> = {
   claude: { args: ['--help'], flags: ['--json-schema', '--restricted', '--safe-mode', '--strict-mcp-config', '--permission-prompts', '--no-session-persistence'] },
-  codex: { args: ['exec', '--help'], flags: ['--output-schema', '--ignore-user-config', '--ephemeral', '--sandbox'] }
+  codex: { args: ['exec', '--help'], flags: ['--output-schema', '--ignore-user-config', '--ephemeral', '--sandbox'] },
+  antigravity: { args: ['--help'], flags: ['--input-format', '--json-schema', '--sandbox', '--effort'] }
 }
 
 const helpCache = new Map<string, boolean>()
@@ -95,10 +97,6 @@ function capabilities(force = false): CoworkCapability[] {
   const settings = loadSettings()
   const caps = COWORK_AGENTS.map((agent): CoworkCapability => {
     const enabled = settings.cliEnabled?.[agent] !== false
-    if (agent === 'antigravity') {
-      // agy 沒有 flag 能在單次執行停用全域 MCP，唯讀規劃無法保證（cowork.md §3.1）
-      return { agent, enabled, path: findAgentCli(agent), planning: false, reason: 'antigravity-unsupported' }
-    }
     const cliPath = findAgentCli(agent)
     if (!cliPath) return { agent, enabled, path: null, planning: false, reason: 'not-installed' }
     if (!supportsFlags(cliPath, agent)) return { agent, enabled, path: cliPath, planning: false, reason: 'cli-too-old' }
@@ -116,7 +114,31 @@ function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
   if (!cap) return { error: 'unknown agent' }
   if (!cap.enabled) return { error: 'disabled in Settings' }
   if (!cap.planning || !cap.path) return { error: cap.reason || 'not available' }
+  if (agent === 'antigravity') {
+    try {
+      return { command: cap.path, env: prepareAgyHome() }
+    } catch (e) {
+      return { error: `could not prepare the isolated Antigravity home: ${(e as Error).message}` }
+    }
+  }
   return { command: cap.path, windowsSandbox: agent === 'codex' && process.platform === 'win32' ? readCodexWindowsSandbox() : null }
+}
+
+/**
+ * agy 沒有 flag 能在單次執行停用使用者的全域 MCP／外掛／hooks，所以規劃時給它一個隔離的家目錄
+ * （Go 在 Windows 以 USERPROFILE 找家目錄）。登入憑證在 OS 認證管理員，不受影響（2026-10-08 實測）。
+ * 所有會議共用這一份；權限規則每次都重寫，確保沒被改過。
+ */
+function prepareAgyHome(): Record<string, string> {
+  const home = path.join(app.getPath('userData'), 'cowork', 'agy-home')
+  const settingsFile = path.join(home, '.gemini', 'antigravity-cli', 'settings.json')
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true })
+  // 外掛、MCP 設定與 hooks 都不該出現在這裡；有就清掉
+  for (const stale of [path.join(home, '.gemini', 'config'), path.join(home, '.gemini', 'antigravity-cli', 'mcp')]) {
+    fs.rmSync(stale, { recursive: true, force: true })
+  }
+  fs.writeFileSync(settingsFile, JSON.stringify(agyIsolationSettings(home), null, 2))
+  return { USERPROFILE: home, HOME: home }
 }
 
 /** codex 的 Windows sandbox 讀不到使用者目錄（實測）；repo 在那底下時先提醒，執行時也會偵測 */

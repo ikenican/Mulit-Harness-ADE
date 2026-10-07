@@ -102,7 +102,38 @@ const cleanup: string[] = [tmp]
   const cx = shared.plannerInvocation('codex', { cwd: 'C:/snap', schema: {}, schemaFile: 's.json', outFile: 'o.txt', windowsSandbox: 'elevated' })
   assert.ok(cx.args.includes('read-only') && cx.args.includes('--ignore-user-config') && cx.args.includes('windows.sandbox="elevated"'))
   assert.equal(cx.args[cx.args.length - 1], '-', 'prompt goes through stdin')
-  assert.throws(() => shared.plannerInvocation('antigravity', { cwd: '.', schema: {}, schemaFile: 's', outFile: 'o' }))
+  // antigravity：prompt 走 stream-json stdin（-p 一定要接值，所以是 -p=）、即時工具白名單、較長逾時
+  const ag = shared.plannerInvocation('antigravity', { cwd: '.', schema: {}, schemaFile: 's.json', outFile: 'o' })
+  assert.ok(ag.args.includes('stream-json') && ag.args.includes('--sandbox') && ag.args.includes('s.json'))
+  assert.equal(ag.args[ag.args.length - 1], '-p=')
+  assert.ok(!ag.args.some((a) => /dangerously|skip-permissions/i.test(a)))
+  assert.deepEqual(JSON.parse(ag.stdin!('中文 "q"\nline')), { event: 'user', message: { role: 'user', content: '中文 "q"\nline' } })
+  assert.ok((ag.minTimeoutSec || 0) >= 600)
+  const step = (tool: string, state = 'ACTIVE') => JSON.stringify({ event: 'step_update', step_update: { state, step_type: 'tool', tool_name: tool } })
+  assert.equal(ag.guard!(step('view_file')), null)
+  assert.equal(ag.guard!(step('grep_search')), null)
+  assert.equal(ag.guard!(step('run_command')), null, 'run_command is refused by the deny rule, not killed')
+  for (const bad of ['schedule', 'invoke_subagent', 'open_browser_url', 'write_to_file', 'search_web', 'send_message']) {
+    assert.match(String(ag.guard!(step(bad))), new RegExp(bad), `${bad} must be stopped`)
+  }
+  assert.equal(ag.guard!(step('schedule', 'DONE')), null, 'only the ACTIVE event triggers')
+  assert.equal(ag.guard!('not json "tool_name"'), null)
+  const deny = (shared.agyIsolationSettings('C:\\iso\\home') as any).permissions
+  for (const d of ['command(*)', 'write_file(*)', 'mcp(*)', 'read_url(*)', 'execute_url(*)']) assert.ok(deny.deny.includes(d), d)
+  assert.deepEqual(deny.allow, ['read_file(C:/iso/home/.gemini/antigravity-cli/builtin/**)'])
+  const agEv = (r: Record<string, unknown>) =>
+    [JSON.stringify({ event: 'init' }), JSON.stringify({ event: 'result', result: { status: 'SUCCESS', usage: { input_tokens: 10, output_tokens: 2, cache_read_tokens: 5 }, ...r } })].join('\n')
+  const pa = shared.parseAgyOutput(agEv({ structured_output: { c: 3 } }))
+  assert.ok(pa.ok)
+  if (pa.ok) assert.deepEqual(pa.value, { c: 3 })
+  assert.deepEqual(pa.usage, { inputTokens: 10, cachedInputTokens: 5, outputTokens: 2 })
+  const noOut = shared.parseAgyOutput(agEv({ denied_actions: [{ action: 'read_file' }] }))
+  assert.ok(!noOut.ok && /read_file/.test(noOut.error))
+  assert.equal(shared.parseAgyOutput(agEv({ status: 'ERROR', error: 'boom' })).ok, false)
+  assert.equal(shared.parseAgyOutput('garbage').ok, false)
+  // 工具說明插在步驟標記之後，假 CLI 與真 CLI 都還認得步驟
+  const tn = shared.withToolNote('Cowork step: R1 (chair opening)\nrest', 'antigravity')
+  assert.ok(tn.startsWith('Cowork step: R1') && tn.includes('list_dir') && tn.endsWith('\nrest'))
 
   // schema 相容 codex strict：每個 object 都 additionalProperties:false 且 required 列全
   const walk = (s: any): void => {
@@ -229,10 +260,16 @@ const fake = path.join(here, 'fixtures', 'cowork-fake-cli.mjs')
 const repo = makeRepo('repo-e2e')
 const dataDir = path.join(tmp, 'data')
 const emitted: string[] = []
+const agyHome = path.join(tmp, 'agy-home')
+const ineligible = new Set<string>()
 const deps = {
   dataDir,
   resolveCli: (agent: string) =>
-    agent === 'antigravity' ? { error: 'not supported' } : { command: process.execPath, prefixArgs: [fake] },
+    ineligible.has(agent)
+      ? { error: 'not available' }
+      : agent === 'antigravity'
+        ? { command: process.execPath, prefixArgs: [fake], env: { USERPROFILE: agyHome, HOME: agyHome } }
+        : { command: process.execPath, prefixArgs: [fake] },
   emit: (run: { id: string; phase: string }) => emitted.push(`${run.id}:${run.phase}`)
 }
 const behave = (cfg: Record<string, unknown>): void => {
@@ -505,8 +542,67 @@ const code = async (p: Promise<unknown> | (() => unknown), c: string): Promise<v
   await code(svc.start({ ...base, prompt: '   ' } as any), 'empty-prompt')
   await code(svc.start({ ...base, participants: ['claude'] } as any), 'need-two-participants')
   await code(svc.start({ ...base, chair: 'codex', participants: ['claude', 'antigravity'] } as any), 'chair-not-participant')
-  await code(svc.start({ ...base, participants: ['claude', 'antigravity'] } as any), 'agent-not-eligible')
+  ineligible.add('codex')
+  await code(svc.start(base), 'agent-not-eligible')
+  ineligible.clear()
   await code(svc.start({ ...base, prompt: 'x', workspace: tmp } as any), 'not-a-git-repo')
+}
+
+// 13–15 用新的 service（11 把 svc 關了）
+const svc3 = new CoworkService(deps)
+svc3.init()
+async function settle3(id: string): Promise<any> {
+  const t0 = Date.now()
+  while (svc3.get(id)!.phase === 'meeting' && Date.now() - t0 < 30000) await new Promise((r) => setTimeout(r, 50))
+  return svc3.get(id)!
+}
+const three = { ...base, participants: ['claude', 'codex', 'antigravity'] as any }
+
+// 13. 三位與會者：agy 以隔離家目錄執行、prompt 走 stream-json，反對意見照樣要處置
+{
+  behave({ r2Objection: true, expectHome: agyHome })
+  const run0 = await svc3.start(three)
+  const r = await settle3(run0.id)
+  assert.equal(r.phase, 'awaiting-approval', JSON.stringify(r.block))
+  assert.equal(r.reviewers.antigravity.status, 'ok')
+  const ids = shared.currentBoard(r)!.decisions.map((d: any) => d.issueId)
+  assert.ok(ids.includes('antigravity.o1') && ids.includes('codex.o1') && ids.includes('antigravity.m1'))
+  assert.equal(r.budget.planningCallsUsed, 4, 'N+1 calls for three agents')
+  const agCall = r.calls.find((c: any) => c.agent === 'antigravity')
+  assert.ok(agCall.timeoutMs >= 600_000 && agCall.usage.inputTokens === 900)
+  await svc3.cancel(r.id)
+  console.log('e2e antigravity reviewer ok')
+}
+
+// 14. agy 用了白名單外的工具：立刻終止，不能等它跑完；可以明確選擇不等它
+{
+  behave({ r2Objection: true, agyBadTool: 'schedule' })
+  const run0 = await svc3.start(three)
+  const t0 = Date.now()
+  const r = await settle3(run0.id)
+  assert.ok(Date.now() - t0 < 20000, 'the bad tool is killed, not waited out')
+  assert.equal(r.block.kind, 'reviewers-failed')
+  assert.match(r.reviewers.antigravity.error, /schedule/)
+  assert.equal(r.reviewers.codex.status, 'ok')
+  behave({ r2Objection: true })
+  await svc3.dropFailedReviewers(r.id)
+  const r2 = await settle3(r.id)
+  assert.equal(r2.phase, 'awaiting-approval')
+  assert.equal(r2.planRevision, 2)
+  assert.ok(!shared.currentBoard(r2)!.decisions.some((d: any) => d.issueId.startsWith('antigravity.')))
+  await svc3.cancel(r.id)
+  console.log('e2e antigravity tool guard ok')
+}
+
+// 15. agy 因權限中止而沒有輸出：當成失敗，訊息說明原因
+{
+  behave({ agyNoOutput: true })
+  const run0 = await svc3.start(three)
+  const r = await settle3(run0.id)
+  assert.equal(r.block.kind, 'reviewers-failed')
+  assert.match(r.reviewers.antigravity.error, /permission/)
+  await svc3.cancel(r.id)
+  console.log('e2e antigravity no output ok')
 }
 
 for (const d of cleanup) {
