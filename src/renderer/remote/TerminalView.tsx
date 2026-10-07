@@ -96,70 +96,13 @@ function outputLines(term: Terminal, cursorVisible: boolean): OutputLine[] {
 function screenText(term: Terminal, lines = 24): string {
   const buf = term.buffer.active
   const out: string[] = []
-  for (let y = Math.max(0, buf.baseY + buf.cursorY - lines); y <= buf.baseY + buf.cursorY; y++) {
+  // TUIs can park the cursor above the prompt (e.g. on a spinner); read up to the last drawn row instead.
+  let end = buf.length - 1
+  while (end > 0 && !buf.getLine(end)?.translateToString(true).trim()) end--
+  for (let y = Math.max(0, end - lines); y <= end; y++) {
     out.push(buf.getLine(y)?.translateToString(true) ?? '')
   }
   return out.join('\n')
-}
-
-/**
- * 專為 Claude Code 設計的終端歷史累積串流：
- * 攔截 TUI 回合重繪與清螢幕代碼（\x1b[2J\x1b[H），轉化為換行推進與回合分隔線，
- * 確保過往交談紀錄自然推入 scrollback 緩衝區而非被擦除，使手機端可隨時向上滑動查閱歷史。
- */
-export class ClaudeHistoryStream {
-  private pending = ''
-  private hasContent = false
-
-  constructor(
-    private isClaude: boolean,
-    private cols = 120,
-    private rows = 40
-  ) {}
-
-  reset(): void {
-    this.pending = ''
-    this.hasContent = false
-  }
-
-  updateGeometry(cols: number, rows: number): void {
-    this.cols = cols
-    this.rows = rows
-  }
-
-  transform(chunk: string): string {
-    if (!this.isClaude) return chunk
-    const text = this.pending + chunk
-    this.pending = ''
-
-    const trailingEsc = text.search(/\x1b(?:\[[0-9;?]*)?$/)
-    let processText = text
-    if (trailingEsc !== -1 && text.length - trailingEsc < 24) {
-      this.pending = text.slice(trailingEsc)
-      processText = text.slice(0, trailingEsc)
-    }
-
-    const transformed = processText.replace(
-      /(^|[\s\S])(?:\x1b\[\?25[lh])*\x1b\[2J(?:\x1b\[[0-9;]*m)*(?:\x1b\[H|\x1b\[1;1H)/g,
-      (_match, prev) => {
-        if (prev || this.hasContent) {
-          return (prev || '') + '\r\n' + '─'.repeat(this.cols) + '\r\n' + '\r\n'.repeat(this.rows) + '\x1b[H'
-        }
-        return ''
-      }
-    )
-
-    if (transformed.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').trim()) {
-      this.hasContent = true
-    }
-    return transformed
-  }
-
-  flush(): string {
-    const p = this.pending
-    this.pending = ''
-    return p
-  }
 }
 
 export default function TerminalView({
@@ -236,8 +179,6 @@ export default function TerminalView({
     scrollPosition.current = 0
     setOutput([])
     cursorVisible.current = true
-    const isClaude = session.launcherKey === 'claude' || (session.title || '').toLowerCase().includes('claude')
-    const historyStream = new ClaudeHistoryStream(isClaude, session.cols || 120, session.rows || 40)
     // CLI redraws may erase saved lines. Keep the mobile history available to read.
     const keepHistory = term.parser.registerCsiHandler({ final: 'J' }, params => params[0] === 3)
     const cursorModes = ['h', 'l'].map(final => term.parser.registerCsiHandler({ prefix: '?', final }, params => {
@@ -248,20 +189,13 @@ export default function TerminalView({
     const off = conn.onMessage((m: ServerMessage) => {
       if (m.t === 'snapshot' && m.id === id) {
         term.reset()
-        historyStream.reset()
         cursorVisible.current = true
-        if (m.cols && m.rows) {
-          term.resize(m.cols, m.rows)
-          historyStream.updateGeometry(m.cols, m.rows)
-        }
-        term.write(historyStream.transform(m.data) + historyStream.flush(), refresh)
+        if (m.cols && m.rows) term.resize(m.cols, m.rows)
+        term.write(m.data, refresh)
       } else if (m.t === 'data' && m.id === id) {
-        term.write(historyStream.transform(m.d), refresh)
+        term.write(m.d, refresh)
       } else if (m.t === 'resized' && m.id === id) {
-        if (m.cols && m.rows) {
-          term.resize(m.cols, m.rows)
-          historyStream.updateGeometry(m.cols, m.rows)
-        }
+        if (m.cols && m.rows) term.resize(m.cols, m.rows)
         refresh()
       } else if (m.t === 'preview' && m.id === id) {
         setPreview({ url: m.url, error: m.url ? null : m.error || 'preview unavailable' })
