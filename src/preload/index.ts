@@ -165,7 +165,15 @@ const api = {
       ipcRenderer.send('pty:resize', id, cols, rows),
     kill: (id: string): void => ipcRenderer.send('pty:kill', id),
     // 接上一個已在 main 跑著的 pty（手機遠端開的終端），回傳目前畫面
-    attach: (id: string): Promise<{ snapshot: string } | null> => ipcRenderer.invoke('pty:attach', id),
+    attach: (id: string): Promise<{ snapshot: string; cols: number; rows: number } | null> =>
+      ipcRenderer.invoke('pty:attach', id),
+    // main 依輸出順序套用尺寸後才通知（pty.ts resizePty），renderer 照這個改 xterm 尺寸
+    onResized: (id: string, cb: (cols: number, rows: number) => void): (() => void) => {
+      const ch = `pty:resized:${id}`
+      const listener = (_e: unknown, cols: number, rows: number): void => cb(cols, rows)
+      ipcRenderer.on(ch, listener)
+      return () => ipcRenderer.removeListener(ch, listener)
+    },
     // 手機遠端在這個視窗的工作區開了新終端，renderer 收到後開分頁並 attach
     onRemoteSpawned: (cb: (info: RemoteSpawnedPty) => void): (() => void) => {
       const listener = (_e: unknown, info: RemoteSpawnedPty): void => cb(info)
