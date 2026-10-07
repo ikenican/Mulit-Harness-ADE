@@ -7,6 +7,8 @@ export interface LayoutState {
   termH: number
   dock: Dock
   leftCollapsed?: boolean
+  /** 開發模式：中央（編輯器／Preview）欄是否收起，預設收起，只留側邊欄＋終端 */
+  centerCollapsed?: boolean
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
@@ -14,7 +16,8 @@ export const DEFAULT_LAYOUT: LayoutState = {
   rightW: 460,
   termH: 300,
   dock: 'bottom',
-  leftCollapsed: false
+  leftCollapsed: false,
+  centerCollapsed: true
 }
 
 const KEY = 'wb-layout'
@@ -70,7 +73,8 @@ export function loadLayout(mode: 'developer' | 'vibe' = 'developer'): LayoutStat
       rightW: typeof p.rightW === 'number' ? Math.max(LIMITS.rightMin, p.rightW) : DEFAULT_LAYOUT.rightW,
       termH: typeof p.termH === 'number' ? Math.max(LIMITS.termMin, p.termH) : DEFAULT_LAYOUT.termH,
       dock,
-      leftCollapsed: isCollapsed
+      leftCollapsed: isCollapsed,
+      centerCollapsed: p.centerCollapsed ?? true
     }
   } catch {
     return { ...DEFAULT_LAYOUT }

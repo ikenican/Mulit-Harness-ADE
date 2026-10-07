@@ -20,7 +20,9 @@ import {
   IconSettings,
   IconMaximize,
   IconMinimize,
-  IconClose
+  IconClose,
+  IconSplitSingle,
+  IconSplitVertical
 } from '@/components/Icons'
 import {
   toggleCenterMaximized,
@@ -160,7 +162,9 @@ export default function App(): JSX.Element {
 
   // 有人請求開網址（終端偵測到 dev server / 狀態列）→ 切到 Browser
   useEffect(() => {
-    if (browserRequest) setCenter('browser')
+    if (!browserRequest) return
+    setCenter('browser')
+    setLayout((l) => ({ ...l, centerCollapsed: false }))
   }, [browserRequest?.nonce])
 
   // 監聽跨面板請求開啟/聚焦終端：若指定 ensureRightDock 且目前非右側停靠，自動切換至右側停靠
@@ -191,6 +195,9 @@ export default function App(): JSX.Element {
   const isCenterMaximized = Boolean(centerMaximized)
   // Vibe 模式沒有左欄：Dashboard 的 session 清單改由最左圖示列懸浮開啟
   const isLeftCollapsed = isVibe || isCenterMaximized || Boolean(layout.leftCollapsed || layout.leftW === 0)
+  // 開發模式預設收起中央欄（編輯器／Preview），畫面只剩側邊欄＋終端；聚焦模式下中央欄必定展開
+  const isCenterCollapsed = !isVibe && !isCenterMaximized && Boolean(layout.centerCollapsed)
+  const expandCenter = (): void => setLayout((l) => ({ ...l, centerCollapsed: false }))
 
   // 上限依目前視窗算，避免把中央區擠沒了
   const maxLeft = (): number =>
@@ -242,11 +249,13 @@ export default function App(): JSX.Element {
     : isBottom
     ? {
         gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
-        gridTemplateRows: `1fr 1px ${layout.termH}px`,
+        gridTemplateRows: isCenterCollapsed ? '0px 0px 1fr' : `1fr 1px ${layout.termH}px`,
         gridTemplateAreas: `"left sp1 center" "left sp1 sp2" "left sp1 term"`
       }
     : {
-        gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr 1px ${layout.rightW}px`,
+        gridTemplateColumns: isCenterCollapsed
+          ? `${effectiveLeftW}px ${sp1W} 0px 0px 1fr`
+          : `${effectiveLeftW}px ${sp1W} 1fr 1px ${layout.rightW}px`,
         gridTemplateRows: '1fr',
         gridTemplateAreas: `"left sp1 center sp2 term"`
       }
@@ -288,26 +297,29 @@ export default function App(): JSX.Element {
 
         <div className="app-header-center">
           {!isVibe && (
+          <>
           <div className="segmented">
-            <button className={center === 'editor' ? 'on' : ''} onClick={() => setCenter('editor')}>
-              {t('header.editor')}
-            </button>
-            <button
-              className={center === 'preview' ? 'on' : ''}
-              onClick={() => setCenter('preview')}
-            >
-              {t('header.preview')}
-            </button>
-            <button className={center === 'memory' ? 'on' : ''} onClick={() => setCenter('memory')}>
-              {t('header.memory')}
-            </button>
-            <button
-              className={center === 'browser' ? 'on' : ''}
-              onClick={() => setCenter('browser')}
-            >
-              {t('header.browser')}
-            </button>
+            {(['editor', 'preview', 'memory', 'browser'] as const).map((tab) => (
+              <button
+                key={tab}
+                className={!isCenterCollapsed && center === tab ? 'on' : ''}
+                onClick={() => {
+                  setCenter(tab)
+                  expandCenter()
+                }}
+              >
+                {t(`header.${tab}`)}
+              </button>
+            ))}
           </div>
+          <button
+            className={`btn-icon ${isCenterCollapsed ? '' : 'active'}`}
+            title={isCenterCollapsed ? t('header.showCenter') : t('header.hideCenter')}
+            onClick={() => setLayout((l) => ({ ...l, centerCollapsed: !l.centerCollapsed }))}
+          >
+            {isCenterCollapsed ? <IconSplitVertical size={14} /> : <IconSplitSingle size={14} />}
+          </button>
+          </>
           )}
         </div>
 
@@ -424,7 +436,10 @@ export default function App(): JSX.Element {
           />
         )}
 
-        <main className="col col-center" style={{ gridArea: 'center' }}>
+        <main
+          className="col col-center"
+          style={{ gridArea: 'center', display: isCenterCollapsed ? 'none' : 'flex' }}
+        >
           {/* Vibe：成品／Preview／程式碼分頁放在成果欄自己的頂端（靠左），不佔 header 正中 */}
           {isVibe && (
             <div className="tabbar vibe-center-tabs">
@@ -475,7 +490,7 @@ export default function App(): JSX.Element {
           </div>
         </main>
 
-        {!isCenterMaximized && (
+        {!isCenterMaximized && !isCenterCollapsed && (
           <Splitter
             axis={isBottom ? 'horizontal' : 'vertical'}
             label={isBottom ? 'Terminal height' : 'Terminal width'}
