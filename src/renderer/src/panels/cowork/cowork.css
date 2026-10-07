@@ -1201,3 +1201,46 @@
 .cw-host[hidden] {
   display: none;
 }
+
+/* 模型與推理強度選擇（開會表單、設定頁） */
+.cw-model-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.cw-select {
+  height: 24px;
+  max-width: 220px;
+  min-width: 0;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--bg2);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: var(--text-size-caption);
+  outline: none;
+}
+.cw-select:focus {
+  border-color: var(--accent);
+}
+.cw-model-custom {
+  font-family: var(--mono);
+  width: 160px;
+}
+.cw-model-custom.invalid {
+  border-color: var(--red);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 18%, transparent);
+}
+.cw-agent-card .cw-model-picker .cw-select {
+  flex: 1 1 90px;
+}
+.cw-person-model {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

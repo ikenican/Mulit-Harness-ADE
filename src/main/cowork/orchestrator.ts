@@ -39,6 +39,9 @@ import {
   schemaFor,
   summarizeRun,
   withToolNote,
+  AGY_DEFAULT_EFFORT,
+  sanitizeModelChoices,
+  type AgentModelChoice,
   type CoworkAgent,
   type CoworkBlockKind,
   type CoworkCall,
@@ -61,6 +64,12 @@ export interface ResolvedCli {
   windowsSandbox?: string | null
   /** 額外環境變數（agy 用隔離家目錄：USERPROFILE／HOME） */
   env?: Record<string, string>
+  /**
+   * 使用者沒選模型／強度時的值。codex 規劃時忽略了使用者的 config.toml（為了排除 MCP 與外掛），
+   * 不補回來就會悄悄換成 codex 內建的預設模型，所以由 IPC 從 config.toml 讀出來放這裡。
+   */
+  defaultModel?: string
+  defaultEffort?: string
 }
 
 export interface CoworkDeps {
@@ -79,6 +88,8 @@ export interface StartOptions {
   chairExecutes: boolean
   language: 'en' | 'zh-TW'
   limits: Pick<CoworkLimits, 'maxPlanningCalls' | 'maxPlanningMinutes' | 'maxExecutionMinutes'>
+  /** 各家的模型與強度；空 = 預設 */
+  models?: Partial<Record<CoworkAgent, AgentModelChoice>>
 }
 
 /** 給 IPC 回傳的錯誤：code 讓 renderer 翻譯，message 給 log */
@@ -136,6 +147,8 @@ export class CoworkService {
         const loaded = readJsonWithFallback(path.join(dir, 'run.json'), isRun)
         if (!loaded) continue
         const run = loaded.value
+        // 早期的 run 沒有 models 欄位
+        run.models = run.models || {}
         this.runs.set(run.id, run)
         this.dirs.set(run.id, dir)
         let changed = loaded.fromBackup
@@ -245,6 +258,9 @@ export class CoworkService {
       chair: opts.chair,
       participants,
       chairExecutes: opts.chairExecutes,
+      models: Object.fromEntries(
+        Object.entries(sanitizeModelChoices(opts.models)).filter(([a]) => participants.includes(a as CoworkAgent))
+      ),
       phase: 'meeting',
       block: null,
       pending: null,
@@ -524,6 +540,11 @@ export class CoworkService {
     cli: ResolvedCli
   ): Promise<{ ok: true; value: unknown; raw: string } | Extract<StepResult<never>, { ok: false }>> {
     const callId = `c${run.calls.length + 1}`
+    // 這場會議的選擇 → CLI 的預設（codex 是使用者 config.toml 的值）
+    const choice = run.models?.[agent]
+    const model = choice?.model || cli.defaultModel || ''
+    // agy 指定了模型時強度由模型（ID 尾碼）決定，不另補 medium
+    const effort = choice?.effort || cli.defaultEffort || (agent === 'antigravity' && !model ? AGY_DEFAULT_EFFORT : '')
     const meetingDir = path.join(this.dirOf(run), 'meeting')
     fs.mkdirSync(meetingDir, { recursive: true })
     const schema = schemaFor(step, assignableAgents(run))
@@ -532,7 +553,7 @@ export class CoworkService {
     fs.writeFileSync(schemaFile, JSON.stringify(schema))
     let inv
     try {
-      inv = plannerInvocation(agent, { cwd: run.snapshotDir, schema, schemaFile, outFile, windowsSandbox: cli.windowsSandbox })
+      inv = plannerInvocation(agent, { cwd: run.snapshotDir, schema, schemaFile, outFile, windowsSandbox: cli.windowsSandbox, model, effort })
     } catch (e) {
       return { ok: false, kind: 'failed', error: (e as Error).message }
     }
@@ -549,7 +570,9 @@ export class CoworkService {
       outputBytes: 0,
       // agy 一次覆核實測要 7 分多鐘：各家可以要求更長的下限
       timeoutMs: Math.max(run.limits.callTimeoutSec, inv.minTimeoutSec ?? 0) * 1000,
-      status: 'running'
+      status: 'running',
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {})
     }
     run.calls.push(call)
     run.budget.planningCallsUsed++
@@ -608,6 +631,7 @@ export class CoworkService {
         parsed = { ...parsed, error: `${parsed.error} (exit ${result.code}: ${result.stderr.trim().slice(-400)})` }
       }
     }
+    if (parsed.model) call.model = parsed.model
     if (parsed.usage) {
       call.usage = parsed.usage
       run.budget.costUsd += parsed.usage.costUsd || 0

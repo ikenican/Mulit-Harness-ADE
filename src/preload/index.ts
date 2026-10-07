@@ -1,9 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { RemoteVibeStatus } from '../shared/remoteProtocol'
 import type {
+  AgentModelChoice,
   CoworkAgent,
   CoworkBaselineInfo,
   CoworkCapability,
+  CoworkModelCatalog,
   CoworkResult,
   CoworkRun,
   CoworkRunSummary,
@@ -225,6 +227,8 @@ const api = {
   cowork: {
     capabilities: (force?: boolean): Promise<CoworkResult<{ agents: CoworkCapability[]; baseline: CoworkBaselineInfo }>> =>
       ipcRenderer.invoke('cowork:capabilities', force),
+    // 三家的可選模型（設定頁與開會表單用）；第一次會跑 CLI 讀清單，之後快取
+    models: (force?: boolean): Promise<CoworkResult<CoworkModelCatalog[]>> => ipcRenderer.invoke('cowork:models', force),
     list: (): Promise<CoworkResult<CoworkRunSummary[]>> => ipcRenderer.invoke('cowork:list'),
     get: (runId: string): Promise<CoworkResult<CoworkRun | null>> => ipcRenderer.invoke('cowork:get', runId),
     start: (req: {
@@ -232,6 +236,7 @@ const api = {
       chair: CoworkAgent
       participants: CoworkAgent[]
       language: 'en' | 'zh-TW'
+      models?: Partial<Record<CoworkAgent, AgentModelChoice>>
     }): Promise<CoworkResult<CoworkRun>> => ipcRenderer.invoke('cowork:start', req),
     cancel: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:cancel', runId),
     retry: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:retry', runId),

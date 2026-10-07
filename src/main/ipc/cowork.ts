@@ -4,7 +4,7 @@ import { app, ipcMain, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { spawnSync } from 'child_process'
+import { spawnSync, execFile } from 'child_process'
 import { CoworkService, CoworkError, type ResolvedCli } from '../cowork/orchestrator'
 import { readBaseline } from '../cowork/git'
 import { launchPlan } from '../cowork/runner'
@@ -15,6 +15,12 @@ import {
   COWORK_AGENTS,
   agyIsolationSettings,
   sanitizeCoworkSettings,
+  sanitizeModelChoice,
+  sanitizeModelChoices,
+  AGY_DEFAULT_EFFORT,
+  groupAgyModels,
+  type CoworkModelCatalog,
+  type CoworkModelOption,
   type CoworkAgent,
   type CoworkCapability,
   type CoworkBaselineInfo,
@@ -89,6 +95,129 @@ export function readCodexWindowsSandbox(): string | null {
   return null
 }
 
+/** codex 使用者 config.toml 最上層的 model 與 model_reasoning_effort（規劃時忽略整份設定，所以要自己補回來） */
+export function readCodexUserModel(): { model: string; effort: string } {
+  const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')
+  let text = ''
+  try {
+    text = fs.readFileSync(path.join(home, 'config.toml'), 'utf8')
+  } catch {
+    return { model: '', effort: '' }
+  }
+  let model = ''
+  let effort = ''
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) break // 只看最上層，不看 [profiles.x] 之類的區段
+    const m = line.match(/^\s*(model|model_reasoning_effort)\s*=\s*"([^"]*)"/)
+    if (m && m[1] === 'model') model = m[2]
+    if (m && m[1] === 'model_reasoning_effort') effort = m[2]
+  }
+  return sanitizeModelChoice({ model, effort })
+}
+
+// ── 模型清單：給設定頁與開會表單選 ─────────────────────────────────
+
+const CLAUDE_ALIASES: CoworkModelOption[] = [
+  { id: 'fable', label: 'Fable' },
+  { id: 'opus', label: 'Opus' },
+  { id: 'sonnet', label: 'Sonnet' },
+  { id: 'haiku', label: 'Haiku' }
+]
+
+/** 跑一個列清單的 CLI 子命令；.cmd 一樣經 launchPlan 安全處理 */
+function runList(cmd: string, args: string[], env?: Record<string, string>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const plan = launchPlan(cmd, args)
+    if ('error' in plan) return reject(new Error(plan.error))
+    execFile(
+      plan.file,
+      plan.args,
+      {
+        encoding: 'utf8',
+        timeout: 45000,
+        maxBuffer: 8 * 1024 * 1024,
+        windowsHide: true,
+        windowsVerbatimArguments: plan.verbatim,
+        env: env ? { ...process.env, ...env } : process.env
+      },
+      (err, stdout) => (err ? reject(err) : resolve(stdout))
+    )
+  })
+}
+
+/** ~/.claude/settings.json 的 model（claude 規劃時仍會套用，只是拿來顯示「預設」是什麼） */
+function readClaudeUserModel(): string {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8'))
+    return sanitizeModelChoice({ model: j?.model, effort: '' }).model
+  } catch {
+    return ''
+  }
+}
+
+async function loadCatalog(agent: CoworkAgent): Promise<CoworkModelCatalog> {
+  const cap = capabilities().find((c) => c.agent === agent)
+  if (agent === 'claude') {
+    const user = readClaudeUserModel()
+    return {
+      agent,
+      options: CLAUDE_ALIASES,
+      fallback: { model: user, effort: '', source: user ? 'user-config' : 'cli-default' }
+    }
+  }
+  if (agent === 'codex') {
+    const user = readCodexUserModel()
+    const fallback = { model: user.model, effort: user.effort, source: user.model ? ('user-config' as const) : ('cli-default' as const) }
+    if (!cap?.path) return { agent, options: [], fallback, error: 'not-installed' }
+    try {
+      // codex debug models 輸出模型目錄，含每個模型支援的強度（2026-10-08 實測）
+      const j = JSON.parse(await runList(cap.path, ['debug', 'models']))
+      const models: any[] = Array.isArray(j?.models) ? j.models : []
+      const options = models
+        .filter((m) => m?.visibility === 'list' && typeof m.slug === 'string')
+        .map((m) => ({
+          id: m.slug as string,
+          label: typeof m.display_name === 'string' ? m.display_name : m.slug,
+          efforts: (Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels : [])
+            .map((x: any) => (typeof x === 'string' ? x : x?.effort))
+            .filter((x: unknown): x is string => typeof x === 'string'),
+          defaultEffort: typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : undefined
+        }))
+      return { agent, options, fallback }
+    } catch (e) {
+      return { agent, options: [], fallback, error: (e as Error).message.slice(0, 200) }
+    }
+  }
+  const fallback = { model: '', effort: AGY_DEFAULT_EFFORT, source: 'cli-default' as const }
+  if (!cap?.path) return { agent, options: [], fallback, error: 'not-installed' }
+  try {
+    // agy models：每行「id<TAB>名稱」；用隔離家目錄跑，不碰使用者自己的 agy 狀態
+    const out = await runList(cap.path, ['models'], prepareAgyHome())
+    const list = out
+      .split(/\r?\n/)
+      .map((l) => l.split('\t'))
+      .filter((p) => p.length >= 2 && sanitizeModelChoice({ model: p[0].trim(), effort: '' }).model)
+      .map((p) => ({ id: p[0].trim(), label: p[1].trim() }))
+    // gemini-3.8-flash-high／-medium／-low 合併成一個模型＋三種強度（agy 的 ID 本身就帶強度）
+    return { agent, options: groupAgyModels(list), fallback }
+  } catch (e) {
+    return { agent, options: [], fallback, error: (e as Error).message.slice(0, 200) }
+  }
+}
+
+const catalogCache = new Map<CoworkAgent, { at: number; value: Promise<CoworkModelCatalog> }>()
+const CATALOG_TTL_MS = 10 * 60 * 1000
+
+function modelCatalog(agent: CoworkAgent, force: boolean): Promise<CoworkModelCatalog> {
+  const hit = catalogCache.get(agent)
+  if (!force && hit && Date.now() - hit.at < CATALOG_TTL_MS) return hit.value
+  const value = loadCatalog(agent)
+  catalogCache.set(agent, { at: Date.now(), value })
+  // 失敗的結果不要快取太久
+  value.then((c) => c.error && catalogCache.delete(agent)).catch(() => catalogCache.delete(agent))
+  return value
+}
+
 let capCache: { at: number; caps: CoworkCapability[] } | null = null
 const CAP_TTL_MS = 15000
 
@@ -121,7 +250,17 @@ function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
       return { error: `could not prepare the isolated Antigravity home: ${(e as Error).message}` }
     }
   }
-  return { command: cap.path, windowsSandbox: agent === 'codex' && process.platform === 'win32' ? readCodexWindowsSandbox() : null }
+  if (agent === 'codex') {
+    // 使用者沒選模型時沿用他 config.toml 的值，不讓 --ignore-user-config 悄悄換掉模型
+    const user = readCodexUserModel()
+    return {
+      command: cap.path,
+      windowsSandbox: process.platform === 'win32' ? readCodexWindowsSandbox() : null,
+      defaultModel: user.model,
+      defaultEffort: user.effort
+    }
+  }
+  return { command: cap.path }
 }
 
 /**
@@ -208,11 +347,17 @@ export function registerCoworkHandlers(): void {
   ipcMain.handle('cowork:capabilities', async (event, force?: boolean) =>
     wrap(async () => ({ agents: capabilities(!!force), baseline: await baselineInfo(getWorkspaceForEvent(event)) }))
   )
+  ipcMain.handle('cowork:models', async (_e, force?: boolean) =>
+    wrap(() => Promise.all(COWORK_AGENTS.map((a) => modelCatalog(a, !!force))))
+  )
   ipcMain.handle('cowork:list', async (event) => wrap(() => svc().list(getWorkspaceForEvent(event))))
   ipcMain.handle('cowork:get', async (_e, runId: string) => wrap(() => svc().get(String(runId))))
   ipcMain.handle(
     'cowork:start',
-    async (event, req: { prompt: string; chair: CoworkAgent; participants: CoworkAgent[]; language: 'en' | 'zh-TW' }) =>
+    async (
+      event,
+      req: { prompt: string; chair: CoworkAgent; participants: CoworkAgent[]; language: 'en' | 'zh-TW'; models?: unknown }
+    ) =>
       wrap(async () => {
         const settings = loadSettings()
         const cw = sanitizeCoworkSettings(settings.cowork)
@@ -224,11 +369,22 @@ export function registerCoworkHandlers(): void {
           participants,
           chairExecutes: cw.chairExecutes,
           language: req?.language === 'zh-TW' ? 'zh-TW' : 'en',
-          limits: cw.limits
+          limits: cw.limits,
+          models: sanitizeModelChoices(req?.models)
         })
-        // 主席與與會者第一次明確選擇之後記住（cowork.md §8）
-        if (cw.chair !== run.chair || cw.participants.join() !== run.participants.join()) {
-          saveSettings({ ...loadSettings(), cowork: { ...cw, chair: run.chair, participants: run.participants } })
+        // 主席、與會者與各家模型：開會時的選擇記住，下次預設帶出來（cowork.md §8）
+        // 這場與會者的選擇覆蓋舊值；選回「預設」就把舊值清掉
+        const models = { ...cw.models }
+        for (const a of run.participants) {
+          if (run.models[a]) models[a] = run.models[a]
+          else delete models[a]
+        }
+        if (
+          cw.chair !== run.chair ||
+          cw.participants.join() !== run.participants.join() ||
+          JSON.stringify(cw.models) !== JSON.stringify(models)
+        ) {
+          saveSettings({ ...loadSettings(), cowork: { ...cw, chair: run.chair, participants: run.participants, models } })
         }
         return run
       })

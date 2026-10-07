@@ -27,9 +27,10 @@ if (isAgy) {
     process.exit(3)
   }
 }
-if (cfg.logFile) appendFileSync(cfg.logFile, `${me}\t${(prompt.match(/^Cowork step: (.+)$/m) || [])[1]}\n`)
 
 const step = (prompt.match(/^Cowork step: (\S+)/m) || [])[1]
+// 記下每次呼叫：誰、哪一步、收到的參數（測模型與強度有沒有傳對）
+if (cfg.logFile) appendFileSync(cfg.logFile, JSON.stringify({ me, step, argv }) + '\n')
 const repair = prompt.includes('Your previous reply failed validation')
 const assignable = ((prompt.match(/assignee: one of ([a-z, ]+)\./) || [])[1] || 'claude').split(',').map((s) => s.trim())
 

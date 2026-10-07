@@ -494,7 +494,21 @@ type CoworkSettings = {
 - 實機 UI：亮色、暗色、暗色莫蘭迪截圖檢查，核准與派送到新 Codex 終端實際操作過。
 - 既有檢查：`check-portDetect`、`check-usage`、`check-bgTasks`、`check-hosts`、`check-remote` 通過。`check-remote-files` 失敗是本機 AdGuard 改寫了 CSP 標頭；`check-terminal-ui`（要用 electron 跑）失敗在手機遙控頁分頁標籤的語言斷言。兩者都與 Cowork 無關，改動也沒碰到那些檔案。
 
-### 12.4 已知限制
+### 12.4 模型與推理強度（2026-10-08）
+
+「設定 › Cowork」與開會表單都可以替每一家選模型與推理強度，留空就用預設；開會時的選擇會固定在這場 run 上，之後改設定不影響進行中的會議。會議畫面的與會者列顯示每一家這場用的模型。
+
+| CLI | 怎麼指定 | 可選清單從哪來 | 「預設」代表什麼 | 實測 |
+|---|---|---|---|---|
+| Claude | `--model`、`--effort`（low～max） | 別名 fable／opus／sonnet／haiku，可自訂 | 你 `~/.claude/settings.json` 的模型（`--safe-mode` 不影響模型選擇） | `--model sonnet --effort low` → 回報實際模型 `claude-sonnet-5-5` |
+| Codex | `-m`、`-c model_reasoning_effort="…"` | `codex debug models`：模型目錄，含每個模型支援的強度（例如 gpt-6.1-sol 到 ultra） | **你 `~/.codex/config.toml` 的 `model` 與 `model_reasoning_effort`**。規劃時用 `--ignore-user-config` 排除 MCP 與外掛，會把這兩項一起丟掉，所以 Cowork 讀回來再傳；修正前 Codex 會悄悄改用它內建的預設模型 | `-m gpt-6.1-sol -c model_reasoning_effort="low"` 在 `--ignore-user-config` 下有效 |
+| Antigravity | 見下 | `agy models`（以隔離家目錄執行），把 `-high`／`-medium`／`-low` 變體合併成一個模型 | agy 預設模型 + `--effort medium` | 見下 |
+
+Antigravity 的模型 ID 本身就帶強度：`--model gemini-3.8-flash-medium` 加 `--effort low` 會衝突；不支援強度的模型（`claude-sonnet-4-6`）加 `--effort` 會被拒；基本名稱加強度（`--model gemini-3.8-flash --effort low`）可以。所以選了有變體的模型時一定要選強度（自動選 medium，沒有就選第一個），送出 `--model <基本名稱>-<強度>`，這個 ID 一定在清單裡；沒有變體的模型或自訂的完整 ID，強度選單顯示「由模型決定」。
+
+模型名稱與強度會接進命令列（codex 的強度還會被當成 TOML 值），只接受英數字與 `. _ - : / @`，不合法的自訂名稱會在輸入框標紅，不會被默默換成預設。只有 Claude 會回報實際用的模型；Codex 與 Antigravity 顯示的是指定的值。
+
+### 12.5 已知限制
 
 - 終端停靠在底部（預設 300px 高）時，會議畫面很擠。停靠右側，或搭配 PR #35（預設收起中央欄）就有足夠空間。
 - 遇到未知的 `schemaVersion` 時目前直接略過，不是 §7 說的「只能讀取或匯出」。
@@ -517,4 +531,5 @@ type CoworkSettings = {
 | 合併定稿（Claude Opus 5.5） | `171b056` | 新增「設計主軸」；補回自由討論的反對理由（§4.1）與協議標記（§6.2）；把 worktree 的使用者可見後果列為 P2 必做（§2.4，含 `preparing` 階段與 diff 檢視）；回報介面改為只帶 attemptId（由 attempt 綁定 revision）；崩潰恢復的候選 commit 改為一律交人確認；恢復 herdr 授權的已驗證事實；明示 P2 是輪流執行 |
 | 會議室呈現層（Claude Opus 5.5） | `bf14bb8` | 新增 §6.3：與會者列、進行中指示、「輪到你」卡片、R2 並排、訊息與任務板連動；列出不做的擬真元素與理由 |
 | P1 實作紀錄（Claude Opus 5.5） | `a77eef1` | 新增 §12：P0 探測結果、與設計的偏離（快照位置、`approved` 階段、新終端派送要等就緒）、驗證與已知限制 |
-| Antigravity 參與規劃（Claude Opus 5.5） | 本版 | §12.1 補上 Antigravity 的四層唯讀方案與實測；§3.1 能力表更新；預設規劃時間改為 20 分鐘 |
+| Antigravity 參與規劃（Claude Opus 5.5） | `3ea87de` | §12.1 補上 Antigravity 的四層唯讀方案與實測；§3.1 能力表更新；預設規劃時間改為 20 分鐘 |
+| 模型與推理強度（Claude Opus 5.5） | 本版 | 新增 §12.4：三家可選模型與強度的來源與規則，Codex 預設改為沿用使用者 config.toml，Antigravity 的 ID 與強度對應 |

@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import AgentMark from '@/components/AgentMark'
 import { IconChevronDown, IconClose, IconCowork, IconPlus, IconTrash } from '@/components/Icons'
 import { useWorkbench, openSettings } from '@/store'
+import ModelPicker, { choiceLabel, useModelCatalogs } from './ModelPicker'
 import { useTranslation } from '@/i18n'
 import {
   COWORK_AGENTS,
@@ -18,6 +19,7 @@ import {
   reviewersOf,
   sanitizeCoworkSettings,
   taskDispatchText,
+  type AgentModelChoice,
   type CoworkAgent,
   type CoworkBaselineInfo,
   type CoworkBoard,
@@ -228,6 +230,8 @@ function StartForm({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ text: string; runId?: string } | null>(null)
   const [showDirty, setShowDirty] = useState(false)
+  const [models, setModels] = useState<Partial<Record<CoworkAgent, AgentModelChoice>>>({})
+  const { catalogs } = useModelCatalogs()
 
   useEffect(() => {
     let alive = true
@@ -244,6 +248,7 @@ function StartForm({
       p = p.slice(0, Math.max(2, p.length))
       setPicked(p)
       setChair(cw.chair && p.includes(cw.chair) ? cw.chair : p[0] || null)
+      setModels(cw.models)
     })
     return () => {
       alive = false
@@ -266,7 +271,8 @@ function StartForm({
     if (!canStart || !chair) return
     setBusy(true)
     setError(null)
-    const r = await window.api.cowork.start({ prompt: prompt.trim(), chair, participants: picked, language })
+    const chosen = Object.fromEntries(picked.map((a) => [a, models[a] || { model: '', effort: '' }]))
+    const r = await window.api.cowork.start({ prompt: prompt.trim(), chair, participants: picked, language, models: chosen })
     setBusy(false)
     if (r.ok) onStarted(r.data)
     else {
@@ -321,6 +327,14 @@ function StartForm({
                   >
                     {chair === a ? `★ ${t('cowork.chair')}` : t('cowork.makeChair')}
                   </button>
+                )}
+                {on && (
+                  <ModelPicker
+                    agent={a}
+                    catalog={catalogs?.find((c) => c.agent === a)}
+                    value={models[a] || { model: '', effort: '' }}
+                    onChange={(v) => setModels((prev) => ({ ...prev, [a]: v }))}
+                  />
                 )}
               </div>
             )
@@ -521,6 +535,11 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
   const running = run.calls.filter((c) => c.status === 'running')
   const yourTurn = run.phase === 'awaiting-approval' || run.phase === 'blocked' || run.phase === 'paused'
   const usedMin = Math.floor(planningMsUsed(run, now) / 60000)
+  // 最近一次呼叫實際用的模型（claude 有回報實際值）；還沒呼叫過就顯示這場會議指定的值
+  const modelOf = (a: CoworkAgent): string => {
+    const last = [...run.calls].reverse().find((c) => c.agent === a)
+    return choiceLabel(t, last?.model || run.models?.[a]?.model, last?.effort || run.models?.[a]?.effort)
+  }
 
   const statusOf = (a: CoworkAgent): { text: string; cls: string; call?: (typeof running)[number] } => {
     const call = running.find((c) => c.agent === a)
@@ -548,6 +567,9 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
             <div key={a} data-agent={a} className={`cw-person ${s.cls}`}>
               <AgentMark agent={a} size={14} />
               <span className="cw-person-name">{agentLabel(a)}</span>
+              <span className="cw-person-model" title={t('cowork.modelLabel')}>
+                {modelOf(a)}
+              </span>
               <span className={`cw-role ${a === run.chair ? 'chair' : ''}`}>
                 {a === run.chair ? `★ ${t('cowork.role_chair')}` : t('cowork.role_reviewer')}
               </span>

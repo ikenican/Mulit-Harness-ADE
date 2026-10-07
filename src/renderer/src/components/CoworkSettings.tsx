@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import AgentMark from '@/components/AgentMark'
 import { useTranslation } from '@/i18n'
+import ModelPicker, { useModelCatalogs } from '@panels/cowork/ModelPicker'
 import {
   COWORK_AGENTS,
   agentLabel,
@@ -22,6 +23,7 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
   const { t } = useTranslation()
   const cw = sanitizeCoworkSettings(value)
   const [caps, setCaps] = useState<CoworkCapability[]>([])
+  const { catalogs, refresh } = useModelCatalogs()
 
   useEffect(() => {
     window.api.cowork.capabilities(true).then((r) => {
@@ -120,6 +122,58 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
               <p style={{ margin: 0, color: 'var(--fg-dim)', fontSize: 'var(--text-size-caption)', lineHeight: 1.5 }}>
                 {t('settings.coworkParticipantsSub')}
               </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="macos-section">
+        <span className="macos-section-header">{t('settings.coworkModelsSection')}</span>
+        <div className="macos-inset-group">
+          {COWORK_AGENTS.map((a) => {
+            const cat = catalogs?.find((c) => c.agent === a)
+            const status = !catalogs ? t('cowork.modelLoading') : cat?.error ? t('cowork.modelListError') : ''
+            return (
+              <div key={a} className="macos-row">
+                <div className="macos-row-main">
+                  <div className="macos-row-left">
+                    <AgentMark agent={a} size={18} />
+                    <div className="macos-row-info">
+                      <span className="macos-row-title">{agentLabel(a)}</span>
+                      {status && (
+                        <span className="macos-row-sub" title={cat?.error}>
+                          {status}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="macos-row-right">
+                    <ModelPicker
+                      agent={a}
+                      catalog={cat}
+                      value={cw.models[a] || { model: '', effort: '' }}
+                      onChange={(v) => {
+                        const models = { ...cw.models }
+                        if (v.model || v.effort) models[a] = v
+                        else delete models[a]
+                        onChange({ ...cw, models })
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+          <div className="macos-row">
+            <div className="macos-row-main">
+              <p style={{ margin: 0, color: 'var(--fg-dim)', fontSize: 'var(--text-size-caption)', lineHeight: 1.5 }}>
+                {t('settings.coworkModelsSub')}
+              </p>
+              <div className="macos-row-right">
+                <button type="button" className="macos-btn-secondary macos-btn-sm" onClick={refresh}>
+                  {t('cowork.refreshModels')}
+                </button>
+              </div>
             </div>
           </div>
         </div>

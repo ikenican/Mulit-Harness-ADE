@@ -131,6 +131,38 @@ const cleanup: string[] = [tmp]
   assert.ok(!noOut.ok && /read_file/.test(noOut.error))
   assert.equal(shared.parseAgyOutput(agEv({ status: 'ERROR', error: 'boom' })).ok, false)
   assert.equal(shared.parseAgyOutput('garbage').ok, false)
+  // 模型與強度：各家用自己的參數；不指定就不帶（agy 例外：強度預設 medium）
+  const argsFor = (agent: 'claude' | 'codex' | 'antigravity', model?: string, effort?: string) =>
+    shared.plannerInvocation(agent, { cwd: '.', schema: {}, schemaFile: 's.json', outFile: 'o', model, effort }).args.join(' ')
+  assert.ok(argsFor('claude', 'opus', 'high').includes('--model opus --effort high'))
+  assert.ok(!argsFor('claude').includes('--model') && !argsFor('claude').includes('--effort'))
+  assert.ok(argsFor('codex', 'gpt-6.1-sol', 'xhigh').includes('-m gpt-6.1-sol -c model_reasoning_effort="xhigh"'))
+  assert.ok(!argsFor('codex').includes(' -m ') && !argsFor('codex').includes('model_reasoning_effort'))
+  // agy：ID 本身帶強度。模型＋強度 → 組成完整 ID；只有模型 → 不加 --effort；都沒有 → --effort medium（實測規則）
+  assert.ok(argsFor('antigravity', 'gemini-3.8-flash', 'low').includes('--model gemini-3.8-flash-low') && !argsFor('antigravity', 'gemini-3.8-flash', 'low').includes('--effort'))
+  assert.ok(argsFor('antigravity', 'claude-sonnet-4-6').includes('--model claude-sonnet-4-6') && !argsFor('antigravity', 'claude-sonnet-4-6').includes('--effort'))
+  assert.ok(argsFor('antigravity').includes('--effort medium') && !argsFor('antigravity').includes('--model'))
+  assert.ok(argsFor('antigravity', '', 'high').includes('--effort high'))
+  const grouped = shared.groupAgyModels([
+    { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+    { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Thinking)' },
+    { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' }
+  ])
+  assert.deepEqual(grouped, [
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', efforts: ['high', 'low'] },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Thinking)', efforts: [] },
+    { id: 'gpt-oss-120b', label: 'GPT-OSS 120B', efforts: ['medium'] }
+  ])
+  // 不安全的值一律丟掉（會接進命令列，codex 的強度還會被當成 TOML）
+  assert.ok(!argsFor('codex', 'x" ; rm -rf', 'high"').includes('rm') && !argsFor('codex', 'x', 'hi"gh').includes('hi"gh'))
+  assert.deepEqual(shared.sanitizeModelChoice({ model: ' opus ', effort: 'HIGH' }), { model: 'opus', effort: '' })
+  assert.deepEqual(shared.sanitizeCoworkSettings({ models: { claude: { model: 'opus', effort: 'high' }, codex: { model: '', effort: '' }, bogus: {} } }).models, {
+    claude: { model: 'opus', effort: 'high' }
+  })
+  // claude 回報實際用的模型
+  assert.equal(shared.parseClaudeOutput(env({ modelUsage: { 'claude-opus-5-5': {} } })).model, 'claude-opus-5-5')
+
   // 工具說明插在步驟標記之後，假 CLI 與真 CLI 都還認得步驟
   const tn = shared.withToolNote('Cowork step: R1 (chair opening)\nrest', 'antigravity')
   assert.ok(tn.startsWith('Cowork step: R1') && tn.includes('list_dir') && tn.endsWith('\nrest'))
@@ -269,7 +301,10 @@ const deps = {
       ? { error: 'not available' }
       : agent === 'antigravity'
         ? { command: process.execPath, prefixArgs: [fake], env: { USERPROFILE: agyHome, HOME: agyHome } }
-        : { command: process.execPath, prefixArgs: [fake] },
+        : agent === 'codex'
+          ? // 模擬使用者 config.toml 的 model／model_reasoning_effort
+            { command: process.execPath, prefixArgs: [fake], defaultModel: 'gpt-user', defaultEffort: 'low' }
+          : { command: process.execPath, prefixArgs: [fake] },
   emit: (run: { id: string; phase: string }) => emitted.push(`${run.id}:${run.phase}`)
 }
 const behave = (cfg: Record<string, unknown>): void => {
@@ -592,6 +627,39 @@ const three = { ...base, participants: ['claude', 'codex', 'antigravity'] as any
   assert.ok(!shared.currentBoard(r2)!.decisions.some((d: any) => d.issueId.startsWith('antigravity.')))
   await svc3.cancel(r.id)
   console.log('e2e antigravity tool guard ok')
+}
+
+// 16. 模型與強度：會議指定的值傳到 CLI；codex 沒指定時沿用使用者 config.toml；開會後改設定不影響這場
+{
+  const log = path.join(tmp, 'argv.log')
+  behave({ logFile: log })
+  const models = { claude: { model: 'opus', effort: 'high' }, codex: { model: '', effort: '' }, antigravity: { model: 'gemini-x', effort: '' } }
+  const run0 = await svc3.start({ ...three, models } as any)
+  assert.deepEqual(run0.models, { claude: { model: 'opus', effort: 'high' }, antigravity: { model: 'gemini-x', effort: '' } })
+  const r = await settle3(run0.id)
+  assert.equal(r.phase, 'awaiting-approval', JSON.stringify(r.block))
+  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const argsOf = (me: string) => calls.filter((c) => c.me === me).map((c) => c.argv.join(' '))
+  assert.ok(argsOf('claude').every((a) => a.includes('--model opus --effort high')))
+  assert.ok(argsOf('codex').every((a) => a.includes('-m gpt-user -c model_reasoning_effort="low"')), 'codex falls back to the user config')
+  assert.ok(argsOf('antigravity').every((a) => a.includes('--model gemini-x') && !a.includes('--effort')), 'a chosen agy model carries its own effort')
+  const byAgent = (a: string) => r.calls.find((c: any) => c.agent === a)
+  assert.equal(byAgent('claude').model, 'opus')
+  assert.equal(byAgent('codex').model, 'gpt-user')
+  assert.equal(byAgent('codex').effort, 'low')
+  assert.equal(byAgent('antigravity').model, 'gemini-x')
+  assert.equal(byAgent('antigravity').effort, undefined)
+  // 磁碟上的 run 也記住了這場的選擇；舊 run 沒有 models 欄位也能讀
+  const file = path.join(dataDir, fs.readdirSync(dataDir).find((d) => fs.existsSync(path.join(dataDir, d, r.id)))!, r.id, 'run.json')
+  assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).models, run0.models)
+  await svc3.cancel(r.id)
+  const legacy = JSON.parse(fs.readFileSync(file, 'utf8'))
+  delete legacy.models
+  fs.writeFileSync(file, JSON.stringify(legacy))
+  const svc4 = new CoworkService(deps)
+  svc4.init()
+  assert.deepEqual(svc4.get(r.id)!.models, {})
+  console.log('e2e models ok')
 }
 
 // 15. agy 因權限中止而沒有輸出：當成失敗，訊息說明原因

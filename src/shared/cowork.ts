@@ -40,17 +40,109 @@ export const DEFAULT_COWORK_LIMITS: CoworkLimits = {
   maxTasks: 20
 }
 
+/** 每家規劃時用的模型與推理強度；空字串 = 用預設（codex 的預設是使用者 config.toml 裡的值） */
+export interface AgentModelChoice {
+  model: string
+  effort: string
+}
+
+/** 模型名稱與強度會接進命令列（codex 的強度還會被當成 TOML 值）：只收安全字元 */
+const SAFE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/
+const SAFE_EFFORT = /^[a-z]{2,12}$/
+
+export function sanitizeModelChoice(raw: unknown): AgentModelChoice {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const model = typeof r.model === 'string' ? r.model.trim() : ''
+  const effort = typeof r.effort === 'string' ? r.effort.trim() : ''
+  return { model: SAFE_MODEL.test(model) ? model : '', effort: SAFE_EFFORT.test(effort) ? effort : '' }
+}
+
+export function sanitizeModelChoices(raw: unknown): Partial<Record<CoworkAgent, AgentModelChoice>> {
+  const out: Partial<Record<CoworkAgent, AgentModelChoice>> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const a of COWORK_AGENTS) {
+    const c = sanitizeModelChoice((raw as Record<string, unknown>)[a])
+    if (c.model || c.effort) out[a] = c
+  }
+  return out
+}
+
+/** Claude 與 Antigravity 的 --effort 可選值（2026-10-08 各自 --help）；codex 依模型而定，見模型目錄 */
+export const COWORK_EFFORTS: Record<CoworkAgent, string[]> = {
+  claude: ['low', 'medium', 'high', 'xhigh', 'max'],
+  codex: ['low', 'medium', 'high', 'xhigh', 'max'],
+  antigravity: ['low', 'medium', 'high', 'xhigh', 'max']
+}
+
+/** agy 沒指定強度時用 medium：實測一次覆核在預設強度下要 7 分多鐘 */
+export const AGY_DEFAULT_EFFORT = 'medium'
+
+/**
+ * agy 的模型 ID 本身就帶強度（gemini-3.8-flash-medium），再加 --effort 會衝突；不支援強度的模型
+ * （claude-sonnet-4-6）加 --effort 會被拒（2026-10-08 實測）。所以：
+ * - 模型＋強度 → --model <模型>-<強度>（模型是清單裡合併後的基本名稱，這個 ID 一定存在）
+ * - 只有模型 → --model <模型>（完整 ID）
+ * - 都沒有 → --effort medium（套在 agy 的預設模型上）
+ */
+export function agyModelArgs(m: AgentModelChoice): string[] {
+  if (m.model && m.effort) return ['--model', `${m.model}-${m.effort}`]
+  if (m.model) return ['--model', m.model]
+  return ['--effort', m.effort || AGY_DEFAULT_EFFORT]
+}
+
+const AGY_EFFORT_SUFFIX = /^(.+)-(low|medium|high|xhigh|max)$/
+
+/** 把 agy models 的清單合併成「基本模型＋可選強度」；沒有強度變體的模型 efforts 為空（不支援強度） */
+export function groupAgyModels(list: { id: string; label: string }[]): CoworkModelOption[] {
+  const out: CoworkModelOption[] = []
+  const byBase = new Map<string, CoworkModelOption>()
+  for (const { id, label } of list) {
+    const m = id.match(AGY_EFFORT_SUFFIX)
+    if (!m) {
+      out.push({ id, label, efforts: [] })
+      continue
+    }
+    let opt = byBase.get(m[1])
+    if (!opt) {
+      opt = { id: m[1], label: label.replace(/\s*\([^)]*\)\s*$/, '') || m[1], efforts: [] }
+      byBase.set(m[1], opt)
+      out.push(opt)
+    }
+    if (!opt.efforts!.includes(m[2])) opt.efforts!.push(m[2])
+  }
+  return out
+}
+
+export interface CoworkModelOption {
+  id: string
+  label: string
+  /** 這個模型支援的強度（codex 目錄有）；沒有就用 COWORK_EFFORTS */
+  efforts?: string[]
+  defaultEffort?: string
+}
+
+export interface CoworkModelCatalog {
+  agent: CoworkAgent
+  options: CoworkModelOption[]
+  /** 「預設」實際代表什麼：codex 是使用者 config.toml 的值；其他家是 CLI 自己的預設 */
+  fallback: { model: string; effort: string; source: 'user-config' | 'cli-default' }
+  /** 讀清單失敗時的原因（仍可自訂輸入） */
+  error?: string
+}
+
 export interface CoworkSettings {
   chair: CoworkAgent | null
   participants: CoworkAgent[]
   chairExecutes: boolean
   limits: Pick<CoworkLimits, 'maxPlanningCalls' | 'maxPlanningMinutes' | 'maxExecutionMinutes'>
+  models: Partial<Record<CoworkAgent, AgentModelChoice>>
 }
 
 export const DEFAULT_COWORK_SETTINGS: CoworkSettings = {
   chair: null,
   participants: [],
   chairExecutes: true,
+  models: {},
   limits: {
     maxPlanningCalls: DEFAULT_COWORK_LIMITS.maxPlanningCalls,
     maxPlanningMinutes: DEFAULT_COWORK_LIMITS.maxPlanningMinutes,
@@ -77,7 +169,8 @@ export function sanitizeCoworkSettings(raw: unknown): CoworkSettings {
       maxPlanningCalls: clampInt(limits.maxPlanningCalls, 3, 30, DEFAULT_COWORK_LIMITS.maxPlanningCalls),
       maxPlanningMinutes: clampInt(limits.maxPlanningMinutes, 1, 120, DEFAULT_COWORK_LIMITS.maxPlanningMinutes),
       maxExecutionMinutes: clampInt(limits.maxExecutionMinutes, 1, 600, DEFAULT_COWORK_LIMITS.maxExecutionMinutes)
-    }
+    },
+    models: sanitizeModelChoices(r.models)
   }
 }
 
@@ -148,6 +241,9 @@ export interface CoworkCall {
   status: 'running' | 'ok' | 'failed' | 'cancelled' | 'interrupted'
   error?: string
   usage?: CallUsage
+  /** 這次呼叫用的模型：CLI 有回報實際值（claude）就用實際值，否則是指定的值；不知道為 undefined */
+  model?: string
+  effort?: string
 }
 
 export interface CoworkBoard extends Resolution {
@@ -212,6 +308,8 @@ export interface CoworkRun {
   chair: CoworkAgent
   participants: CoworkAgent[]
   chairExecutes: boolean
+  /** 開會時固定下來的模型與強度；之後改設定不影響這場會議 */
+  models: Partial<Record<CoworkAgent, AgentModelChoice>>
   phase: CoworkPhase
   block: { kind: CoworkBlockKind; message: string; at: number; details?: string[] } | null
   /** 卡住或暫停後，「重試」要重跑哪一步 */
@@ -900,8 +998,18 @@ export function withToolNote(prompt: string, agent: CoworkAgent): string {
  */
 export function plannerInvocation(
   agent: CoworkAgent,
-  o: { cwd: string; schema: Record<string, unknown>; schemaFile: string; outFile: string; windowsSandbox?: string | null }
+  o: {
+    cwd: string
+    schema: Record<string, unknown>
+    schemaFile: string
+    outFile: string
+    windowsSandbox?: string | null
+    /** 空字串或 undefined = 不指定，用 CLI 的預設 */
+    model?: string
+    effort?: string
+  }
 ): PlannerInvocation {
+  const m = sanitizeModelChoice({ model: o.model, effort: o.effort })
   if (agent === 'claude') {
     return {
       args: [
@@ -915,7 +1023,9 @@ export function plannerInvocation(
         '--safe-mode',
         '--permission-prompts', 'none',
         '--no-session-persistence',
-        '--disable-slash-commands'
+        '--disable-slash-commands',
+        ...(m.model ? ['--model', m.model] : []),
+        ...(m.effort ? ['--effort', m.effort] : [])
       ]
     }
   }
@@ -933,6 +1043,8 @@ export function plannerInvocation(
       '-C', o.cwd
     ]
     if (o.windowsSandbox) args.push('-c', `windows.sandbox="${o.windowsSandbox}"`)
+    if (m.model) args.push('-m', m.model)
+    if (m.effort) args.push('-c', `model_reasoning_effort="${m.effort}"`)
     args.push('-')
     return { args, schemaFile: o.schemaFile, outFile: o.outFile }
   }
@@ -943,7 +1055,7 @@ export function plannerInvocation(
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--json-schema', o.schemaFile,
-      '--effort', 'medium',
+      ...agyModelArgs(m),
       '--sandbox',
       '-p='
     ],
@@ -954,7 +1066,10 @@ export function plannerInvocation(
   }
 }
 
-export type ParsedOutput = { ok: true; value: unknown; raw: string; usage?: CallUsage } | { ok: false; error: string; raw: string; usage?: CallUsage }
+/** model：CLI 有回報實際用的模型時才有（目前只有 claude 的 modelUsage） */
+export type ParsedOutput =
+  | { ok: true; value: unknown; raw: string; usage?: CallUsage; model?: string }
+  | { ok: false; error: string; raw: string; usage?: CallUsage; model?: string }
 
 /** claude -p --output-format json：單一 result 物件，結構化結果在 structured_output */
 export function parseClaudeOutput(stdout: string): ParsedOutput {
@@ -971,14 +1086,16 @@ export function parseClaudeOutput(stdout: string): ParsedOutput {
     outputTokens: num(u.output_tokens),
     costUsd: typeof env.total_cost_usd === 'number' ? env.total_cost_usd : undefined
   }
+  // modelUsage 的 key 就是實際用的模型（例如 claude-opus-5-5）
+  const model = env.modelUsage && typeof env.modelUsage === 'object' ? Object.keys(env.modelUsage)[0] : undefined
   if (env.type !== 'result' || env.is_error || env.subtype !== 'success') {
     const why = typeof env.result === 'string' && env.result ? env.result : env.subtype || 'unknown error'
-    return { ok: false, error: `Claude reported an error: ${String(why).slice(0, 500)}`, raw: stdout, usage }
+    return { ok: false, error: `Claude reported an error: ${String(why).slice(0, 500)}`, raw: stdout, usage, model }
   }
   if (env.structured_output === undefined || env.structured_output === null) {
-    return { ok: false, error: 'Claude returned no structured_output', raw: stdout, usage }
+    return { ok: false, error: 'Claude returned no structured_output', raw: stdout, usage, model }
   }
-  return { ok: true, value: env.structured_output, raw: JSON.stringify(env.structured_output), usage }
+  return { ok: true, value: env.structured_output, raw: JSON.stringify(env.structured_output), usage, model }
 }
 
 const DENIED = /access to the path .* is denied|unauthorizedaccessexception|blocked by policy/i
