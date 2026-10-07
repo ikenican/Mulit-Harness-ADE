@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.38] - 2026-10-07
 
 ### Fixed / 修復
 - 桌面終端微軟注音重複輸入：組字緩衝區滿了會先送出前段、後段繼續組字，xterm 5.5 以舊位置切 textarea，把還在組字的後段一起送出、之後又送一次。組字事件改由 `imeGuard` 全權處理，只送 `compositionend.data`，組字預覽照常顯示。
