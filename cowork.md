@@ -1,7 +1,7 @@
 # Cowork.md — 多 Agent 協作模式設計計畫
 
 - 日期：2026-10-07（Asia/Taipei）
-- 狀態：**合併定稿，未實作**
+- 狀態：**P1 已實作**（P0 探測結果與實作上的偏離見 §12）；P2 以後未實作
 - 沿革：Claude Opus 5 原稿 → Codex 覆核修訂 → Claude Opus 5.5 合併（各版差異見附錄 B）
 - 原稿基準：`master` @ `b6c7841`（v0.1.38）
 - 驗證範圍：讀過原始碼、CLI help 與官方文件；**未執行模型任務，未實作 Cowork**
@@ -460,6 +460,37 @@ type CoworkSettings = {
 | 長時間呼叫沒有輸出，看起來像當掉 | 與會者列顯示「思考中 經過時間／上限」並可取消（§6.3） |
 | 清理時刪掉成果 | 先停止行程，檢查 dirty、未保存的成果與實際路徑，交由使用者決定 |
 
+## 12. P1 實作紀錄（2026-10-07）
+
+### 12.1 P0 探測結果（本機實測）
+
+| CLI | 規劃可用 | 實際採用的唯讀設定 | 實測發現 |
+|---|---|---|---|
+| Claude Code 2.1.292 | ✅ | `-p --output-format json --json-schema <inline> --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --restricted --strict-mcp-config --safe-mode --permission-prompts none --no-session-persistence --disable-slash-commands` | 只給 `--tools` 不夠：搭配 `--permission-prompts none` 時連 `Glob` 都會被拒，必須再用 `--allowedTools` 預先放行。`--restricted` 會擋下工作目錄外的讀取。沒有寫入工具，寫檔要求無效 |
+| Codex 0.160.1 | ✅ | `exec --sandbox read-only --ignore-user-config --ignore-rules --ephemeral --json --output-schema <file> -o <file> -C <snapshot> -c windows.sandbox="<使用者設定值>" -` | `--ignore-user-config` 用來排除使用者的 MCP 與外掛（本機有 `agent-hub`），但 Windows sandbox 設定也一起丟了，結果**連讀檔都被擋**，所以要從 `~/.codex/config.toml` 讀回 `[windows] sandbox` 再用 `-c` 補上。**elevated sandbox 讀不到使用者目錄（AppData、Temp）**，D 槽上的 repo 可以 |
+| Antigravity 1.2.14 | ❌ | — | 沒有 flag 能在單次執行時停用全域 MCP；本機 `mcp_config.json` 啟用了 `agent-hub`（可以派工、做 git 操作）。依 ADR-03 不參與自動規劃，UI 會顯示原因 |
+
+### 12.2 與設計文件的偏離
+
+1. **規劃快照放在 `<git common dir>/cowork/<runId>/snapshot`，不放 userData**（§2.1.5、§7 寫的是 userData）。原因是 12.1 的 codex sandbox 讀不到使用者目錄。快照用 `git clone --shared` 建立（物件走 alternates，不實際複製），不會在使用者 repo 的 `.git/worktrees` 留紀錄。`.git` 已在檔案監看的忽略清單裡，不會觸發檔案樹重整。代價：開會期間 OneDrive 會同步這份約 2 MB 的快照；會議核准、取消或刪除後就移除。**P2 的執行 worktree 會遇到同一個限制，要沿用這個位置，或另找 codex sandbox 讀得到的地方。** manifest 仍放 userData。
+2. **新增 `approved` 階段**：P1 的終點。核准後在任務板上手動派送；修改計畫會產生新版本並回到 `awaiting-approval`。P2 之後由 `preparing`／`executing` 接手。
+3. **新開終端的派送要等 CLI 啟動完成**：實測直接貼進剛啟動的 Codex，它還沒開啟 bracketed paste，開頭幾行的換行被當成一般按鍵吃掉（這次沒有被當成 Enter 送出，但不能賭）。改成等終端輸出靜止 1.5 秒（上限 20 秒）才貼；改完之後 Codex 正確辨識為一次貼上。已開著的終端照常直接貼。這是 §5.1「接收問題」的 P1 版緩解，P2 仍需要真正的 ACK。
+4. **回到 Cowork 時預設打開的會議**：有進行中的就打開它；沒有的話，最近一場若是 `approved` 也打開（核准後正是要派送的時候）。
+5. **R2 的 objection／missing／問題 id 一律由 App 重新編號**（`codex.o1`、`claude.q1`…），不信任模型自己取的 id，避免重複或撞名讓「每項都要處置」的檢查失準。
+
+### 12.3 驗證
+
+- `node --experimental-strip-types scripts/check-cowork.mts`：純邏輯、runner、原子寫入、git 快照，加上 12 組 orchestrator 端對端情境（假 CLI，輸出格式照實測）。涵蓋單一覆核者的反對不能被繞過、修正呼叫、覆核失敗、副作用作廢與快照重建、預算、取消、改板與版本綁定、待定項目、重啟後暫停。
+- **真實會議一場**（主席 Claude、覆核 Codex，需求：讓 dev 網址偵測支援 https）：3 次呼叫、沒有修正呼叫、127 秒，Claude $0.39、Codex 約 3 萬非快取 token。Codex 在覆核時找到真的漏洞（`TerminalPanel.tsx` 的前置條件只檢查 `http://`），主席據此新增 t3；7 項 issue 全部有處置；真正的 repo 沒有被改動。
+- 實機 UI：亮色、暗色、暗色莫蘭迪截圖檢查，核准與派送到新 Codex 終端實際操作過。
+- 既有檢查：`check-portDetect`、`check-usage`、`check-bgTasks`、`check-hosts`、`check-remote` 通過。`check-remote-files` 失敗是本機 AdGuard 改寫了 CSP 標頭；`check-terminal-ui`（要用 electron 跑）失敗在手機遙控頁分頁標籤的語言斷言。兩者都與 Cowork 無關，改動也沒碰到那些檔案。
+
+### 12.4 已知限制
+
+- 終端停靠在底部（預設 300px 高）時，會議畫面很擠。停靠右側，或搭配 PR #35（預設收起中央欄）就有足夠空間。
+- 遇到未知的 `schemaVersion` 時目前直接略過，不是 §7 說的「只能讀取或匯出」。
+- 規劃預算只能約束呼叫次數與時間；Claude 有實際金額，Codex 只有 token，兩者都不是精確的花費上限（§8）。
+
 ## 附錄 A：外部參考
 
 原稿參考過 [herdr](https://github.com/herdrdev/herdr)（Rust 寫成的 coding agent 終端多工器）的終端狀態判斷與派送設計。授權為 **Apache-2.0**（✅ 2026-10-07 讀過 repo 根目錄的 `LICENSE` 確認）；本專案為 MIT。
@@ -475,4 +506,5 @@ type CoworkSettings = {
 | 原稿（Claude Opus 5） | `98d4e23` | 提出 headless 規劃加互動執行、主席會議協議、三層狀態分離 |
 | 覆核修訂（Codex） | `c169608` | 強制 worktree、R3/R4 合併並修正兩人時的仲裁漏洞、規劃唯讀、userData 儲存、attempt/ACK/恢復機制；修正三項事實錯誤（codex 的 schema flag、adapters.ts 缺少 Codex MCP 輸出） |
 | 合併定稿（Claude Opus 5.5） | `171b056` | 新增「設計主軸」；補回自由討論的反對理由（§4.1）與協議標記（§6.2）；把 worktree 的使用者可見後果列為 P2 必做（§2.4，含 `preparing` 階段與 diff 檢視）；回報介面改為只帶 attemptId（由 attempt 綁定 revision）；崩潰恢復的候選 commit 改為一律交人確認；恢復 herdr 授權的已驗證事實；明示 P2 是輪流執行 |
-| 會議室呈現層（Claude Opus 5.5） | 本版 | 新增 §6.3：與會者列、進行中指示、「輪到你」卡片、R2 並排、訊息與任務板連動；列出不做的擬真元素與理由 |
+| 會議室呈現層（Claude Opus 5.5） | `bf14bb8` | 新增 §6.3：與會者列、進行中指示、「輪到你」卡片、R2 並排、訊息與任務板連動；列出不做的擬真元素與理由 |
+| P1 實作紀錄（Claude Opus 5.5） | 本版 | 新增 §12：P0 探測結果、與設計的偏離（快照位置、`approved` 階段、新終端派送要等就緒）、驗證與已知限制 |
