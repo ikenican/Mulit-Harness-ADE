@@ -289,7 +289,6 @@ export class RemoteBridge {
       ptyEvents.on('changed', this.scheduleState)
       ptyEvents.on('approval', this.onApproval)
       ptyEvents.on('exit', this.onExit)
-      ptyEvents.on('resized', this.onResized)
       ptyEvents.on('activity', this.onActivity)
       audit('bridge.start', { port, addresses: this.addresses })
     } catch (e) {
@@ -306,7 +305,6 @@ export class RemoteBridge {
     ptyEvents.off('changed', this.scheduleState)
     ptyEvents.off('approval', this.onApproval)
     ptyEvents.off('exit', this.onExit)
-    ptyEvents.off('resized', this.onResized)
     ptyEvents.off('activity', this.onActivity)
     for (const c of this.clients) this.dropClient(c, 1001)
     this.clients.clear()
@@ -629,16 +627,16 @@ export class RemoteBridge {
         return
       }
       case 'attach': {
-        const info = getPtySession(msg.id)
-        const snapshot = subscribePty(msg.id, subKey, {
+        const snap = subscribePty(msg.id, subKey, {
           data: (id, d) => this.send(c, { t: 'data', id, d }),
+          resized: (id, cols, rows) => this.send(c, { t: 'resized', id, cols, rows }),
           exit: () => {
             c.attached.delete(msg.id)
           }
         })
-        if (snapshot === null || !info) return this.send(c, { t: 'error', message: 'session not found' })
+        if (!snap) return this.send(c, { t: 'error', message: 'session not found' })
         c.attached.add(msg.id)
-        return this.send(c, { t: 'snapshot', id: msg.id, data: snapshot, cols: info.cols, rows: info.rows })
+        return this.send(c, { t: 'snapshot', id: msg.id, data: snap.data, cols: snap.cols, rows: snap.rows })
       }
       case 'detach':
         unsubscribePty(msg.id, subKey)
@@ -842,10 +840,6 @@ export class RemoteBridge {
   // 執行中／閒置只在翻轉時廣播，不必為了狀態更新整包 state（buildState 會讀設定檔與 agents/*.yaml）
   private onActivity = (id: string, busy: boolean): void => {
     this.broadcast({ t: 'activity', id, busy })
-  }
-
-  private onResized = (id: string, cols: number, rows: number): void => {
-    this.broadcast({ t: 'resized', id, cols, rows }, (c) => c.attached.has(id))
   }
 
   private onApproval = (id: string): void => {

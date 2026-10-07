@@ -102,6 +102,54 @@ app.whenReady().then(async () => {
   await bridge.handleMessage(oldPhone, {t:'input', id:'desktop', data:'hello'})
   assert.deepEqual(remoteInputs, [['desktop', 'hello']], 'mobile input still reaches shared PTY')
   console.log('legacy mobile resize blocked / remote input: passed')
+
+  // 真的 Claude Code 2.1.280 經 ConPTY 的輸出（scripts/fixtures，個人路徑已替換），中間改 4 次尺寸。
+  // main 的 headless 畫面要是唯一真相：中途接上的手機、最後才接上的手機，看到的要一模一樣，對話只有一份。
+  {
+    const { Terminal: Headless } = require('@xterm/headless')
+    const ptyModule = { exports: {} }
+    const ptyCode = await require('esbuild').transform(fs.readFileSync('src/main/ipc/pty.ts', 'utf8'), {loader:'ts', format:'cjs'})
+    let feedPty
+    new Function('require', 'module', 'exports', ptyCode.code)(id => ({
+      electron: { ipcMain: {}, app: { on() {} } },
+      '@lydell/node-pty': { spawn: () => ({ pid: 1, onData: fn => { feedPty = fn }, onExit() {}, resize() {} }) },
+      '../index': {}, './conn': { resolveConnectionEnv: () => ({}) },
+      './settings': { getCustomCliPath: () => null, isCliBypassPermissions: () => false },
+      '../ext/paths': { findAgentCli: () => null },
+      '../../shared/approvalDetect': { looksLikeApprovalPrompt: () => false },
+      '../../shared/portDetect': { detectDevPort: () => null }
+    })[id] || require(id), ptyModule, ptyModule.exports)
+    const { spawnPty, subscribePty, resizePty } = ptyModule.exports
+    const ptyId = spawnPty({ command: 'claude', cols: 120, rows: 30 }, { workspace: '', owner: { id: 1 }, subscribeOwner: false })
+    // 照 remote/TerminalView 的順序處理 snapshot / data / resized
+    const phone = () => {
+      const t = new Headless({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true, windowsPty: { backend: 'conpty' } })
+      const snap = subscribePty(ptyId, `phone${Math.random()}`, {
+        data: (_id, d) => t.write(d),
+        resized: (_id, c, r) => t.write('', () => t.resize(c, r)),
+        exit() {}
+      })
+      t.write('', () => { t.reset(); t.resize(snap.cols, snap.rows) })
+      t.write(snap.data)
+      return t
+    }
+    const settle = t => new Promise(r => t.write('', r))
+    const text = t => { const b = t.buffer.active, out = []; for (let y = 0; y < b.length; y++) out.push(b.getLine(y).translateToString(true)); return out.join('\n').trimEnd() }
+    const events = require('./fixtures/claude-resize-conpty.json')
+    let early
+    for (const [i, e] of events.entries()) {
+      if (e[0] === 'd') feedPty(e[1]); else resizePty(ptyId, e[1], e[2])
+      if (i === 100) early = phone()
+      await new Promise(r => setImmediate(r))
+    }
+    await new Promise(r => setTimeout(r, 100))
+    const late = phone()
+    await Promise.all([settle(early), settle(late)])
+    assert.equal(text(early), text(late), 'phone attached mid-session matches a fresh snapshot')
+    assert.equal(text(late).split('Claude Code v2.1.280').length - 1, 1, 'one transcript copy after resizes')
+    assert.equal(text(late).split('5. Scrollback buffers keep earlier output').length - 1, 1, 'no duplicated reply')
+    console.log('headless screen mirror / Claude resize reprint: passed')
+  }
   const ptyModule = { exports: {} }
   const ptyCode = await require('esbuild').transform(fs.readFileSync('src/main/ipc/pty.ts', 'utf8'), {loader:'ts', format:'cjs'})
   new Function('require', 'module', 'exports', ptyCode.code)(id => {
@@ -160,6 +208,18 @@ app.whenReady().then(async () => {
       await pause()
     }
     assert.deepEqual(await run('sent'), ['中文測試', '中文測試', '，', '😀'], 'native compositions exactly once')
+    // 微軟注音組字緩衝區滿了：先送出前段，後段繼續組字。
+    await run('sent.length = 0')
+    const ime = (cmd, args) => win.webContents.debugger.sendCommand(cmd, args)
+    await ime('Input.imeSetComposition', {text:'一二三四五六', selectionStart:6, selectionEnd:6})
+    await pause()
+    assert.equal(await run('document.querySelector(".composition-view.active")?.textContent'), '一二三四五六', 'composition preview visible')
+    await ime('Input.insertText', {text:'一二三'})
+    await ime('Input.imeSetComposition', {text:'四五六七', selectionStart:4, selectionEnd:4})
+    await pause()
+    await ime('Input.insertText', {text:'四五六七'})
+    await pause()
+    assert.deepEqual(await run('sent'), ['一二三', '四五六七'], 'IME partial commit sends each part once')
     assert.equal(await run('term.textarea.value'), '', 'no retained IME text')
     // IME passthrough punctuation must not diff/re-emit previously typed content.
     assert.deepEqual(await run(`(async () => {
@@ -358,9 +418,9 @@ app.whenReady().then(async () => {
       await pause()
       assert.equal(await position(), up, 'new output leaves history in place')
       const history = await run('mobileTerm.buffer.active.baseY')
-      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[3J\\x1b[H\\x1b[2Jredrawn screen'})`)
+      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[H\\x1b[2Jredrawn screen'})`)
       await pause()
-      assert.equal(await run('mobileTerm.buffer.active.baseY'), history, 'CLI erase-scrollback redraw retains mobile history')
+      assert.equal(await run('mobileTerm.buffer.active.baseY'), history, 'CLI clear-screen redraw retains mobile history')
       assert.equal(await position(), up, 'CLI redraw leaves reader in history')
       await swipe(-180)
       await pause()

@@ -172,31 +172,36 @@ export default function TerminalView({
       cols: session.cols || 120,
       rows: session.rows || 40,
       disableStdin: true,
-      scrollback: 5000
+      // 跟桌面 main 的 headless 畫面同設定（pty.ts）：snapshot 之後照同樣的輸出與 resize 順序處理，畫面就一樣
+      scrollback: 5000,
+      windowsPty: { backend: 'conpty' }
     })
     termRef.current = term
     followOutput.current = true
     scrollPosition.current = 0
     setOutput([])
     cursorVisible.current = true
-    // CLI redraws may erase saved lines. Keep the mobile history available to read.
-    const keepHistory = term.parser.registerCsiHandler({ final: 'J' }, params => params[0] === 3)
     const cursorModes = ['h', 'l'].map(final => term.parser.registerCsiHandler({ prefix: '?', final }, params => {
       if (params.includes(25)) cursorVisible.current = final === 'h'
       return false // xterm still processes the mode for the canonical buffer
     }))
 
     const off = conn.onMessage((m: ServerMessage) => {
+      // reset/resize 都排在已收到的輸出後面：reset 不會清掉 xterm 還沒處理的輸出，直接呼叫的話舊輸出會畫到新畫面上
       if (m.t === 'snapshot' && m.id === id) {
-        term.reset()
-        cursorVisible.current = true
-        if (m.cols && m.rows) term.resize(m.cols, m.rows)
+        term.write('', () => {
+          term.reset()
+          cursorVisible.current = true
+          if (m.cols && m.rows) term.resize(m.cols, m.rows)
+        })
         term.write(m.data, refresh)
       } else if (m.t === 'data' && m.id === id) {
         term.write(m.d, refresh)
       } else if (m.t === 'resized' && m.id === id) {
-        if (m.cols && m.rows) term.resize(m.cols, m.rows)
-        refresh()
+        term.write('', () => {
+          if (m.cols && m.rows) term.resize(m.cols, m.rows)
+          refresh()
+        })
       } else if (m.t === 'preview' && m.id === id) {
         setPreview({ url: m.url, error: m.url ? null : m.error || 'preview unavailable' })
       }
@@ -210,7 +215,6 @@ export default function TerminalView({
     return () => {
       off()
       offState()
-      keepHistory.dispose()
       cursorModes.forEach(handler => handler.dispose())
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       refreshTimer.current = null

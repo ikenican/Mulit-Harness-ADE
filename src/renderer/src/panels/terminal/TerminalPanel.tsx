@@ -543,7 +543,9 @@ export default function TerminalPanel(): JSX.Element {
         minimumContrastRatio: minContrast,
         fontFamily: "'SF Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace",
         fontSize: 12,
-        cursorBlink: true
+        cursorBlink: true,
+        // 跟 main 的 headless 畫面同一套 ConPTY 行為（pty.ts），尺寸變化後三方才會一致
+        windowsPty: { backend: 'conpty' }
       })
       const fitAddon = new FitAddon()
       term.loadAddon(fitAddon)
@@ -1911,6 +1913,22 @@ export default function TerminalPanel(): JSX.Element {
   )
 }
 
+// 比這還窄／矮就當作窗格正在收合或動畫中，不跟著縮：PTY 一縮，CLI 就照那個寬度重畫，捲動歷史留下窄版殘片
+const MIN_COLS = 20
+const MIN_ROWS = 5
+
+/**
+ * 依窗格大小調整終端。接著 pty 時不直接改 xterm：送給 main，main 依輸出順序套用後回 pty:resized 才改，
+ * 桌面、main 的畫面與手機三方才會一致（見 pty.ts resizePty）。
+ */
+function fitToPane(session: TerminalSession, ptyId: string | null): void {
+  const dims = session.fitAddon.proposeDimensions()
+  if (!dims || dims.cols < MIN_COLS || dims.rows < MIN_ROWS) return
+  if (dims.cols === session.term.cols && dims.rows === session.term.rows) return
+  if (ptyId) window.api.pty.resize(ptyId, dims.cols, dims.rows)
+  else session.term.resize(dims.cols, dims.rows)
+}
+
 function TerminalInstance({
   session,
   isVisible,
@@ -1948,7 +1966,13 @@ function TerminalInstance({
 
     // remount 時 term 要重新掛進新的 DOM 節點，但底下的 spawn 只能做一次。
     session.term.open(elRef.current)
-    session.fitAddon.fit()
+    if (session.bootstrapped) {
+      ptyIdRef.current = session.isExited ? null : session.ptyId || null
+      fitToPane(session, ptyIdRef.current)
+    } else {
+      // 還沒 spawn：直接量，spawn 用這個尺寸
+      session.fitAddon.fit()
+    }
     const untrackIme = trackComposition(session.term)
 
     // 杜絕手掌誤觸觸控板產生的中鍵（Button 1）貼上：以 capture 階段攔截，防止 xterm 接收 auxclick
@@ -1961,24 +1985,20 @@ function TerminalInstance({
     }
     targetEl.addEventListener('auxclick', handleAuxClick, true)
 
+    // 拖分隔線、展開收合會連續觸發：停下來才調整一次，CLI 只重畫一次
+    let fitTimer: ReturnType<typeof setTimeout> | undefined
     const ro = new ResizeObserver(() => {
-      // 組字中改尺寸會讓 xterm 重繪並中止組字，殘留的字會在下一鍵被重送（見 imeGuard）
-      if (isComposing(session.term)) return
-      try {
-        session.fitAddon.fit()
-        const pid = ptyIdRef.current || session.ptyId
-        if (pid) {
-          window.api.pty.resize(pid, session.term.cols, session.term.rows)
-        }
-      } catch {
-        /* 尺寸為 0 時 fit 會丟例外，忽略 */
-      }
+      clearTimeout(fitTimer)
+      fitTimer = setTimeout(() => {
+        // 組字中改尺寸會讓 xterm 重繪並中止組字（見 imeGuard）
+        if (!isComposing(session.term)) fitToPane(session, ptyIdRef.current)
+      }, 100)
     })
     ro.observe(elRef.current)
 
     if (session.bootstrapped) {
-      ptyIdRef.current = session.ptyId || null
       return () => {
+        clearTimeout(fitTimer)
         ro.disconnect()
         untrackIme()
         targetEl.removeEventListener('auxclick', handleAuxClick, true)
@@ -2013,8 +2033,9 @@ function TerminalInstance({
     const ready: Promise<string> = attachId
       ? window.api.pty.attach(attachId).then((res) => {
           if (!res) throw new Error('remote terminal is no longer running')
+          // 先用 pty 現在的尺寸還原畫面，下面掛好 handler 後再調成窗格大小
+          session.term.resize(res.cols, res.rows)
           session.term.write(res.snapshot)
-          window.api.pty.resize(attachId, session.term.cols, session.term.rows)
           return attachId
         })
       : window.api.pty.spawn(opts)
@@ -2050,7 +2071,14 @@ function TerminalInstance({
           }
         })
 
+        // 排在已收到的輸出後面才改尺寸，跟 main 套用的順序一樣
+        const unsubResized = window.api.pty.onResized(ptyId, (cols, rows) => {
+          session.term.write('', () => session.term.resize(cols, rows))
+        })
+
         const unsubExit = window.api.pty.onExit(ptyId, (code) => {
+          // 結束後 main 不再處理 resize，改回直接調整 xterm
+          ptyIdRef.current = null
           approvalRef.current = false
           setSessions((prev) =>
             prev.map((s) =>
@@ -2073,7 +2101,13 @@ function TerminalInstance({
           window.api.pty.write(ptyId, data)
         })
 
-        session.disposables.push(unsubData, unsubExit, () => termDataDisp.dispose())
+        session.disposables.push(unsubData, unsubResized, unsubExit, () => termDataDisp.dispose())
+        // spawn 期間窗格變過的話 xterm 已直接改了尺寸，pty 還是 spawn 時的大小
+        if (!attachId && (session.term.cols !== opts.cols || session.term.rows !== opts.rows)) {
+          window.api.pty.resize(ptyId, session.term.cols, session.term.rows)
+        }
+        // attach 的 pty 是手機開的尺寸，調成窗格大小
+        fitToPane(session, ptyId)
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
@@ -2081,6 +2115,7 @@ function TerminalInstance({
       })
 
     return () => {
+      clearTimeout(fitTimer)
       ro.disconnect()
       untrackIme()
       targetEl.removeEventListener('auxclick', handleAuxClick, true)
@@ -2093,11 +2128,7 @@ function TerminalInstance({
     const timer = setTimeout(() => {
       if (isComposing(session.term)) return
       try {
-        session.fitAddon.fit()
-        const pid = ptyIdRef.current || session.ptyId
-        if (pid) {
-          window.api.pty.resize(pid, session.term.cols, session.term.rows)
-        }
+        fitToPane(session, ptyIdRef.current)
         if (isActive) focusTerm(session.term)
       } catch {
         /* 尺寸尚未穩定時忽略 */

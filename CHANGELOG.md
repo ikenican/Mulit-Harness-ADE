@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed / 修復
+- 桌面終端微軟注音重複輸入：組字緩衝區滿了會先送出前段、後段繼續組字，xterm 5.5 以舊位置切 textarea，把還在組字的後段一起送出、之後又送一次。組字事件改由 `imeGuard` 全權處理，只送 `compositionend.data`，組字預覽照常顯示。
+- 手機端 Claude Code / Antigravity 畫面疊成好幾份、分隔線斷成數行：
+  - 手機 snapshot 原本是用現在寬度重播原始輸出紀錄；改為 main 為每個 PTY 維護 headless xterm，snapshot 為其序列化畫面，輸出與尺寸變更依同一順序送到桌面與手機。
+  - Windows ConPTY 改尺寸後會重畫可見區：改尺寸前先清可見區，舊畫面不再被 reflow 推進捲動歷史；Claude / Antigravity 會整段重印對話，連捲動歷史一起清，只留一份。
+  - 桌面改尺寸合併為停止拖動後一次，窗格小於 20×5 時不縮 PTY。
+
 ## [0.1.37] - 2026-10-07
 
 ### Fixed / 修復

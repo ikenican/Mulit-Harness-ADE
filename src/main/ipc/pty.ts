@@ -1,6 +1,8 @@
 import { ipcMain, app, type WebContents } from 'electron'
 import { EventEmitter } from 'events'
 import * as pty from '@lydell/node-pty'
+import { Terminal as ScreenMirror } from '@xterm/headless'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as yaml from 'js-yaml'
@@ -30,6 +32,8 @@ export interface ActiveSessionMeta {
 export interface PtySubscriber {
   data: (ptyId: string, chunk: string) => void
   exit: (ptyId: string, code: number) => void
+  /** 尺寸變了：跟 data 同一條順序送達，接收端照順序 resize 才會跟 main 的畫面一致 */
+  resized?: (ptyId: string, cols: number, rows: number) => void
 }
 
 interface PtyEntry {
@@ -42,8 +46,16 @@ interface PtyEntry {
   workspace: string
   cols: number
   rows: number
-  /** 最後一段輸出，給中途接上的 subscriber（例如手機）補畫面 */
-  scrollback: string
+  /** 最後一段原始輸出：審批卡片擷取提示文字、dev server 網址偵測用 */
+  tail: string
+  /**
+   * main 自己的終端畫面（headless xterm）。中途接上的 subscriber（手機、桌面 attach）拿它序列化的畫面，
+   * 不能重播原始輸出：那些輸出是在各種寬度下畫的，用現在的寬度重播游標定位全錯，TUI 會疊成好幾份。
+   */
+  screen: ScreenMirror
+  serializer: SerializeAddon
+  /** Claude Code / Antigravity CLI：改尺寸時會清掉重印整段對話 */
+  reprintsOnResize: boolean
   subs: Map<string, PtySubscriber>
   needsApproval: boolean
   lastOutputAt: number
@@ -56,7 +68,8 @@ interface PtyEntry {
   killed: boolean
 }
 
-const SCROLLBACK_LIMIT = 256 * 1024
+const TAIL_LIMIT = 16 * 1024
+const SCREEN_SCROLLBACK = 5000
 /** 停止輸出多久算「閒置」 */
 const BUSY_IDLE_MS = 4000
 
@@ -117,17 +130,43 @@ export function getPtySession(id: string): PtySessionInfo | null {
   return e ? toInfo(id, e) : null
 }
 
-/** 訂閱 pty 輸出；回傳目前的 scrollback 讓呼叫端先補畫面。找不到 pty 回 null。 */
-export function subscribePty(id: string, key: string, sub: PtySubscriber): string | null {
+/**
+ * 訂閱 pty 輸出；回傳目前畫面（含捲動歷史）讓呼叫端先補上。找不到 pty 回 null。
+ * subscriber 只在 screen 處理完某段輸出後才收到那段（見 feed），所以此刻序列化的畫面
+ * 剛好涵蓋「之前送過的全部」，之後的輸出一段不漏、也不重複。
+ */
+export function subscribePty(
+  id: string,
+  key: string,
+  sub: PtySubscriber
+): { data: string; cols: number; rows: number } | null {
   const e = entries.get(id)
   if (!e) return null
   e.subs.set(key, sub)
-  return e.scrollback
+  return { data: e.serializer.serialize({ scrollback: SCREEN_SCROLLBACK }), cols: e.screen.cols, rows: e.screen.rows }
 }
 
-/** 目前的 scrollback（不訂閱），給審批卡片擷取提示文字用 */
+/** 最後一段原始輸出（不訂閱），給審批卡片擷取提示文字用 */
 export function getPtyScrollback(id: string): string | null {
-  return entries.get(id)?.scrollback ?? null
+  return entries.get(id)?.tail ?? null
+}
+
+/** 依序送進 screen；screen 處理完才轉給 subscriber，screen 永遠不落後任何 subscriber */
+function feed(e: PtyEntry, data: string, deliver: (sub: PtySubscriber) => void): void {
+  e.screen.write(data, () => {
+    for (const sub of e.subs.values()) deliver(sub)
+  })
+}
+
+/**
+ * Windows ConPTY 改尺寸後一定整頁重畫可見區，所以先清掉可見區：舊畫面不會被 reflow 折行、推進捲動歷史變成殘片。
+ * Claude Code / Antigravity 改尺寸時會清掉重印整段對話（2026-10 實錄 ConPTY 輸出確認），但 ConPTY 不轉送
+ * 「清除捲動歷史」，舊的那份會留在歷史裡變成重複，所以連捲動歷史一起清，留下的就是它重印的那一份。
+ * ponytail: 靠 CLI 種類判斷；哪天 CLI 改成不重印，這裡會清掉它的歷史，要改成偵測重印。
+ */
+function resizePrelude(e: PtyEntry): string {
+  if (process.platform !== 'win32') return ''
+  return e.reprintsOnResize ? '\x1b[H\x1b[2J\x1b[3J' : '\x1b[H\x1b[2J'
 }
 
 export function unsubscribePty(id: string, key: string): void {
@@ -148,15 +187,21 @@ export function writePty(id: string, data: string): boolean {
 
 export function resizePty(id: string, cols: number, rows: number): void {
   const e = entries.get(id)
-  if (!e || cols < 2 || rows < 2) return
+  if (!e || cols < 2 || rows < 2 || (cols === e.cols && rows === e.rows)) return
   try {
     e.proc.resize(cols, rows)
-    e.cols = cols
-    e.rows = rows
-    ptyEvents.emit('resized', id, cols, rows)
   } catch {
-    // ignore
+    return
   }
+  e.cols = cols
+  e.rows = rows
+  // ConPTY 的重畫下一輪事件才會進 onData，這裡同步排進去就一定排在它前面
+  const prelude = resizePrelude(e)
+  if (prelude) feed(e, prelude, (sub) => sub.data(id, prelude))
+  e.screen.write('', () => {
+    e.screen.resize(cols, rows)
+    for (const sub of e.subs.values()) sub.resized?.(id, cols, rows)
+  })
 }
 
 export function killPty(id: string): void {
@@ -186,6 +231,8 @@ function finish(id: string, e: PtyEntry, code: number): void {
   }
   e.busy = false
   entries.delete(id)
+  // 排在還沒處理完的輸出後面，subscriber 才收得到最後幾段
+  e.screen.write('', () => e.screen.dispose())
   ptyEvents.emit('exit', id, code, e.title, e.killed)
   ptyEvents.emit('changed')
 }
@@ -198,6 +245,13 @@ function webContentsSubscriber(wc: WebContents): PtySubscriber {
     data: (id, chunk) => {
       try {
         if (!wc.isDestroyed()) wc.send(`pty:data:${id}`, chunk)
+      } catch {
+        // ignore destroyed sender
+      }
+    },
+    resized: (id, cols, rows) => {
+      try {
+        if (!wc.isDestroyed()) wc.send(`pty:resized:${id}`, cols, rows)
       } catch {
         // ignore destroyed sender
       }
@@ -500,7 +554,8 @@ export function spawnPty(
   args = applyAgentDefaultArgs(opts.command || command, args, targetAgent)
   // Claude Code 的 fullscreen TUI（settings "tui": "fullscreen"）走備用螢幕＋滑鼠模式：沒有 scrollback、游標停在畫面中段，
   // 手機只看得到一頁且審批選項解析不到。等同 Codex 的 --no-alt-screen；launcher 自己有設就尊重。
-  if (targetAgent === 'claude' || (opts.command || command).toLowerCase().includes('claude')) {
+  const isClaude = targetAgent === 'claude' || (opts.command || command).toLowerCase().includes('claude')
+  if (isClaude) {
     env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN ??= '1'
   }
 
@@ -512,7 +567,8 @@ export function spawnPty(
   // 檢查該 session 是否在 CLI 本地資料庫 (~/.gemini/antigravity-cli/conversations/) 中。
   // 若為 IDE 專屬 session 或不存在的 CLI 紀錄，過濾掉 --conversation 避免 agy 印出 'warning: conversation "<id>" not found'
   const cmdLower = command.toLowerCase()
-  if (cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity') {
+  const isAntigravity = targetAgent === 'antigravity' || cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity'
+  if (isAntigravity) {
     const convIdx = args.indexOf('--conversation')
     if (convIdx !== -1 && args[convIdx + 1]) {
       const targetId = args[convIdx + 1]
@@ -561,7 +617,11 @@ export function spawnPty(
     workspace: ws,
     cols,
     rows,
-    scrollback: '',
+    tail: '',
+    // windowsPty：ConPTY 長高時是在底下補空行（不是把歷史拉回畫面），照它的行為算才不會被重畫蓋掉歷史
+    screen: new ScreenMirror({ cols, rows, scrollback: SCREEN_SCROLLBACK, allowProposedApi: true, windowsPty: { backend: 'conpty' } }),
+    serializer: new SerializeAddon(),
+    reprintsOnResize: isClaude || isAntigravity,
     subs: new Map(),
     needsApproval: false,
     lastOutputAt: Date.now(),
@@ -570,20 +630,14 @@ export function spawnPty(
     devPort: null,
     killed: false
   }
+  entry.screen.loadAddon(entry.serializer as unknown as Parameters<ScreenMirror['loadAddon']>[0])
   if (ctx.subscribeOwner) entry.subs.set(`wc:${ctx.owner.id}`, webContentsSubscriber(ctx.owner))
   entries.set(id, entry)
 
   ptyProcess.onData((data) => {
     entry.lastOutputAt = Date.now()
-    entry.scrollback += data
-    if (entry.scrollback.length > SCROLLBACK_LIMIT) {
-      // 從換行處切，減少把 ANSI 序列切一半造成的亂碼
-      let cut = entry.scrollback.length - SCROLLBACK_LIMIT
-      const nl = entry.scrollback.indexOf('\n', cut)
-      if (nl !== -1 && nl - cut < 4096) cut = nl + 1
-      entry.scrollback = entry.scrollback.slice(cut)
-    }
-    for (const sub of entry.subs.values()) sub.data(id, data)
+    entry.tail = (entry.tail + data).slice(-TAIL_LIMIT)
+    feed(entry, data, (sub) => sub.data(id, data))
 
     // 「執行中／閒置」由 main 判定後廣播（只在狀態翻轉時發），
     // 否則遠端只能拿手機自己的時鐘去比 lastOutputAt：時鐘有偏差就永遠顯示錯，
@@ -602,7 +656,7 @@ export function spawnPty(
 
     // dev server 網址：看 scrollback 尾段而不是單一 chunk，
     // 否則 Vite 那行被切成兩塊時就抓不到 port。
-    const port = detectDevPort(entry.scrollback.slice(-4000))
+    const port = detectDevPort(entry.tail.slice(-4000))
     if (port && port !== entry.devPort) {
       entry.devPort = port
       ptyEvents.emit('changed')
@@ -617,7 +671,7 @@ export function spawnPty(
   })
 
   ptyProcess.onExit(({ exitCode }) => {
-    for (const sub of entry.subs.values()) sub.exit(id, exitCode)
+    feed(entry, '', (sub) => sub.exit(id, exitCode))
     finish(id, entry, exitCode)
   })
 
@@ -645,8 +699,8 @@ export function registerPtyHandlers(): void {
   // 接上一個已存在的 pty（例如手機開的終端要出現在桌面分頁）：回傳 scrollback 並開始轉送輸出
   ipcMain.handle('pty:attach', async (event, id: string) => {
     const wc = event.sender
-    const snapshot = subscribePty(id, `wc:${wc.id}`, webContentsSubscriber(wc))
-    return snapshot === null ? null : { snapshot }
+    const snap = subscribePty(id, `wc:${wc.id}`, webContentsSubscriber(wc))
+    return snap && { snapshot: snap.data, cols: snap.cols, rows: snap.rows }
   })
 
   ipcMain.on('pty:write', (_event, id: string, data: string) => {
