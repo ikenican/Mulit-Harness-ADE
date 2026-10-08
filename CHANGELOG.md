@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.39] - 2026-10-08
+
+### Added / 新增
+- Cowork 多 agent 會議：Discussion 公開依序討論與追問、指定摘要 agent 保存累積紀錄、主席總結，以及可編輯的轉 Project 提案。
+- Project 專案規劃、獨立審查、任務板與使用者核准後背景執行；支援 worktree 任務相依／資源排程、結果檢視、合併與清理。
+- Cowork 多分頁，入口整合至終端 `+` 選單與 New Terminal 卡片；可同時討論／規劃，同一 repository 的實際執行限制一場。
+- Cowork 設定包含參與者、主席、摘要 agent、完整版本模型、自動／手動推理強度及會議預算；README 補上使用方式與雙語功能架構。
+- 開發者模式預設收合中央 Preview，標題列提供一鍵切換按鈕。（PR #35）
+
+### Fixed / 修復
+- Cowork Windows Claude CLI 啟動、取消確認視窗主題、agent 卡片對齊與 Settings 窄視窗／中英文排版；移除模型 Custom 輸入選項。（PR #36）
+- 手機審批改以目前已解析的終端畫面偵測，避免舊輸出誤觸發、空白選項與提示消失後殘留審批卡片。（PR #37）
+
 ## [0.1.38] - 2026-10-07
 
 ### Fixed / 修復
