@@ -1,17 +1,16 @@
 # Mulit-Harness-ADE — Agent Workbench
 
 A lightweight, **agent-native** developer workbench: a Monaco code editor, a Git
-visualizer, and N embedded CLI terminals — nothing more. Built with Electron +
+visualizer, N embedded CLI terminals, and Cowork multi-agent meetings. Built with Electron +
 React + Vite.
 
 *English is the primary language of this README; a 繁體中文 version follows below.*
 
-> **Design principle — not an agent runtime.** This workbench does not implement
-> an agent loop, hold API keys, or parse any vendor's private protocol. The agent
-> loop is run by each vendor's **official CLI** in a real terminal; cross-CLI
-> hand-off is done through a shared `.project-memory/` (handoff notes + Git). The
-> workbench only does four things: **edit code, visualize Git, spawn CLI terminal
-> shells, and render shared memory.**
+> **Design principle — official CLIs own the agent runtime.** The workbench uses
+> each vendor's official CLI and its existing authentication. It provides code
+> editing, Git, terminals, shared memory, and Cowork coordination; Cowork schedules
+> CLI calls, stores meeting records, and runs explicitly approved project plans.
+> Cross-CLI handoffs use `.project-memory/` (handoff notes + Git).
 
 ## Features
 
@@ -23,6 +22,8 @@ React + Vite.
 - **Multi-CLI terminals** — each CLI gets its own `xterm.js` terminal tab, run
   natively as a child process via `node-pty`. No keys stored; the CLIs use their
   own subscriptions/auth.
+- **Cowork meetings** — independent tabs for Claude Code, Codex, and Antigravity; visible discussion, a selectable recorder, chair conclusions, code-aware project planning, and background execution after user approval. See [Cowork](#cowork) and its [rendered architecture](docs/architecture.html#cowork).
+- **Collapsible Developer Mode preview** — the center pane starts collapsed and can be toggled from the title bar.
 - **Preview & Documents** — live Markdown / HTML preview that auto-syncs on edit and save, plus built-in document viewing for Word, Excel, PowerPoint, and PDF.
 - **Vibe Coding Mode** — an alternative, task-first layout (Settings → Appearance → Work Mode): an icon rail (Sessions / Status / Handoff / Files / Git / Settings) whose panels fade in on hover and pin on click, the agent terminal in the middle, and the live result on the right. Dev-server URLs printed in the terminal (`http://localhost:PORT`) open automatically, and the Handoff panel summarises `.project-memory/handoff.md`. Developer Mode keeps the classic code-first layout.
 - **Dashboard & Telemetry** — session list plus token usage scanned from local CLI records (Claude Code, Codex, Antigravity), switchable between **All / 30d / 7d / Today** and split into input / cache read / output. Claude and Codex figures come from the CLIs' own usage records; Antigravity logs carry no token counts, so its figures are character-based estimates and are labelled as such. Includes CLI enable/disable filtering, folder grouping, and one-click workspace switching.
@@ -31,6 +32,29 @@ React + Vite.
 - **CLI Permissions & Bypass Mode** — toggleable bypass mode skipping interactive approval prompts for Claude Code (`--permission-mode bypassPermissions`), Codex (`--dangerously-bypass-approvals-and-sandbox`), and Antigravity (`--dangerously-skip-permissions`).
 - **iPhone Remote Control (LAN)** — watch and answer your CLI agents from an iPhone on the same Wi-Fi: a Home Screen web app lists every terminal, mirrors its output, shows an approval card with one-tap answers, lets you type or start new agents, and sends a notification when an agent needs you. It can also open one of your recent workspaces on the computer and start an agent inside it, fits the terminal to the phone's width automatically, previews the dev server a terminal printed, and remembers up to three computers to switch between. See [iPhone remote control](#iphone-remote-control).
 - **Architecture overview** — how the desktop app, the phone app and the remote bridge fit together: [`docs/architecture.html`](docs/architecture.html) (open it in a browser).
+
+## Cowork
+
+1. Open **Terminals → + → Cowork**, or choose the Cowork card in **New Terminal**. Each opening creates an independent tab.
+2. Choose **Discussion** for a conversation (ordinary folders work too), or **Project** for planning against a Git repository. Select participants, a chair, and models from the installed CLIs' catalogs; model names include their versions. Custom model input is not offered.
+3. In Discussion, the chair speaks first and participants respond in order, seeing earlier public replies. Replies appear when each call completes; startup and first-output timings show progress. Send a follow-up to start another round, retry a failed speaker, or explicitly skip that speaker.
+4. Select a recorder and choose on-demand/context-limit summaries or a summary after every round. Records contain consensus, disagreements, and open questions; original messages remain available. **Ask the chair to conclude** produces a recommendation for your decision.
+5. A current chair conclusion can populate an editable Project proposal. Starting that proposal runs a fresh code-aware planning and review process. Review its task board and unresolved issues, then approve before executing. Further discussion makes the earlier conclusion stale and requires a new conclusion before conversion.
+6. Review background task results, then merge or clean up the execution worktrees. Closing a Cowork tab only closes its view; use **Cancel meeting** to stop a meeting. Saved meetings can be reopened from history; tab layouts and unsent drafts are session-local.
+
+**Settings → Cowork** controls default participants, chair, recorder, per-agent model/effort, and budgets for new meetings. Automatic effort uses lower effort for discussion, medium for opening proposals and summaries, and higher for review and conclusions, where the model supports it. Explicit effort choices take precedence.
+
+| Budget | Default | Settings range |
+| --- | --- | --- |
+| Planning/discussion CLI calls | 6 | 3–30 |
+| Active planning/discussion time | 20 minutes | 1–120 minutes |
+| Background execution time | 60 minutes | 1–600 minutes |
+
+These are call/time budgets, not a currency or token spending cap. Summaries, chair conclusions, and repair calls also consume planning calls. A round uses one call per active speaker, so its remaining count depends on participants and summarization. Waiting for user input does not consume active planning time. Reaching a limit pauses the flow for an explicit budget increase; the service ceiling is 60 calls / 240 planning minutes, while the Discussion increase button caps at 30 calls / 120 minutes. Settings changes apply to new meetings.
+
+Multiple discussions and project-planning meetings may run concurrently, including in the same repository. **Actual background execution is limited to one run per repository until its execution is merged or cleaned up**; paused/review worktrees still hold that slot. Different repositories may execute concurrently. All tabs share each provider's account quota.
+
+Open the rendered [Cowork architecture and meeting flow](docs/architecture.html#cowork) in a browser. [Implementation notes](docs/cowork-architecture.md) cover storage, CLI isolation, scheduling and recovery.
 
 ## Installation
 
@@ -99,12 +123,14 @@ Installer output goes to `release/`. Build config is in `electron-builder.yml`.
 
 ```
 src/main         Electron main process (IPC, git, pty, files, extensions)
+src/main/cowork   meeting orchestration, CLI runner, persistence, Git and execution
 src/main/remote  LAN remote bridge: HTTPS + WebSocket, local CA, web push, preview proxy
 src/preload      the single IPC contract surface
 src/renderer/src React UI (editor / git / terminal / preview / dashboard panels)
 src/renderer/remote  the iPhone web app (second Vite entry, served by the bridge)
 src/shared       types and logic both sides use (remote protocol, detectors)
 docs/architecture.html  end-to-end architecture overview
+docs/cowork-architecture.md  Cowork flows and implementation boundaries
 .project-memory  shared cross-agent memory (handoff, protocol, decisions)
 ```
 
@@ -236,12 +262,11 @@ the Apache License 2.0.
 # 繁體中文說明
 
 一個輕量、**agent-native** 的開發工作台：Monaco 程式碼編輯器、Git 視覺化面板，以及
-N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
+N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React + Vite 打造。
 
-> **設計原則——本工具不是 agent runtime。** 本工作台不實作 agent 迴圈、不保存 API
-> 金鑰、也不解析任何廠商的私有協定。Agent 迴圈交由各廠商的**官方 CLI**在真實終端中執行；
-> 跨 CLI 的交接透過共享的 `.project-memory/`（handoff 筆記 + Git）完成。工作台只做四件事：
-> **編輯程式碼、視覺化 Git、啟動 CLI 終端殼、渲染共享記憶。**
+> **設計原則——由官方 CLI 負責 agent runtime。** 工作台使用各廠商的官方 CLI 與既有登入，
+> 提供編輯、Git、終端、共享記憶，以及 Cowork 協調。Cowork 排程 CLI 呼叫、保存會議紀錄，
+> 並執行使用者明確核准的專案計畫。跨 CLI 交接透過 `.project-memory/`（handoff 筆記 + Git）完成。
 
 ## 功能
 
@@ -250,6 +275,8 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **Git 面板**——狀態、暫存、commit、切換分支、commit graph，以及最近 commit／檔案 diff。
 - **多 CLI 終端**——每個 CLI 各有一個 `xterm.js` 終端分頁，透過 `node-pty` 以子行程原生執行。
   不儲存金鑰；CLI 使用其自身的訂閱／驗證。
+- **Cowork 多 agent 會議**——獨立分頁、可見討論、指定摘要 agent、主席結論、專案規劃與核准後背景執行。支援 Claude Code、Codex、Antigravity；詳見下方〈Cowork 使用方式〉及 [架構圖](docs/architecture.html#cowork)。
+- **開發者模式中央預覽收合**——預設收合，可用標題列按鈕切換。
 - **預覽與文件**——Markdown／HTML 即時預覽（編輯與存檔自動同步），並內建 Word、Excel、PowerPoint 與 PDF 檢視器。
 - **Vibe Coding 模式**——任務優先的另一種版面（設定 → 外觀 → 工作模式）：最左側圖示列（Sessions／Status／Handoff／Files／Git／Settings）游標移過去就淡入彈出、點擊可固定；中間是 Agent 終端，右側是即時成品。終端輸出的 dev server 網址（`http://localhost:PORT`）會自動開啟，Handoff 面板會整理 `.project-memory/handoff.md`。開發者模式維持原本程式碼優先的版面。
 - **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）掃描 session 清單與 token 用量，可切換**總用量／30 天／7 天／今天**，並拆分輸入／快取讀取／輸出。Claude 與 Codex 取自 CLI 自己的用量紀錄；Antigravity 紀錄沒有 token 欄位，數字為字數估算並明確標示。支援 CLI 啟用連動、資料夾群組分類與一鍵工作區切換。
@@ -258,6 +285,27 @@ N 個內嵌 CLI 終端——僅此而已。以 Electron + React + Vite 打造。
 - **CLI 啟動權限與略過模式**——全域開關支援切換 AI 代理（Claude Code、Codex、Antigravity）略過互動式審批確認模式，提升自動化執行流暢度。
 - **iPhone 遠端控制（區網）**——在同一個 Wi-Fi 下用 iPhone 查看並回覆 CLI agent：加入主畫面的 App 會列出所有終端、同步顯示輸出、用審批卡片一鍵回覆、可以輸入或開新的 agent，agent 等你回覆時會推播通知。也可以請電腦開啟最近用過的工作區並在裡面開 agent、終端會自動配合手機寬度、預覽終端印出的 dev server，並記住最多三台電腦切換。詳見下方〈iPhone 遠端控制〉。
 - **架構總覽**——桌面程式、手機程式與遠端橋接怎麼接在一起：[`docs/architecture.html`](docs/architecture.html)（用瀏覽器開啟）。
+
+## Cowork 使用方式
+
+從 **Terminals → + → Cowork** 或 **New Terminal 的 Cowork 卡片**開啟；每次開啟都是獨立分頁。
+
+- **Discussion 討論**：主席先發言，參與者依序看到前面的公開回覆並接續討論。一般資料夾也能使用。每次呼叫完成後顯示回覆，過程可查看啟動與首次輸出時間；追問會啟動下一輪。失敗時可重試或明確跳過該 agent。
+- **摘要與主席結論**：指定參與者作為摘要 agent，選擇按需／上下文達門檻時摘要，或每輪摘要。累積紀錄整理共識、歧見與待確認事項，原始訊息仍保留。「請主席總結」提出建議供使用者拍板；繼續追問後，必須重新總結才能轉專案。
+- **Project 專案**：可把最新主席結論轉成可編輯提案，或直接開始 Project。系統重新讀取 Git 專案、形成方案、獨立審查並由主席整合；使用者確認任務板與未決事項、核准後，才在 worktree 背景執行。完成後由使用者檢視、合併或清理。
+- **設定與預算**：Settings → Cowork 可調整參與者、主席、摘要 agent、模型／強度，以及新會議預算。模型顯示完整版本，沒有 Custom 輸入。自動強度依討論、摘要、審查等階段分配，手動選擇優先。
+
+| 預算 | 預設 | 設定範圍 |
+| --- | --- | --- |
+| 討論／規劃 CLI 呼叫 | 6 次 | 3–30 次 |
+| 討論／規劃有效運作時間 | 20 分鐘 | 1–120 分鐘 |
+| 背景執行時間 | 60 分鐘 | 1–600 分鐘 |
+
+這是呼叫／時間預算，不是金額或 token 上限。每輪依發言人數耗用呼叫，摘要、主席結論與格式修復也計入；等待使用者輸入不消耗有效規劃時間。達到上限後暫停，可明確提高該會議預算；服務最高為 60 次／240 分鐘，Discussion 增額按鈕上限為 30 次／120 分鐘。設定變更套用至新會議。
+
+同一 repository 可同時開多場討論與規劃，但**實際背景執行同時限一場，直到合併或清理該次執行**；暫停或等待檢視的 worktree 仍占用名額。不同 repository 可同時執行，各分頁共用供應商帳號用量。關閉分頁只關閉畫面，要停止會議請按 Cancel meeting；紀錄可從歷史重新開啟，分頁版面與未送出草稿只保留於本次程式執行。
+
+以瀏覽器開啟 [架構總覽的 Cowork 章節](docs/architecture.html#cowork)，可查看已渲染的模組架構與會議流程圖；資料保存、隔離與恢復細節見 [實作筆記](docs/cowork-architecture.md)。
 
 ## 安裝指南
 
@@ -324,12 +372,14 @@ npm run release    # （僅限專案維護者）一鍵自動編譯、打包並�
 
 ```
 src/main         Electron 主行程（IPC、git、pty、files、extensions）
+src/main/cowork   會議協調、CLI runner、保存、Git 與背景執行
 src/main/remote  區網遠端橋接：HTTPS + WebSocket、本機 CA、Web Push、預覽代理
 src/preload      唯一的 IPC 契約介面
 src/renderer/src React UI（editor / git / terminal / preview / dashboard 面板）
 src/renderer/remote  iPhone 端網頁 App（第二個 Vite entry，由橋接層提供）
 src/shared       兩端共用的型別與邏輯（遠端協定、各種偵測）
 docs/architecture.html  端到端架構總覽
+docs/cowork-architecture.md  Cowork 功能流程與模組邊界
 .project-memory  跨 agent 共享記憶（handoff、protocol、decisions）
 ```
 

@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Multi-Harness ADE Architecture</title>
 <style>
   :root {
@@ -244,6 +249,17 @@
   svg.d1 {
     min-width: 860px;
   }
+  svg.cw-diagram {
+    min-width: 860px;
+  }
+  svg.cw-diagram .t-b { font-size: 15px; }
+  svg.cw-diagram .tm { font-size: 12px; }
+  svg.cw-diagram .lane-title { font-size: 11px; }
+  svg.cw-diagram .approval-box {
+    fill: color-mix(in srgb, var(--amber) 9%, var(--surface));
+    stroke: var(--amber);
+  }
+  #cowork { scroll-margin-top: 110px; }
   svg.d2,
   svg.d3 {
     min-width: 660px;
@@ -497,6 +513,8 @@
   href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;600&display=swap"
 />
 
+</head>
+<body>
 <header class="top">
   <div class="bar">
     <span class="name">Multi-Harness ADE</span>
@@ -504,6 +522,7 @@
       <a href="#shape"><span class="zh">全貌</span><span class="en">Shape</span></a>
       <a href="#pty"><span class="zh">終端</span><span class="en">Terminals</span></a>
       <a href="#desktop"><span class="zh">桌面</span><span class="en">Desktop</span></a>
+      <a href="#cowork">Cowork</a>
       <a href="#bridge"><span class="zh">橋接</span><span class="en">Bridge</span></a>
       <a href="#phone"><span class="zh">手機</span><span class="en">Phone</span></a>
       <a href="#preview"><span class="zh">預覽</span><span class="en">Preview</span></a>
@@ -525,16 +544,16 @@
 
 <div class="wrap">
   <div class="hero">
-    <span class="stamp">Agent Workbench · v0.1.23</span>
+    <span class="stamp">Agent Workbench · v0.1.39</span>
     <div class="zh">
       <h1>桌面程式、遠端橋接、手機程式：三個執行環境，同一組終端</h1>
       <p>
         Electron 桌面程式擁有 CLI 子行程；跑在它主行程裡的區網橋接把同一組終端用 HTTPS 再發佈一次；
-        iPhone 的主畫面網頁 App 接上去。這裡沒有任何 agent 的實作——迴圈是各廠商的官方 CLI 自己跑的。
+        iPhone 的主畫面網頁 App 接上去。Cowork 在主行程協調會議與核准後的工作；模型執行仍由官方 CLI 負責。
       </p>
       <p class="principle">
-        <b>這不是 agent runtime。</b>不實作 agent 迴圈、不保存 API 金鑰、不解析任何廠商的私有協定。
-        工作台只做四件事：編輯程式碼、視覺化 Git、啟動 CLI 終端殼、渲染共享記憶。
+        <b>官方 CLI 負責 agent runtime。</b>工作台提供編輯、Git、終端、共享記憶與 Cowork 協調，
+        排程 CLI 呼叫、保存會議紀錄，並在使用者明確核准後執行專案。
         跨 CLI 的交接走 <code>.project-memory/</code> 與 Git。
       </p>
     </div>
@@ -543,11 +562,11 @@
       <p>
         An Electron desktop app owns the CLI child processes. A LAN bridge inside its main process
         re-publishes those same terminals over HTTPS. An iPhone Home Screen web app attaches to them.
-        Nothing about the agents themselves lives here — each vendor's official CLI runs the loop.
+        Cowork coordinates meetings and approved work in the main process; official CLIs run the models.
       </p>
       <p class="principle">
-        <b>Not an agent runtime.</b> No agent loop, no API keys, no vendor protocol parsing. The workbench
-        edits code, visualizes Git, spawns CLI shells, and renders shared memory. Cross-CLI hand-off goes
+        <b>Official CLIs own the agent runtime.</b> The workbench provides editing, Git, terminals,
+        shared memory and Cowork coordination, scheduling CLI calls and explicitly approved project work. Cross-CLI hand-off goes
         through <code>.project-memory/</code> and Git.
       </p>
     </div>
@@ -989,6 +1008,166 @@
         URL printed in a terminal opens the built-in browser view automatically.
       </p>
     </div>
+  </section>
+
+  <section id="cowork">
+    <div class="zh">
+      <h2>Cowork：從討論到核准後執行</h2>
+      <p class="lede">分頁負責呈現，主行程負責協調，官方 CLI 負責模型執行。公開討論、累積紀錄、專案規劃與實際執行有各自的階段；使用者在核准與合併兩個位置拍板。</p>
+    </div>
+    <div class="en">
+      <h2>Cowork: discussion to approved execution</h2>
+      <p class="lede">Tabs present the meeting, the main process coordinates it, and official CLIs run the models. Discussion, cumulative records, planning and execution have separate stages, with user decisions at approval and merge.</p>
+    </div>
+
+    <h3><span class="zh">01 · 模組與執行邊界</span><span class="en">01 · Components and runtime boundaries</span></h3>
+    <figure>
+      <div class="scroll">
+        <svg class="diagram cw-diagram" viewBox="0 0 1020 550" role="img" aria-labelledby="cw-system-title cw-system-desc">
+          <title id="cw-system-title">Cowork components / Cowork 模組架構</title>
+          <desc id="cw-system-desc">Independent desktop tabs and settings send typed IPC commands to the Cowork service in Electron main. The service owns turns, summaries, budgets and persistent records. A bounded runner calls official CLIs; an executor runs approved work in Git worktrees.</desc>
+          <defs>
+            <marker id="cw-green" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--pine)" /></marker>
+            <marker id="cw-gold" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--amber)" /></marker>
+          </defs>
+          <text class="lane-title" x="24" y="28">DESKTOP RENDERER</text>
+          <text class="lane-title" x="360" y="28">ELECTRON MAIN</text>
+          <text class="lane-title" x="792" y="28">OFFICIAL CLIs</text>
+          <rect class="lane-box" x="24" y="44" width="252" height="478" rx="8" />
+          <rect class="lane-box" x="360" y="44" width="348" height="478" rx="8" />
+          <rect class="lane-box" x="792" y="44" width="204" height="242" rx="8" />
+
+          <rect class="box" x="40" y="68" width="220" height="84" rx="6" />
+          <text class="t-b" x="56" y="94">TerminalPanel</text>
+          <text class="tm zh" x="56" y="117">獨立分頁 · 草稿 · 歷史</text><text class="tm en" x="56" y="117">Tabs · drafts · history</text>
+          <text class="tm zh" x="56" y="137">關閉畫面不取消會議</text><text class="tm en" x="56" y="137">Close view keeps meeting</text>
+          <rect class="box" x="40" y="172" width="220" height="84" rx="6" />
+          <text class="t-b" x="56" y="198">CoworkSettings</text>
+          <text class="tm zh" x="56" y="221">角色 · 模型 · 強度 · 預算</text><text class="tm en" x="56" y="221">Roles · models · budgets</text>
+          <text class="tm" x="56" y="241">ModelPicker</text>
+          <rect class="box" x="40" y="276" width="220" height="120" rx="6" />
+          <text class="t-b" x="56" y="302">CoworkPanel / ExecView</text>
+          <text class="tm zh" x="56" y="327">公開回覆 · 紀錄 · 主席結論</text><text class="tm en" x="56" y="327">Replies · records · chair</text>
+          <text class="tm zh" x="56" y="350">任務板 · 核准 · 結果檢視</text><text class="tm en" x="56" y="350">Plan · approve · review</text>
+          <text class="tm zh" x="56" y="373">會議更新事件回推介面</text><text class="tm en" x="56" y="373">Meeting updates to the UI</text>
+          <rect class="box-alt" x="40" y="420" width="220" height="64" rx="6" />
+          <text class="t-b" x="56" y="446">preload / typed IPC</text>
+          <text class="tm" x="56" y="468">Commands + update events</text>
+
+          <rect class="box" x="376" y="68" width="316" height="62" rx="6" />
+          <text class="t-b" x="392" y="94">ipc/cowork.ts</text>
+          <text class="tm zh" x="392" y="115">CLI 能力 · 模型清單 · 設定與指令</text><text class="tm en" x="392" y="115">Capabilities · catalogs · commands</text>
+          <rect class="box" x="376" y="174" width="316" height="128" rx="6" />
+          <text class="t-b" x="392" y="203">CoworkService / orchestrator.ts</text>
+          <text class="tm zh" x="392" y="230">發言順序 · 摘要 · 主席整合 · 任務板</text><text class="tm en" x="392" y="230">Turns · summaries · chair · task board</text>
+          <text class="tm zh" x="392" y="253">狀態 · 呼叫／時間預算 · 取消與恢復</text><text class="tm en" x="392" y="253">State · call/time budget · recovery</text>
+          <text class="tm" x="392" y="279">shared/cowork.ts → validate + prompts</text>
+          <rect class="box" x="376" y="344" width="316" height="68" rx="6" />
+          <text class="t-b" x="392" y="372">runner.ts</text>
+          <text class="tm zh" x="392" y="395">程序啟動 · 輸出上限 · 逾時 · 終止</text><text class="tm en" x="392" y="395">Launch · output cap · timeout · stop</text>
+          <rect class="box-alt" x="376" y="436" width="316" height="64" rx="6" />
+          <text class="t-b" x="392" y="462">store.ts / userData/cowork</text>
+          <text class="tm zh" x="392" y="485">原子 JSON · 前一份備援 · 會議紀錄</text><text class="tm en" x="392" y="485">Atomic JSON · backup · meeting records</text>
+
+          <rect class="box" x="808" y="68" width="172" height="166" rx="6" />
+          <text class="t-b" x="824" y="98">Claude Code</text>
+          <text class="t-b" x="824" y="130">Codex</text>
+          <text class="t-b" x="824" y="162">Antigravity</text>
+          <text class="tm zh" x="824" y="193">模型執行與既有登入</text><text class="tm en" x="824" y="193">Models + auth</text>
+          <text class="tm zh" x="824" y="214">各分頁共用帳號用量</text><text class="tm en" x="824" y="214">Shared quota</text>
+          <text class="lane-title" x="792" y="338">APPROVED WORK</text>
+          <rect class="approval-box" x="808" y="360" width="172" height="140" rx="6" />
+          <text class="t-b" x="824" y="390">executor.ts</text>
+          <text class="tm" x="824" y="417">Git worktrees</text>
+          <text class="tm zh" x="824" y="442">相依／資源排程</text><text class="tm en" x="824" y="442">Task scheduling</text>
+          <text class="tm zh" x="824" y="480">使用者檢視、合併或清理</text><text class="tm en" x="824" y="480">Review / cleanup</text>
+
+          <path class="wire" d="M260 452 H314 V100 H376" marker-end="url(#cw-green)" />
+          <path class="wire" d="M534 130 V174" marker-end="url(#cw-green)" />
+          <path class="wire" d="M534 302 V344" marker-end="url(#cw-green)" />
+          <path class="wire" d="M376 238 H344 V468 H376" marker-end="url(#cw-green)" />
+          <path class="wire" d="M692 378 H768 V146 H808" marker-end="url(#cw-green)" />
+          <path class="wire-amber" d="M692 270 H740 V430 H808" marker-end="url(#cw-gold)" />
+          <path class="wire" d="M894 360 V234" marker-end="url(#cw-green)" />
+          <text class="wl-a zh" x="716" y="321">核准</text><text class="wl-a en" x="716" y="321">Approve</text>
+        </svg>
+      </div>
+      <figcaption><span class="zh">實線是主流程，金色線是核准後的執行入口。Cowork 使用背景 CLI 子行程；一般互動終端仍走 node-pty，兩者由主行程管理。</span><span class="en">Green follows the main flow; gold marks the approved execution path. Cowork uses background CLI processes, while interactive terminals use node-pty. Both are owned by main.</span></figcaption>
+    </figure>
+
+    <h3><span class="zh">02 · 討論、專案與使用者決策</span><span class="en">02 · Discussion, Project and user decisions</span></h3>
+    <figure>
+      <div class="scroll">
+        <svg class="diagram cw-diagram" viewBox="0 0 1020 650" role="img" aria-labelledby="cw-flow-title cw-flow-desc">
+          <title id="cw-flow-title">Cowork meeting and execution flow / 會議與執行流程</title>
+          <desc id="cw-flow-desc">Discussion proceeds from public turns to cumulative recording and chair conclusion. The user can edit a Project proposal; Project performs code-aware planning and parallel independent reviews, then produces a task board. Only user approval starts execution; results require user review before merge or cleanup.</desc>
+          <rect class="lane-box" x="24" y="42" width="972" height="200" rx="8" />
+          <rect class="lane-box" x="24" y="308" width="972" height="150" rx="8" />
+          <text class="lane-title" x="24" y="27">DISCUSSION · PUBLIC CONVERSATION</text>
+          <text class="lane-title" x="24" y="292">PROJECT · CODE-AWARE PLANNING</text>
+          <rect class="box" x="40" y="68" width="276" height="106" rx="6" />
+          <text class="t-b zh" x="56" y="97">公開依序發言</text><text class="t-b en" x="56" y="97">Sequential public turns</text>
+          <text class="tm zh" x="56" y="124">主席 → 參與者；看到前面的回覆</text><text class="tm en" x="56" y="124">Chair, then participants</text>
+          <text class="tm zh" x="56" y="151">使用者追問 → 下一輪</text><text class="tm en" x="56" y="151">User follow-up → another round</text>
+          <rect class="box" x="372" y="68" width="276" height="106" rx="6" />
+          <text class="t-b zh" x="388" y="97">指定摘要 agent</text><text class="t-b en" x="388" y="97">Selected recorder</text>
+          <text class="tm zh" x="388" y="124">共識 · 歧見 · 問題；保留原始訊息</text><text class="tm en" x="388" y="124">Consensus · disputes · questions</text>
+          <text class="tm zh" x="388" y="151">按需、達門檻或每輪累積摘要</text><text class="tm en" x="388" y="151">On demand / threshold / round</text>
+          <rect class="box" x="704" y="68" width="276" height="106" rx="6" />
+          <text class="t-b zh" x="720" y="97">請主席總結</text><text class="t-b en" x="720" y="97">Ask the chair to conclude</text>
+          <text class="tm zh" x="720" y="124">建議方案 · 風險 · 待拍板事項</text><text class="tm en" x="720" y="124">Plan · risks · decisions</text>
+          <text class="tm zh" x="720" y="151">再追問後須重新總結</text><text class="tm en" x="720" y="151">Further replies make it stale</text>
+          <path class="wire" d="M316 121 H372" marker-end="url(#cw-green)" />
+          <path class="wire" d="M648 121 H704" marker-end="url(#cw-green)" />
+          <text class="tm zh" x="56" y="214">討論不修改專案；摘要與主席結論都計入會議呼叫預算。</text><text class="tm en" x="56" y="214">Discussion does not edit the project. Summaries and conclusions count toward call budgets.</text>
+
+          <path class="wire-amber" d="M980 121 H1008 V264 H12 V382 H40" marker-end="url(#cw-gold)" />
+          <text class="wl-a zh" x="396" y="258">使用者編輯提案，再啟動 Project</text><text class="wl-a en" x="396" y="258">User edits proposal, then starts Project</text>
+          <rect class="box" x="40" y="332" width="276" height="100" rx="6" />
+          <text class="t-b zh" x="56" y="362">主席形成初案</text><text class="t-b en" x="56" y="362">Chair opens the proposal</text>
+          <text class="tm zh" x="56" y="389">重新讀取專案與唯讀快照</text><text class="tm en" x="56" y="389">Fresh code context + snapshot</text>
+          <text class="tm" x="56" y="413">R1</text>
+          <rect class="box" x="372" y="332" width="276" height="100" rx="6" />
+          <text class="t-b zh" x="388" y="362">參與者獨立審查</text><text class="t-b en" x="388" y="362">Independent participant reviews</text>
+          <text class="tm zh" x="388" y="389">並行檢查方案、範圍與風險</text><text class="tm en" x="388" y="389">Parallel scope + risk checks</text>
+          <text class="tm" x="388" y="413">R2</text>
+          <rect class="box" x="704" y="332" width="276" height="100" rx="6" />
+          <text class="t-b zh" x="720" y="362">主席整合任務板</text><text class="t-b en" x="720" y="362">Chair finalizes the task board</text>
+          <text class="tm zh" x="720" y="389">未決事項交由使用者確認</text><text class="tm en" x="720" y="389">Unresolved issues need a decision</text>
+          <text class="tm" x="720" y="413">R3 / R4</text>
+          <path class="wire" d="M316 382 H372" marker-end="url(#cw-green)" />
+          <path class="wire" d="M648 382 H704" marker-end="url(#cw-green)" />
+          <path class="wire-amber" d="M842 432 V536" marker-end="url(#cw-gold)" />
+          <text class="wl-a zh" x="862" y="505">使用者核准</text><text class="wl-a en" x="862" y="505">User approves</text>
+          <rect class="approval-box" x="704" y="536" width="276" height="90" rx="6" />
+          <text class="t-b zh" x="720" y="565">worktree 背景執行</text><text class="t-b en" x="720" y="565">Background worktree execution</text>
+          <text class="tm zh" x="720" y="592">相依排程 · 獨占資源 · 一 repo 一場</text><text class="tm en" x="720" y="592">Dependencies · one run per repo</text>
+          <rect class="approval-box" x="372" y="536" width="276" height="90" rx="6" />
+          <text class="t-b zh" x="388" y="565">使用者檢視結果</text><text class="t-b en" x="388" y="565">User reviews results</text>
+          <text class="tm zh" x="388" y="592">確認 diff、驗證與失敗任務</text><text class="tm en" x="388" y="592">Diffs · validation · failed tasks</text>
+          <rect class="approval-box" x="40" y="536" width="276" height="90" rx="6" />
+          <text class="t-b zh" x="56" y="565">合併或清理</text><text class="t-b en" x="56" y="565">Merge or clean up</text>
+          <text class="tm zh" x="56" y="592">釋放該 repo 的執行名額</text><text class="tm en" x="56" y="592">Release the execution slot</text>
+          <path class="wire-amber" d="M704 581 H648" marker-end="url(#cw-gold)" />
+          <path class="wire-amber" d="M372 581 H316" marker-end="url(#cw-gold)" />
+        </svg>
+      </div>
+      <figcaption><span class="zh">Project 也可直接開始。轉專案只填入可編輯提案，不會自動執行；任務板可要求主席修訂，執行後仍由使用者決定合併或清理。</span><span class="en">Project can also start directly. Conversion fills an editable proposal; it does not execute it. Users may request task-board revisions and decide whether to merge or clean up the results.</span></figcaption>
+    </figure>
+
+    <div class="cols">
+      <div class="panel">
+        <h4><span class="zh">隔離與紀錄</span><span class="en">Isolation and records</span></h4>
+        <ul class="zh"><li>Discussion 使用隔離目錄，不載入專案指令或 skills。</li><li>Project 使用唯讀快照；核准後在 <code>.cowork/&lt;runId&gt;/</code> 執行。</li><li>原始訊息與累積摘要保存於 <code>userData/cowork</code>，可從歷史恢復。</li></ul>
+        <ul class="en"><li>Discussion uses an isolated directory without project instructions or skills.</li><li>Project plans against a read-only snapshot; approved work runs in <code>.cowork/&lt;runId&gt;/</code>.</li><li>Raw messages and cumulative records persist in <code>userData/cowork</code> and reopen from history.</li></ul>
+      </div>
+      <div class="panel">
+        <h4><span class="zh">並行與會議預算</span><span class="en">Concurrency and budgets</span></h4>
+        <ul class="zh"><li>可同時討論與規劃；實際執行同一 repo 限一場，至合併或清理。</li><li>預設 6 次呼叫／20 分鐘規劃／60 分鐘執行，Settings 可調整。</li><li>摘要、結論與格式修復計入呼叫；等待使用者不耗規劃時間。</li></ul>
+        <ul class="en"><li>Meetings can overlap; actual execution stays one per repo until merge or cleanup.</li><li>Defaults: 6 calls / 20 planning minutes / 60 execution minutes, editable in Settings.</li><li>Records, conclusions and repair consume calls; waiting for user input does not consume planning time.</li></ul>
+      </div>
+    </div>
+    <p class="note"><span class="zh">呼叫預算不是金額或 token 上限。CLI 權限、持久化與恢復的實作細節見 <a href="cowork-architecture.md">Cowork 實作筆記</a>。</span><span class="en">Call budgets are not currency or token spending caps. See <a href="cowork-architecture.md">Cowork implementation notes</a> for CLI restrictions, persistence and recovery.</span></p>
   </section>
 
   <section id="bridge">
@@ -2047,7 +2226,7 @@
     </div>
   </section>
 
-  <footer>Multi-Harness ADE · docs/architecture.html · regenerate when the bridge protocol changes</footer>
+  <footer>Multi-Harness ADE · docs/architecture.html · terminal, bridge and Cowork architecture</footer>
 </div>
 
 <script>
@@ -2081,3 +2260,5 @@
     })
   })()
 </script>
+</body>
+</html>
