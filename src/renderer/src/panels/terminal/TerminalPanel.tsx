@@ -13,7 +13,7 @@ import {
 } from '@/store'
 import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
-import { looksLikeApprovalPrompt } from './approvalDetect'
+import { looksLikeApprovalPrompt, readApprovalScreen } from './approvalDetect'
 import { detectDevUrl } from './portDetect'
 import { focusTerm, isComposing, isImeKey, trackComposition } from './imeGuard'
 import AgentMark from '@/components/AgentMark'
@@ -2048,8 +2048,24 @@ function TerminalInstance({
         const isAgent = AGENT_IDS.includes(session.launcherKey)
         // 保留上一段尾巴，避免網址剛好被切在兩個 chunk 之間
         let urlTail = ''
+        let approvalTimer: ReturnType<typeof setTimeout> | undefined
+        const checkApproval = (): void => {
+          if (approvalTimer || !ptyIdRef.current) return
+          approvalTimer = setTimeout(() => {
+            approvalTimer = undefined
+            const waiting = looksLikeApprovalPrompt(readApprovalScreen(session.term))
+            if (waiting === approvalRef.current) return
+            approvalRef.current = waiting
+            setSessions((prev) =>
+              prev.map((s) => (s.id === session.id ? { ...s, needsApproval: waiting } : s))
+            )
+            if (waiting && !isVisibleRef.current) {
+              window.api.notify.show('Approval needed', `${session.title} is waiting for a response`)
+            }
+          }, 120)
+        }
         const unsubData = window.api.pty.onData(ptyId, (data) => {
-          session.term.write(data)
+          session.term.write(data, checkApproval)
 
           if (isAgent) pulseAgentActivity()
           const scan = urlTail + data
@@ -2058,25 +2074,15 @@ function TerminalInstance({
             const devUrl = detectDevUrl(scan)
             if (devUrl) reportDevUrl(devUrl)
           }
-
-          // 待審批偵測：false→true 才提醒，避免同一個提示連發通知
-          if (!approvalRef.current && looksLikeApprovalPrompt(data)) {
-            approvalRef.current = true
-            setSessions((prev) =>
-              prev.map((s) => (s.id === session.id ? { ...s, needsApproval: true } : s))
-            )
-            if (!isVisibleRef.current) {
-              window.api.notify.show('Approval needed', `${session.title} is waiting for a response`)
-            }
-          }
         })
 
         // 排在已收到的輸出後面才改尺寸，跟 main 套用的順序一樣
         const unsubResized = window.api.pty.onResized(ptyId, (cols, rows) => {
-          session.term.write('', () => session.term.resize(cols, rows))
+          session.term.write('', () => { session.term.resize(cols, rows); checkApproval() })
         })
 
         const unsubExit = window.api.pty.onExit(ptyId, (code) => {
+          clearTimeout(approvalTimer)
           // 結束後 main 不再處理 resize，改回直接調整 xterm
           ptyIdRef.current = null
           approvalRef.current = false
@@ -2090,18 +2096,12 @@ function TerminalInstance({
           window.api.notify.show('Task finished', `${session.title} exited with code ${code}`)
         })
 
-        // 使用者一輸入就代表他在回應，清掉待審批狀態
         const termDataDisp = session.term.onData((data) => {
-          if (approvalRef.current) {
-            approvalRef.current = false
-            setSessions((prev) =>
-              prev.map((s) => (s.id === session.id ? { ...s, needsApproval: false } : s))
-            )
-          }
           window.api.pty.write(ptyId, data)
         })
 
-        session.disposables.push(unsubData, unsubResized, unsubExit, () => termDataDisp.dispose())
+        session.disposables.push(unsubData, unsubResized, unsubExit, () => termDataDisp.dispose(), () => clearTimeout(approvalTimer))
+        session.term.write('', checkApproval)
         // spawn 期間窗格變過的話 xterm 已直接改了尺寸，pty 還是 spawn 時的大小
         if (!attachId && (session.term.cols !== opts.cols || session.term.rows !== opts.rows)) {
           window.api.pty.resize(ptyId, session.term.cols, session.term.rows)

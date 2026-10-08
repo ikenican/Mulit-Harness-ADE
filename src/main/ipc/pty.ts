@@ -9,7 +9,7 @@ import * as yaml from 'js-yaml'
 import * as crypto from 'crypto'
 import { execFileSync } from 'child_process'
 import { getWorkspaceForEvent } from '../index'
-import { looksLikeApprovalPrompt } from '../../shared/approvalDetect'
+import { looksLikeApprovalPrompt, readApprovalScreen } from '../../shared/approvalDetect'
 import { detectDevPort } from '../../shared/portDetect'
 import { resolveConnectionEnv } from './conn'
 import type { CliLauncher, PtySpawnOptions } from '../../preload/index'
@@ -58,6 +58,7 @@ interface PtyEntry {
   reprintsOnResize: boolean
   subs: Map<string, PtySubscriber>
   needsApproval: boolean
+  approvalTimer: NodeJS.Timeout | null
   lastOutputAt: number
   /** 近期還在吐輸出＝執行中。由 main 判定，遠端直接用，不讓手機拿自己的時鐘去比對 */
   busy: boolean
@@ -146,15 +147,31 @@ export function subscribePty(
   return { data: e.serializer.serialize({ scrollback: SCREEN_SCROLLBACK }), cols: e.screen.cols, rows: e.screen.rows }
 }
 
-/** 最後一段原始輸出（不訂閱），給審批卡片擷取提示文字用 */
-export function getPtyScrollback(id: string): string | null {
-  return entries.get(id)?.tail ?? null
+/** 審批文字來自已解析的當前畫面，不能從原始 ANSI 紀錄撈已被擦掉的提示。 */
+export function getPtyScreenText(id: string): string | null {
+  const e = entries.get(id)
+  return e ? readApprovalScreen(e.screen) : null
+}
+
+function scheduleApproval(e: PtyEntry): void {
+  if (e.approvalTimer || entries.get(e.meta.id) !== e) return
+  // 合併多個 ANSI 輸出片段，等 xterm 處理完再判斷，不把局部重畫當成新問題。
+  e.approvalTimer = setTimeout(() => {
+    e.approvalTimer = null
+    const waiting = looksLikeApprovalPrompt(readApprovalScreen(e.screen))
+    if (waiting === e.needsApproval) return
+    e.needsApproval = waiting
+    if (waiting) ptyEvents.emit('approval', e.meta.id)
+    ptyEvents.emit('changed')
+  }, 120)
+  e.approvalTimer.unref?.()
 }
 
 /** 依序送進 screen；screen 處理完才轉給 subscriber，screen 永遠不落後任何 subscriber */
 function feed(e: PtyEntry, data: string, deliver: (sub: PtySubscriber) => void): void {
   e.screen.write(data, () => {
     for (const sub of e.subs.values()) deliver(sub)
+    scheduleApproval(e)
   })
 }
 
@@ -177,11 +194,7 @@ export function writePty(id: string, data: string): boolean {
   const e = entries.get(id)
   if (!e) return false
   e.proc.write(data)
-  // 有人輸入就代表在回應提示，清掉待審批狀態
-  if (e.needsApproval) {
-    e.needsApproval = false
-    ptyEvents.emit('changed')
-  }
+  // 方向鍵、Tab 等仍然在操作同一個問題；由後續畫面是否還有提示決定狀態。
   return true
 }
 
@@ -201,6 +214,7 @@ export function resizePty(id: string, cols: number, rows: number): void {
   e.screen.write('', () => {
     e.screen.resize(cols, rows)
     for (const sub of e.subs.values()) sub.resized?.(id, cols, rows)
+    scheduleApproval(e)
   })
 }
 
@@ -225,6 +239,7 @@ export function cleanupPtyForWindow(webContentsId: number): void {
 /** 從表中移除並發出 exit 事件；onExit 與視窗關閉都可能呼叫，只處理一次 */
 function finish(id: string, e: PtyEntry, code: number): void {
   if (entries.get(id) !== e) return
+  if (e.approvalTimer) clearTimeout(e.approvalTimer)
   if (e.busyTimer) {
     clearTimeout(e.busyTimer)
     e.busyTimer = null
@@ -624,6 +639,7 @@ export function spawnPty(
     reprintsOnResize: isClaude || isAntigravity,
     subs: new Map(),
     needsApproval: false,
+    approvalTimer: null,
     lastOutputAt: Date.now(),
     busy: false,
     busyTimer: null,
@@ -659,13 +675,6 @@ export function spawnPty(
     const port = detectDevPort(entry.tail.slice(-4000))
     if (port && port !== entry.devPort) {
       entry.devPort = port
-      ptyEvents.emit('changed')
-    }
-
-    // 待審批偵測：false→true 才發事件，避免同一個提示連發推播
-    if (!entry.needsApproval && looksLikeApprovalPrompt(data)) {
-      entry.needsApproval = true
-      ptyEvents.emit('approval', id)
       ptyEvents.emit('changed')
     }
   })

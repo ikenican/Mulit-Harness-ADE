@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Terminal, type IBufferCell } from '@xterm/xterm'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
+import { readApprovalScreen } from '../../shared/approvalDetect'
 import type { RemoteConnection } from './conn'
 import { t } from './i18n'
 import { parsePrompt, type ParsedPrompt } from './prompt'
@@ -93,18 +94,6 @@ function outputLines(term: Terminal, cursorVisible: boolean): OutputLine[] {
   return lines
 }
 
-function screenText(term: Terminal, lines = term.rows): string {
-  const buf = term.buffer.active
-  const out: string[] = []
-  // TUIs can park the cursor above the prompt (e.g. on a spinner); read up to the last drawn row instead.
-  let end = buf.length - 1
-  while (end > 0 && !buf.getLine(end)?.translateToString(true).trim()) end--
-  for (let y = Math.max(0, end - lines); y <= end; y++) {
-    out.push(buf.getLine(y)?.translateToString(true) ?? '')
-  }
-  return out.join('\n')
-}
-
 export default function TerminalView({
   conn,
   session,
@@ -134,6 +123,8 @@ export default function TerminalView({
   const [menu, setMenu] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [text, setText] = useState('')
+  const prompt = session.needsApproval ? parsePrompt(promptScreen) : null
+  const promptIdentity = prompt ? JSON.stringify([prompt.question, prompt.details, prompt.options.map(o => [o.key, o.label])]) : ''
 
   const scrollToLatest = useCallback((): void => {
     const scroll = scrollRef.current
@@ -163,7 +154,7 @@ export default function TerminalView({
       const term = termRef.current
       if (!term) return
       setOutput(outputLines(term, cursorVisible.current))
-      setPromptScreen(screenText(term))
+      setPromptScreen(readApprovalScreen(term))
     }, 120)
   }, [])
 
@@ -239,7 +230,7 @@ export default function TerminalView({
   // 新的審批出現就重新可以按
   useEffect(() => {
     if (session.needsApproval) setAnswered(false)
-  }, [session.needsApproval])
+  }, [id, session.needsApproval, promptIdentity])
 
   const send = (seq: string): void => {
     conn.send({ t: 'input', id, data: seq })
@@ -262,7 +253,6 @@ export default function TerminalView({
 
   const exited = exitCode !== undefined
   const showApproval = session.needsApproval && !exited && !answered
-  const prompt = showApproval ? parsePrompt(promptScreen) : null
   // 只有這個終端真的印出過 dev server 網址才有預覽可看
   const canPreview = !!session.devPort
   // 每次點「預覽」都換一張新 ticket：ticket 是一次性的，重進來要重發

@@ -14,6 +14,7 @@ import { createRoot } from 'react-dom/client'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { trackComposition, isImeKey } from '/src/renderer/src/panels/terminal/imeGuard.ts'
+import { looksLikeApprovalPrompt, readApprovalScreen } from '/src/shared/approvalDetect.ts'
 import TerminalView from '/src/renderer/remote/TerminalView.tsx'
 import { Home, SettingsSheet } from '/src/renderer/remote/App.tsx'
 import '/src/renderer/remote/remote.css'
@@ -32,6 +33,7 @@ window.makeTerminal = (guarded) => {
   })
   term.focus()
 }
+window.desktopNeedsApproval = () => looksLikeApprovalPrompt(readApprovalScreen(window.term))
 const messages = new Set(), states = new Set()
 const write = Terminal.prototype.write
 Terminal.prototype.write = function(...args) { if (this.options.disableStdin) window.mobileTerm = this; return write.apply(this, args) }
@@ -116,7 +118,7 @@ app.whenReady().then(async () => {
       '../index': {}, './conn': { resolveConnectionEnv: () => ({}) },
       './settings': { getCustomCliPath: () => null, isCliBypassPermissions: () => false },
       '../ext/paths': { findAgentCli: () => null },
-      '../../shared/approvalDetect': { looksLikeApprovalPrompt: () => false },
+      '../../shared/approvalDetect': { looksLikeApprovalPrompt: () => false, readApprovalScreen: () => '' },
       '../../shared/portDetect': { detectDevPort: () => null }
     })[id] || require(id), ptyModule, ptyModule.exports)
     const { spawnPty, subscribePty, resizePty } = ptyModule.exports
@@ -238,6 +240,20 @@ app.whenReady().then(async () => {
     assert.deepEqual(await run('sent'), ['paste once'], 'paste unchanged')
     console.log('native IME / passthrough / Enter / paste: passed')
 
+    await run(`(async () => {
+      await new Promise(r => term.write('\\x1b[H\\x1b[2JI will approve the changes after testing.', r))
+    })()`)
+    assert.equal(await run('window.desktopNeedsApproval()'), false, 'desktop does not turn ordinary approval prose into a prompt')
+    await run(`(async () => {
+      await new Promise(r => term.write('\\x1b[H\\x1b[2JAllow command?\\r\\n❯ 1. Yes\\r\\n  2. No\\r\\nEsc to cancel', r))
+    })()`)
+    assert.equal(await run('window.desktopNeedsApproval()'), true, 'desktop recognizes the actual rendered choice menu')
+    await run(`(async () => {
+      await new Promise(r => term.write('\\x1b[H\\x1b[2JDone.\\r\\n❯ ', r))
+    })()`)
+    assert.equal(await run('window.desktopNeedsApproval()'), false, 'desktop clears approval when the prompt is erased')
+    console.log('desktop rendered-screen approval / ordinary prose / automatic clearing: passed')
+
     await run('window.mountMobile()')
     await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', {enabled:true})
     await pause()
@@ -343,6 +359,10 @@ app.whenReady().then(async () => {
     await run('requests.length = 0; document.querySelectorAll(".approval .choice")[1].click()')
     await pause()
     assert.deepEqual(await run('requests.filter(m => m.t === "input").map(m => m.data)'), ['2'], 'labeled option sends its original CLI key')
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'第二個問題？\\r\\n❯ 1. 繼續\\r\\n  2. 返回\\r\\nEsc to cancel'})`)
+    await pause()
+    assert.equal(await run('document.querySelector(".approval-q")?.textContent'), '第二個問題？', 'consecutive questions remain answerable without toggling the waiting state')
     await run(`window.renderMobile()`)
     await pause()
     console.log('approval parked cursor / spaced questions / full-height screen / fallback text and input: passed')
