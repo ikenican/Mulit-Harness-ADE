@@ -7,7 +7,9 @@ import * as path from 'node:path'
 import * as crypto from 'node:crypto'
 import { runProcess, type RunResult } from './runner'
 import { writeJsonAtomic, readJsonWithFallback } from './store'
+import { CoworkExecutor, ExecError, type ExecCli } from './executor'
 import {
+  git,
   readBaseline,
   createSnapshot,
   snapshotChanges,
@@ -45,6 +47,8 @@ import {
   type CoworkAgent,
   type CoworkBlockKind,
   type CoworkCall,
+  type CoworkContext,
+  type CoworkExecMode,
   type CoworkLimits,
   type CoworkRun,
   type CoworkRunSummary,
@@ -76,6 +80,8 @@ export interface CoworkDeps {
   /** 例如 userData/cowork */
   dataDir: string
   resolveCli(agent: CoworkAgent): ResolvedCli | { error: string }
+  /** 背景執行用：使用者平常的 CLI（完整設定，不用隔離家目錄） */
+  resolveExecCli?(agent: CoworkAgent): ExecCli | { error: string }
   emit(run: CoworkRun): void
   now?(): number
 }
@@ -90,7 +96,15 @@ export interface StartOptions {
   limits: Pick<CoworkLimits, 'maxPlanningCalls' | 'maxPlanningMinutes' | 'maxExecutionMinutes'>
   /** 各家的模型與強度；空 = 預設 */
   models?: Partial<Record<CoworkAgent, AgentModelChoice>>
+  /** 使用者勾選、已由 IPC 讀好的 skill 內容 */
+  skills?: CoworkContext['skills']
+  /** 附上 repo 裡（基線 commit）的 CLAUDE.md／AGENTS.md／GEMINI.md */
+  projectInstructions?: boolean
 }
+
+const INSTRUCTION_FILES = ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md']
+const MAX_CONTEXT_FILE = 24 * 1024
+const MAX_CONTEXT_TOTAL = 96 * 1024
 
 /** 給 IPC 回傳的錯誤：code 讓 renderer 翻譯，message 給 log */
 export class CoworkError extends Error {
@@ -125,9 +139,21 @@ export class CoworkService {
   private lastActivityEmit = new Map<string, number>()
   private shuttingDown = false
   private deps: CoworkDeps
+  private executor: CoworkExecutor
 
   constructor(deps: CoworkDeps) {
     this.deps = deps
+    this.executor = new CoworkExecutor({
+      dirOf: (run) => this.dirOf(run),
+      save: (run) => this.save(run),
+      emit: (run) => this.deps.emit(run),
+      resolveExecCli: (agent) => (this.deps.resolveExecCli ? this.deps.resolveExecCli(agent) : { error: 'execution is not available' }),
+      otherActiveRun: (run) =>
+        [...this.runs.values()].find(
+          (r) => r.id !== run.id && repoIdOf(r.repo.commonDir) === repoIdOf(run.repo.commonDir) && !COWORK_TERMINAL_PHASES.includes(r.phase)
+        ),
+      now: () => this.now()
+    })
   }
 
   private now(): number {
@@ -178,6 +204,7 @@ export class CoworkService {
           run.pending = run.pending || (step ? { step } : null)
           changed = true
         }
+        if (this.executor.recover(run)) changed = true
         if (changed) this.save(run, false)
       }
     }
@@ -187,6 +214,7 @@ export class CoworkService {
   shutdown(): void {
     this.shuttingDown = true
     for (const set of this.controllers.values()) for (const c of set) c.abort()
+    this.executor.shutdown()
   }
 
   // ── 查詢 ───────────────────────────────────────────────────────────
@@ -235,6 +263,7 @@ export class CoworkService {
     )
     if (active) throw new CoworkError('active-run-exists', undefined, { runId: active.id })
 
+    const context = await buildContext(base.root, base.head, opts)
     const id = newRunId()
     const now = this.now()
     const run: CoworkRun = {
@@ -276,6 +305,7 @@ export class CoworkService {
       reviewers: {},
       boards: [],
       calls: [],
+      ...(context ? { context } : {}),
       log: [
         { t: 'start', at: now },
         { t: 'round', round: 1, at: now, planRevision: 1 }
@@ -739,6 +769,8 @@ export class CoworkService {
   async cancel(runId: string): Promise<void> {
     const run = this.mustGet(runId)
     if (COWORK_TERMINAL_PHASES.includes(run.phase)) return
+    // 已經開始執行：用停止／清理，不能把有 worktree 的 run 直接標成取消
+    if (run.execution) throw new CoworkError('not-allowed')
     this.abortAll(run, 'cancel')
     this.nextGen(run)
     run.phase = 'cancelled'
@@ -883,9 +915,52 @@ export class CoworkService {
     this.save(run)
   }
 
+  // ── 背景執行（cowork.md §12.5）──────────────────────────────────────
+
+  async execStart(runId: string, o: { mode: CoworkExecMode; linkDeps: boolean; bypass: boolean }): Promise<void> {
+    if (o.mode !== 'sequential' && o.mode !== 'parallel') throw new CoworkError('not-allowed')
+    await this.exec(() => this.executor.start(this.mustGet(runId), o))
+  }
+
+  async execMessage(runId: string, taskId: string, text: string): Promise<void> {
+    await this.exec(() => this.executor.message(this.mustGet(runId), taskId, typeof text === 'string' ? text : ''))
+  }
+
+  async execRetry(runId: string, taskId: string): Promise<void> {
+    await this.exec(() => this.executor.retry(this.mustGet(runId), taskId))
+  }
+
+  async execPause(runId: string): Promise<void> {
+    await this.exec(() => this.executor.pause(this.mustGet(runId)))
+  }
+
+  async execResume(runId: string): Promise<void> {
+    await this.exec(() => this.executor.resume(this.mustGet(runId)))
+  }
+
+  async execMerge(runId: string): Promise<void> {
+    await this.exec(() => this.executor.merge(this.mustGet(runId)))
+  }
+
+  async execCleanup(runId: string): Promise<void> {
+    await this.exec(() => this.executor.cleanup(this.mustGet(runId)))
+  }
+
+  private async exec(fn: () => unknown): Promise<void> {
+    try {
+      await fn()
+    } catch (e) {
+      if (e instanceof ExecError) throw new CoworkError(e.code, e.message, e.data)
+      throw e
+    }
+  }
+
   delete(runId: string): void {
     const run = this.mustGet(runId)
     if (run.phase === 'meeting' || (this.inflight.get(run.id) || 0) > 0) throw new CoworkError('busy')
+    // worktree 還在就不能刪紀錄：先收尾（合併或清理），不然 .cowork/ 會留下沒人管的 worktree
+    if (run.execution && !run.execution.cleaned && !run.execution.merged) throw new CoworkError('has-worktrees')
+    if (this.executor.isRunning(run)) throw new CoworkError('busy')
     this.dropSnapshot(run)
     const dir = this.dirOf(run)
     const base = path.resolve(this.deps.dataDir)
@@ -969,6 +1044,32 @@ function pickWorst<T>(results: StepResult<T>[]): Extract<StepResult<T>, { ok: fa
     if (hit) return hit
   }
   return null
+}
+
+/** 規劃參考資料：基線 commit 的專案指示＋IPC 讀好的 skill；有大小上限 */
+async function buildContext(root: string, head: string, opts: StartOptions): Promise<CoworkContext | null> {
+  let total = 0
+  const take = (text: string): string | null => {
+    const t = text.slice(0, MAX_CONTEXT_FILE)
+    if (total + t.length > MAX_CONTEXT_TOTAL) return null
+    total += t.length
+    return t
+  }
+  const instructions: CoworkContext['instructions'] = []
+  if (opts.projectInstructions !== false) {
+    for (const file of INSTRUCTION_FILES) {
+      const text = await git(root, ['show', `${head}:${file}`]).catch(() => '')
+      const t = text.trim() ? take(text) : null
+      if (t) instructions.push({ file, content: t })
+    }
+  }
+  const skills: CoworkContext['skills'] = []
+  for (const k of Array.isArray(opts.skills) ? opts.skills : []) {
+    if (!k || typeof k.content !== 'string' || typeof k.name !== 'string') continue
+    const t = take(k.content)
+    if (t) skills.push({ key: String(k.key), name: k.name.slice(0, 200), content: t })
+  }
+  return instructions.length || skills.length ? { instructions, skills } : null
 }
 
 function isRun(v: unknown): v is CoworkRun {

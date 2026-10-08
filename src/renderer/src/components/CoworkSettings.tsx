@@ -1,9 +1,10 @@
-// 設定視窗的 Cowork 分頁：主席、預設與會者、主席是否接任務、每場會議的上限。
+// 設定視窗的 Cowork 分頁：主席、預設與會者、主席是否接任務、規劃參考資料、每場會議的上限。
 // 只改 SettingsModal 的 settings 狀態，由底部「儲存」一起寫回（不自己存檔，避免被 modal 的舊狀態蓋掉）。
 import { useEffect, useState } from 'react'
 import AgentMark from '@/components/AgentMark'
 import { useTranslation } from '@/i18n'
 import ModelPicker, { useModelCatalogs } from '@panels/cowork/ModelPicker'
+import type { ExtItem } from '../../../preload/index'
 import {
   COWORK_AGENTS,
   agentLabel,
@@ -24,11 +25,17 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
   const cw = sanitizeCoworkSettings(value)
   const [caps, setCaps] = useState<CoworkCapability[]>([])
   const { catalogs, refresh } = useModelCatalogs()
+  // 規劃時可附上的 skill：沿用擴充功能頁的盤點（有 SKILL.md 的才列）
+  const [skills, setSkills] = useState<ExtItem[] | null>(null)
 
   useEffect(() => {
     window.api.cowork.capabilities(true).then((r) => {
       if (r.ok) setCaps(r.data.agents)
     })
+    window.api.ext
+      .inventory()
+      .then((items) => setSkills(items.filter((i) => i.kind === 'skill' && i.agents.some((a) => a.detail?.endsWith('SKILL.md')))))
+      .catch(() => setSkills([]))
   }, [])
 
   const capOf = (a: CoworkAgent): CoworkCapability | undefined => caps.find((c) => c.agent === a)
@@ -198,6 +205,57 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
                 </label>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="macos-section">
+        <span className="macos-section-header">{t('settings.coworkContextSection')}</span>
+        <div className="macos-inset-group">
+          <div className="macos-row">
+            <div className="macos-row-main">
+              <div className="macos-row-info">
+                <span className="macos-row-title">{t('settings.coworkProjectInstructions')}</span>
+                <span className="macos-row-sub">{t('settings.coworkProjectInstructionsSub')}</span>
+              </div>
+              <div className="macos-row-right">
+                <label className="apple-toggle">
+                  <input
+                    type="checkbox"
+                    checked={cw.projectInstructions}
+                    onChange={(e) => onChange({ ...cw, projectInstructions: e.target.checked })}
+                  />
+                  <span className="apple-toggle-slider" />
+                </label>
+              </div>
+            </div>
+          </div>
+          <div style={{ padding: '12px 16px' }}>
+            <div className="macos-row-title">{t('settings.coworkSkills')}</div>
+            <p style={{ margin: '2px 0 8px', color: 'var(--fg-dim)', fontSize: 'var(--text-size-caption)', lineHeight: 1.5 }}>
+              {t('settings.coworkSkillsSub')}
+            </p>
+            {skills === null ? (
+              <span className="macos-row-sub">…</span>
+            ) : skills.length === 0 ? (
+              <span className="macos-row-sub">{t('settings.coworkNoSkills')}</span>
+            ) : (
+              <div className="cw-skill-list">
+                {skills.map((s) => (
+                  <label key={s.id} className="cw-skill" title={s.description}>
+                    <input
+                      type="checkbox"
+                      checked={cw.skills.includes(s.id)}
+                      onChange={(e) =>
+                        onChange({ ...cw, skills: e.target.checked ? [...cw.skills, s.id] : cw.skills.filter((k) => k !== s.id) })
+                      }
+                    />
+                    <span className="cw-skill-name">{s.name}</span>
+                    {s.description && <span className="cw-skill-desc">{s.description}</span>}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

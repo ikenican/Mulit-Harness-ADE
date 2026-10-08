@@ -1,7 +1,7 @@
 # Cowork.md — 多 Agent 協作模式設計計畫
 
 - 日期：2026-10-07（Asia/Taipei）
-- 狀態：**P1 已實作**（P0 探測結果與實作上的偏離見 §12）；P2 以後未實作
+- 狀態：**P1 已實作**；背景執行（取代原 P2 的 PTY 派送，含同時執行）見 §12.5
 - 沿革：Claude Opus 5 原稿 → Codex 覆核修訂 → Claude Opus 5.5 合併（各版差異見附錄 B）
 - 原稿基準：`master` @ `b6c7841`（v0.1.38）
 - 驗證範圍：讀過原始碼、CLI help 與官方文件；**未執行模型任務，未實作 Cowork**
@@ -508,11 +508,47 @@ Antigravity 的模型 ID 本身就帶強度：`--model gemini-3.8-flash-medium` 
 
 模型名稱與強度會接進命令列（codex 的強度還會被當成 TOML 值），只接受英數字與 `. _ - : / @`，不合法的自訂名稱會在輸入框標紅，不會被默默換成預設。只有 Claude 會回報實際用的模型；Codex 與 Antigravity 顯示的是指定的值。
 
-### 12.5 已知限制
+### 12.5 規劃參考資料與背景執行（2026-10-08）
+
+使用者的要求：規劃（開會）只碰 skill 與專案指示；核准後在 Cowork 裡選擇開始執行，任務在背景交給對應的 agent，執行時功能全開；最終回覆與後續互動都留在 Cowork，不切到終端。
+
+**規劃參考資料。** 「設定 › Cowork › 規劃參考資料」可以勾選 skill（沿用擴充功能頁的盤點，只列有 SKILL.md 的），並決定是否附上專案指示。開會時把基線 commit 的 `CLAUDE.md`／`AGENTS.md`／`GEMINI.md`（`git show <base>:<file>`，不讀工作區裡未 commit 的版本）與勾選的 SKILL.md 內容固定在 `run.context`，當成「資料」附在每一輪規劃 prompt 的開頭，並註明不能改變唯讀規則。skill 的路徑由 main 從盤點結果解析，不接受 renderer 傳來的路徑。單檔 24 KB、總計 96 KB 上限。MCP、外掛與 hook 在規劃時維持關閉（§12.1 的唯讀方案不變）。
+
+**背景執行。** 核准後的「輪到你」卡片改成執行選項：
+
+| 選項 | worktree 與分支 | 排程 | 收尾 |
+|---|---|---|---|
+| 依序執行 | 一個：`.cowork/<runId>/main`，分支 `cowork/<runId>/main` | 依相依順序一次一項，每項疊在前一項上 | 結果就是 main 分支 |
+| 同時執行 | 每家 agent 一個：`.cowork/<runId>/<agent>`，分支 `cowork/<runId>/<agent>` | 不同 worktree 的任務可同時跑；同一個 worktree 一次一項；前置任務在別的 worktree 完成時，先 cherry-pick 它的 commit 再開始 | 從基線開 `cowork/<runId>/integration`，依相依順序 cherry-pick 所有任務的 commit；衝突就還原並回報是哪一項 |
+
+- **位置**：worktree 開在使用者的 repo 裡（`<repo>/.cowork/<runId>/`），`git worktree list` 與分支清單看得到平行展開的狀態。`.cowork/` 寫進本機的 `.git/info/exclude`，主工作區的 `git status` 保持乾淨，也不動 repo 追蹤的 `.gitignore`。這也避開了 Codex 的 Windows sandbox 讀不到使用者目錄的問題（§12.1）。
+- **依賴**：可選擇把主工作區的 `node_modules` 用 junction 連進 worktree（只在 worktree 會忽略 `node_modules` 時才連，免得被 commit）；清理時先拆 junction 再移除 worktree。
+- **完整設定**：執行用使用者平常的 CLI 與設定，沒有規劃時的隔離（agy 不用隔離家目錄、codex 不加 `--ignore-user-config`），所以使用者的 skill、MCP、外掛與 hook 都會載入。模型與強度沿用這場會議的選擇。
+- **權限**：照開始執行當下「設定」裡的 Bypass（整場沿用，記在 `execution.bypass`）。開啟時分別帶 `--permission-mode bypassPermissions`、`--dangerously-bypass-approvals-and-sandbox`、`--dangerously-skip-permissions`。關閉時用不需要人點的受限模式：Claude `--permission-mode acceptEdits`（只自動接受改檔）、Codex `-c sandbox_mode="workspace-write"`；agy 沒有這種模式，遇到需要核准的工具會中止，畫面會提示。
+- **headless 與接續**（2026-10-08 實測，三家都能在同一個 session 第二輪改檔）：
+
+| CLI | 第一輪 | 接續 | session id 來源 |
+|---|---|---|---|
+| Claude | `-p --output-format stream-json --verbose` | 加 `--resume <id>` | `system/init` 與 `result` 的 `session_id` |
+| Codex | `exec --json -o <file> -C <worktree> -` | `exec resume --json -o <file> <id> -` | `thread.started` 的 `thread_id` |
+| Antigravity | `--input-format stream-json --output-format stream-json -p=` | 加 `--conversation <id>` | `init` 的 `conversation_id` |
+
+- **進度與回覆**：逐行解析 stream，把工具動作縮成一行（路徑轉成相對 worktree；Codex 在 Windows 包的 `powershell.exe -Command` 外殼會去掉），最近 40 筆存在這一輪；回覆取最終結果（Codex 用 `-o` 的最後一則訊息補）。時間軸在「開始執行」分隔線下為每個任務放一張卡：Cowork 的交辦（折疊）、進度、回覆、使用者的追問。與會者列改顯示每家正在做哪一項。
+- **追問**：輸入框改成「選任務 → 送出」，接續該任務的 session；改動另成一個 commit，整合結果重算。也可以對失敗、卡住或被停止的任務「重新執行」（新的 session，worktree 裡已有的修改保留）。
+- **checkpoint**：agent 被要求不要自己 commit、切分支或動 worktree；每一輪成功結束後由 Cowork `git add -A` 並 commit（訊息 `cowork(<runId>): <taskId> <title>`）。repo 沒設 `user.name`／`user.email` 時用 `Agent Workbench Cowork` 的身分，有設就用使用者的。
+- **停止、預算與重啟**：「停止」終止還在跑的 agent 並暫停排程；「繼續」時被停掉的任務有 session 就接續，沒有就重排。執行時間只算有 agent 在跑的區間，平行只算一次，用完就自動停止（`maxExecutionMinutes`）。app 重啟時還在跑的任務標成被中斷，整個執行先暫停等使用者繼續。
+- **收尾**：任務都完成後進入 `review`，顯示結果分支與 `git diff --stat`。「合併到 <來源分支>」只在主工作區乾淨、而且還在原本的來源分支時執行 `merge --no-ff`，衝突就 `merge --abort` 還原，交給使用者自己合併。「移除 worktree」只動 `.cowork/` 底下，分支保留。還有 worktree 的 run 不能刪除紀錄；已開始執行的 run 不能用「取消會議」。
+
+新的階段：`executing`、`review`、`completed`（終態）。`review` 仍佔用「每個 repo 一個活動 run」的名額，合併或清理後才能開下一場。
+
+與 §5 原設計的差異：P2 原本規劃用專用 PTY 互動派送，靠 MCP 回報（`cowork.task()` ACK）判斷完成，而且只能輪流執行。改成 headless 之後，完成與否看 CLI 的最終結果與結束碼，不需要 MCP 回報與畫面判斷；也因此可以同時執行（原 P3）。尚未實作：跨 dev／打包版的 repo lock（§7）、`resources` 的互斥（§2.3）、整合衝突的協助解決。
+
+### 12.6 已知限制
 
 - 終端停靠在底部（預設 300px 高）時，會議畫面很擠。停靠右側，或搭配 PR #35（預設收起中央欄）就有足夠空間。
 - 遇到未知的 `schemaVersion` 時目前直接略過，不是 §7 說的「只能讀取或匯出」。
 - 規劃預算只能約束呼叫次數與時間；Claude 有實際金額，Codex 只有 token，兩者都不是精確的花費上限（§8）。
+- 背景執行時 agent 的完整對話只存在各家 CLI 自己的 session 裡；Cowork 只保留每一輪的最終回覆與最近 40 個工具動作。
 
 ## 附錄 A：外部參考
 
@@ -532,4 +568,5 @@ Antigravity 的模型 ID 本身就帶強度：`--model gemini-3.8-flash-medium` 
 | 會議室呈現層（Claude Opus 5.5） | `bf14bb8` | 新增 §6.3：與會者列、進行中指示、「輪到你」卡片、R2 並排、訊息與任務板連動；列出不做的擬真元素與理由 |
 | P1 實作紀錄（Claude Opus 5.5） | `a77eef1` | 新增 §12：P0 探測結果、與設計的偏離（快照位置、`approved` 階段、新終端派送要等就緒）、驗證與已知限制 |
 | Antigravity 參與規劃（Claude Opus 5.5） | `3ea87de` | §12.1 補上 Antigravity 的四層唯讀方案與實測；§3.1 能力表更新；預設規劃時間改為 20 分鐘 |
-| 模型與推理強度（Claude Opus 5.5） | 本版 | 新增 §12.4：三家可選模型與強度的來源與規則，Codex 預設改為沿用使用者 config.toml，Antigravity 的 ID 與強度對應 |
+| 模型與推理強度（Claude Opus 5.5） | `223d949` | 新增 §12.4：三家可選模型與強度的來源與規則，Codex 預設改為沿用使用者 config.toml，Antigravity 的 ID 與強度對應 |
+| 規劃參考資料與背景執行（Claude Opus 5.5） | 本版 | 新增 §12.5：規劃附上專案指示與勾選的 skill；核准後在 Cowork 裡背景執行（repo 內 worktree、依序或同時、照 Bypass 設定、追問接續 session、每輪 commit、合併與清理）；已知限制改為 §12.6 |

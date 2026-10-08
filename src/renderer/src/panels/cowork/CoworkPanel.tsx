@@ -7,6 +7,7 @@ import AgentMark from '@/components/AgentMark'
 import { IconChevronDown, IconClose, IconCowork, IconPlus, IconTrash } from '@/components/Icons'
 import { useWorkbench, openSettings } from '@/store'
 import ModelPicker, { choiceLabel, useModelCatalogs } from './ModelPicker'
+import { ExecComposer, ExecLauncher, ExecTasks, ExecTurnCard } from './ExecView'
 import { useTranslation } from '@/i18n'
 import {
   COWORK_AGENTS,
@@ -90,7 +91,9 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
     refreshList().then((list) => {
       if (!alive) return
       // 進行中的優先；否則最近一場若已核准也打開（P1 核准後正是要派送任務的時候）
-      const open = list.find((x) => !COWORK_TERMINAL_PHASES.includes(x.phase)) || (list[0]?.phase === 'approved' ? list[0] : undefined)
+      const open =
+        list.find((x) => !COWORK_TERMINAL_PHASES.includes(x.phase)) ||
+        (list[0] && ['approved', 'completed'].includes(list[0].phase) ? list[0] : undefined)
       setRunId(open ? open.id : null)
     })
     return () => {
@@ -177,7 +180,7 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
           </div>
         </div>
         <div className="cw-topbar-actions">
-          {run && run.phase !== 'meeting' && (
+          {run && run.phase !== 'meeting' && run.phase !== 'executing' && (
             <button type="button" className="term-btn-icon" title={t('cowork.deleteMeeting')} onClick={deleteRun}>
               <IconTrash size={13} />
             </button>
@@ -415,11 +418,12 @@ function RunView({
   const [boardOpen, setBoardOpen] = useState(true)
   const [editing, setEditing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [execTarget, setExecTarget] = useState<string | null>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const timelineRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (run.phase !== 'meeting') return
+    if (run.phase !== 'meeting' && run.phase !== 'executing') return
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [run.phase])
@@ -461,7 +465,21 @@ function RunView({
       <div className="cw-main">
         <Roster run={run} t={t} now={now} onCancel={() => act(window.api.cowork.cancel(run.id))} />
         <div className="cw-timeline" ref={timelineRef}>
-          <Timeline run={run} t={t} issueById={issueById} highlight={highlight} onHighlight={setHighlight} />
+          <Timeline
+            run={run}
+            t={t}
+            issueById={issueById}
+            highlight={highlight}
+            onHighlight={setHighlight}
+            exec={{
+              act,
+              now,
+              onFollowUp: (id) => {
+                setExecTarget(id)
+                composerRef.current?.focus()
+              }
+            }}
+          />
           <TurnCard
             run={run}
             t={t}
@@ -478,7 +496,11 @@ function RunView({
             </div>
           )}
         </div>
-        <Composer run={run} t={t} act={act} inputRef={composerRef} />
+        {run.execution ? (
+          <ExecComposer run={run} t={t} act={act} target={execTarget} onTarget={setExecTarget} inputRef={composerRef} />
+        ) : (
+          <Composer run={run} t={t} act={act} inputRef={composerRef} />
+        )}
       </div>
       <aside className="cw-board">
         <div className="cw-board-head">
@@ -533,7 +555,11 @@ function RunView({
 
 function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; onCancel: () => void }): JSX.Element {
   const running = run.calls.filter((c) => c.status === 'running')
-  const yourTurn = run.phase === 'awaiting-approval' || run.phase === 'blocked' || run.phase === 'paused'
+  const ex = run.execution
+  const yourTurn =
+    run.phase === 'awaiting-approval' || run.phase === 'blocked' || run.phase === 'paused' || run.phase === 'review' || !!ex?.paused
+  const execMin = ex ? Math.floor((ex.msUsed + (ex.activeSince ? now - ex.activeSince : 0)) / 60000) : 0
+  const execCost = ex ? Object.values(ex.tasks).reduce((n, x) => n + (x.usage?.costUsd || 0), 0) : 0
   const usedMin = Math.floor(planningMsUsed(run, now) / 60000)
   // 最近一次呼叫實際用的模型（claude 有回報實際值）；還沒呼叫過就顯示這場會議指定的值
   const modelOf = (a: CoworkAgent): string => {
@@ -542,6 +568,15 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
   }
 
   const statusOf = (a: CoworkAgent): { text: string; cls: string; call?: (typeof running)[number] } => {
+    if (ex) {
+      const mine = Object.entries(ex.tasks).filter(([, x]) => x.agent === a)
+      const busy = mine.find(([, x]) => x.status === 'running')
+      if (busy) return { text: t('cowork.status_executing', { task: busy[0], elapsed: mmss(now - (busy[1].startedAt || now)) }), cls: 'thinking' }
+      if (!mine.length) return { text: t('cowork.status_idle'), cls: 'muted' }
+      if (mine.some(([, x]) => ['failed', 'blocked'].includes(x.status))) return { text: t('cowork.status_failed'), cls: 'failed' }
+      if (mine.every(([, x]) => x.status === 'done')) return { text: t('cowork.status_tasksDone', { count: mine.length }), cls: 'done' }
+      return { text: t('cowork.status_waiting'), cls: '' }
+    }
     const call = running.find((c) => c.agent === a)
     if (call) {
       return {
@@ -592,6 +627,8 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
         </div>
       </div>
       <div className="cw-budget" title={t('cowork.budgetTitle')}>
+        {ex && <span>{t('cowork.budgetExec', { used: execMin, max: run.limits.maxExecutionMinutes })}</span>}
+        {execCost > 0 && <span>{t('cowork.budgetExecCost', { cost: execCost.toFixed(2) })}</span>}
         <span>{t('cowork.budgetCalls', { used: run.budget.planningCallsUsed, max: run.limits.maxPlanningCalls })}</span>
         <span>{t('cowork.budgetMinutes', { used: usedMin, max: run.limits.maxPlanningMinutes })}</span>
         {run.budget.costUsd > 0 && <span>{t('cowork.budgetCost', { cost: run.budget.costUsd.toFixed(2) })}</span>}
@@ -608,13 +645,15 @@ function Timeline({
   t,
   issueById,
   highlight,
-  onHighlight
+  onHighlight,
+  exec
 }: {
   run: CoworkRun
   t: T
   issueById: Map<string, CoworkIssue>
   highlight: Highlight
   onHighlight: (h: Highlight) => void
+  exec: { act: (p: Promise<CoworkResult<unknown>>) => Promise<boolean>; now: number; onFollowUp: (taskId: string) => void }
 }): JSX.Element {
   const items: JSX.Element[] = []
   const boardAt = (rev: number): { board: CoworkBoard; prev: CoworkBoard | null } | null => {
@@ -740,6 +779,41 @@ function Timeline({
             {t('cowork.cancelledLine')}
           </Divider>
         )
+        break
+      case 'exec-start':
+        items.push(
+          <Divider key={key}>
+            {t('cowork.execStartedLine', { mode: t(e.mode === 'parallel' ? 'cowork.execParallel' : 'cowork.execSequential') })}
+            {e.bypass ? ` · ${t('cowork.execBypassTag')}` : ''}
+          </Divider>
+        )
+        // 每個任務的對話串都放在這裡，進度與追問在卡片裡更新
+        items.push(<ExecTasks key={`${key}-tasks`} run={run} t={t} act={exec.act} now={exec.now} onFollowUp={exec.onFollowUp} />)
+        break
+      case 'exec-paused':
+        items.push(<SysLine key={key}>{t(`cowork.execPaused_${e.reason}`)}</SysLine>)
+        break
+      case 'exec-resumed':
+        items.push(<SysLine key={key}>{t('cowork.execResumedLine')}</SysLine>)
+        break
+      case 'integrated':
+        // 追問後會重新整合；只顯示最新一次
+        if (run.log.slice(idx + 1).some((x) => x.t === 'integrated')) break
+        items.push(
+          <Divider key={key} tone={e.ok ? 'ok' : 'warn'}>
+            {e.ok ? t('cowork.execIntegratedLine', { branch: e.message }) : t('cowork.execIntegration_conflict')}
+          </Divider>
+        )
+        break
+      case 'merged':
+        items.push(
+          <Divider key={key} tone="ok">
+            ✓ {t('cowork.execMerged', { branch: e.into, commit: e.commit.slice(0, 7) })}
+          </Divider>
+        )
+        break
+      case 'cleaned':
+        items.push(<SysLine key={key}>{t('cowork.execCleanedLine')}</SysLine>)
         break
       case 'blocked':
         // 目前的卡關由「輪到你」卡片處理；歷史上的卡關只留一行
@@ -1044,19 +1118,8 @@ function TurnCard({
       </div>
     )
   }
-  if (run.phase === 'approved') {
-    return (
-      <div className="cw-turn ok" role="status" ref={ref} tabIndex={-1}>
-        <div className="cw-turn-title">✓ {t('cowork.approvedTitle', { rev: run.approvedPlanRevision ?? run.planRevision })}</div>
-        <div className="cw-turn-desc">{t('cowork.approvedDesc')}</div>
-        <div className="cw-turn-actions">
-          <button type="button" className="cw-btn" onClick={onFeedback}>
-            {t('cowork.changePlan')}
-          </button>
-        </div>
-      </div>
-    )
-  }
+  if (run.phase === 'approved') return <ExecLauncher run={run} t={t} act={act} onChangePlan={onFeedback} />
+  if (run.phase === 'executing' || run.phase === 'review' || run.phase === 'completed') return <ExecTurnCard run={run} t={t} act={act} />
   if (run.phase === 'awaiting-approval') {
     return (
       <div className="cw-turn" role="status" ref={ref} tabIndex={-1}>
@@ -1308,6 +1371,9 @@ function TaskCard({
       <div className="cw-task-head" onClick={onClick}>
         <span className="cw-task-id">{task.id}</span>
         <span className="cw-task-title">{task.title}</span>
+        {run.execution?.tasks[task.id] && (
+          <span className={`cw-pill exec-${run.execution.tasks[task.id].status}`}>{t(`cowork.task_${run.execution.tasks[task.id].status}`)}</span>
+        )}
       </div>
       <div className="cw-task-meta">
         <span className="cw-assignee">

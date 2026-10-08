@@ -1180,6 +1180,225 @@
   background: var(--red);
 }
 
+/* ── 背景執行 ─────────────────────────────────────── */
+.cw-pill.phase-executing {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cw-pill.phase-review {
+  color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+}
+.cw-pill.phase-completed,
+.cw-pill.exec-done {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+.cw-pill.exec-running {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.cw-pill.exec-failed,
+.cw-pill.exec-blocked {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+.cw-pill.exec-cancelled {
+  color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+}
+.term-cowork-tab .cw-tab-dot.phase-executing {
+  background: var(--accent);
+  animation: cw-dots 1.2s ease-in-out infinite;
+}
+.term-cowork-tab .cw-tab-dot.phase-review {
+  background: var(--orange);
+}
+.term-cowork-tab .cw-tab-dot.phase-completed {
+  background: var(--green);
+}
+
+.cw-exec-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+.cw-exec-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.cw-exec-mode:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+.cw-exec-mode.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg2));
+}
+.cw-exec-mode-title {
+  font-size: var(--text-size-label);
+  font-weight: 600;
+}
+.cw-exec-mode-desc {
+  font-size: var(--text-size-caption);
+  color: var(--fg-dim);
+  line-height: 1.45;
+}
+.cw-exec-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-size-meta);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.cw-exec-perm {
+  font-size: var(--text-size-caption);
+  color: var(--fg-dim);
+}
+.cw-exec-perm.bypass {
+  color: var(--orange);
+}
+
+.cw-exec-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.cw-exec-tasks > * {
+  flex-shrink: 0;
+}
+.cw-exec-task .cw-msg-head {
+  flex-wrap: wrap;
+}
+.cw-exec-task-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-size-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cw-exec-task.status-pending {
+  opacity: 0.7;
+}
+.cw-exec-branch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-size-caption);
+  margin-bottom: var(--space-3);
+}
+.cw-exec-branch code,
+.cw-turn-desc code {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.cw-exec-turns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.cw-exec-brief {
+  max-height: 240px;
+  overflow: auto;
+  margin-top: var(--space-3);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.cw-exec-user {
+  align-self: flex-end;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  max-width: min(82%, 560px);
+  padding: var(--space-3) var(--space-5);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg2));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.cw-exec-agent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.cw-exec-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border: 1px solid var(--border-subtle);
+}
+.cw-exec-step {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cw-exec-reply {
+  font-size: var(--text-size-label);
+  line-height: 1.55;
+}
+.cw-exec-stat {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre;
+}
+.cw-exec-target {
+  width: auto;
+  max-width: 160px;
+  flex-shrink: 0;
+}
+
+/* Settings › Cowork：規劃時附上的 skill */
+.cw-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow: auto;
+}
+.cw-skill {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.cw-skill-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cw-skill-desc {
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .cw-run {
     grid-template-columns: minmax(0, 1fr);

@@ -157,3 +157,151 @@ export function scopeEscapes(treeRoot: string, relPath: string): string | null {
   if (rel.startsWith('..') || path.isAbsolute(rel)) return `${relPath} resolves outside the repository (${real})`
   return null
 }
+
+// ── 背景執行用的 worktree（放在 repo 內的 .cowork/<runId>/，git worktree list 與分支清單都看得到） ──
+
+/** 把 .cowork/ 加進本機的 .git/info/exclude：主工作區的 git status 保持乾淨，也不動 repo 追蹤的 .gitignore */
+export function excludeCoworkDir(commonDir: string): void {
+  const file = path.join(commonDir, 'info', 'exclude')
+  let text = ''
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch {
+    /* 還沒有這個檔 */
+  }
+  if (text.split(/\r?\n/).some((l) => l.trim() === '.cowork/')) return
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}# Agent Workbench Cowork worktrees\n.cowork/\n`)
+}
+
+export async function addWorktree(repoRoot: string, dir: string, branch: string, base: string): Promise<void> {
+  fs.mkdirSync(path.dirname(dir), { recursive: true })
+  // 分支已存在就失敗（不覆寫使用者或上一場會議的分支）
+  await git(repoRoot, ['worktree', 'add', '-b', branch, dir, base])
+}
+
+/** 主工作區有 node_modules、且 worktree 會忽略它時，用 junction 連過去（不用再安裝；也不會被 commit） */
+export async function linkNodeModules(repoRoot: string, worktree: string): Promise<boolean> {
+  const src = path.join(repoRoot, 'node_modules')
+  const dst = path.join(worktree, 'node_modules')
+  if (!fs.existsSync(src) || fs.existsSync(dst)) return false
+  try {
+    await git(worktree, ['check-ignore', '-q', 'node_modules'])
+  } catch {
+    return false // 沒被忽略：連過去會被 git add -A 收進 commit
+  }
+  fs.symlinkSync(src, dst, 'junction')
+  return true
+}
+
+/** repo 沒設 user.name／user.email 時（commit、cherry-pick、merge 都需要）用的身分；有設就用使用者的 */
+async function identity(dir: string): Promise<string[]> {
+  const has = async (k: string): Promise<boolean> => !!(await git(dir, ['config', k]).catch(() => '')).trim()
+  if ((await has('user.name')) && (await has('user.email'))) return []
+  return ['-c', 'user.name=Agent Workbench Cowork', '-c', 'user.email=cowork@agent-workbench.invalid']
+}
+
+/** 把 worktree 的所有變動 commit；沒有變動回 null */
+export async function commitAll(dir: string, message: string): Promise<string | null> {
+  await git(dir, ['add', '-A'])
+  try {
+    await git(dir, ['diff', '--cached', '--quiet'])
+    return null
+  } catch {
+    /* 有變動 */
+  }
+  await git(dir, [...(await identity(dir)), 'commit', '-q', '-m', message])
+  return (await git(dir, ['rev-parse', 'HEAD'])).trim()
+}
+
+export async function hasChanges(dir: string): Promise<boolean> {
+  return (await git(dir, ['status', '--porcelain', '--untracked-files=all'])).trim().length > 0
+}
+
+/** cherry-pick 一串 commit；衝突就還原並回報是哪一個 */
+export async function cherryPickAll(dir: string, commits: string[]): Promise<{ ok: true } | { ok: false; commit: string; message: string }> {
+  const id = await identity(dir)
+  for (const c of commits) {
+    try {
+      // 已經在這條線上的 commit 不重複套用
+      await git(dir, ['merge-base', '--is-ancestor', c, 'HEAD'])
+      continue
+    } catch {
+      /* 還沒有 */
+    }
+    try {
+      await git(dir, [...id, 'cherry-pick', '--allow-empty', '--keep-redundant-commits', c])
+    } catch (e) {
+      try {
+        await git(dir, ['cherry-pick', '--abort'])
+      } catch {
+        /* 沒有進行中的 cherry-pick */
+      }
+      return { ok: false, commit: c, message: (e as Error).message.slice(0, 500) }
+    }
+  }
+  return { ok: true }
+}
+
+export async function diffStat(dir: string, base: string, head: string): Promise<string> {
+  return (await git(dir, ['diff', '--stat', `${base}..${head}`])).trim().slice(0, 8000)
+}
+
+/**
+ * 把分支合併回使用者的分支：主工作區必須乾淨、而且目前就在原本的來源分支上；
+ * 衝突就 merge --abort 還原，不自動選邊。
+ */
+export async function mergeBranch(
+  repoRoot: string,
+  expectBranch: string,
+  branch: string,
+  message: string
+): Promise<{ ok: true; commit: string } | { ok: false; reason: 'wrong-branch' | 'dirty' | 'conflict'; message: string }> {
+  const current = (await git(repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+  if (current !== expectBranch) return { ok: false, reason: 'wrong-branch', message: current }
+  // 只看已追蹤檔案：未追蹤的檔案（例如 app 自己的 .workbench/）不擋；真的會被覆寫時 git merge 自己會拒絕
+  const dirty = (await git(repoRoot, ['status', '--porcelain', '--untracked-files=no'])).trim()
+  if (dirty) return { ok: false, reason: 'dirty', message: dirty.split(/\r?\n/).slice(0, 20).join('\n') }
+  try {
+    await git(repoRoot, [...(await identity(repoRoot)), 'merge', '--no-ff', '-m', message, branch])
+  } catch (e) {
+    try {
+      await git(repoRoot, ['merge', '--abort'])
+    } catch {
+      /* 沒有進行中的 merge */
+    }
+    return { ok: false, reason: 'conflict', message: (e as Error).message.slice(0, 500) }
+  }
+  return { ok: true, commit: (await git(repoRoot, ['rev-parse', 'HEAD'])).trim() }
+}
+
+/** 移除這場會議的 worktree（分支保留，git 紀錄還在）；只動 .cowork/ 底下的路徑 */
+export async function removeWorktrees(repoRoot: string, root: string, dirs: string[]): Promise<void> {
+  const base = path.resolve(repoRoot, '.cowork')
+  for (const d of dirs) {
+    const rel = path.relative(base, path.resolve(d))
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue
+    // junction 先拆掉，免得 worktree remove 跟著進到主工作區的 node_modules
+    const nm = path.join(d, 'node_modules')
+    try {
+      if (fs.lstatSync(nm).isSymbolicLink()) fs.unlinkSync(nm)
+    } catch {
+      /* 沒有 */
+    }
+    try {
+      await git(repoRoot, ['worktree', 'remove', '--force', d])
+    } catch {
+      /* 已不在；下面的 prune 會清紀錄 */
+    }
+  }
+  await git(repoRoot, ['worktree', 'prune']).catch(() => '')
+  const relRoot = path.relative(base, path.resolve(root))
+  if (relRoot && !relRoot.startsWith('..') && !path.isAbsolute(relRoot)) {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+  try {
+    fs.rmdirSync(base)
+  } catch {
+    /* 還有別場會議的 worktree */
+  }
+}

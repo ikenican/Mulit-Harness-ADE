@@ -9,7 +9,9 @@ import { CoworkService, CoworkError, type ResolvedCli } from '../cowork/orchestr
 import { readBaseline } from '../cowork/git'
 import { launchPlan } from '../cowork/runner'
 import { findAgentCli } from '../ext/paths'
-import { loadSettings, saveSettings } from './settings'
+import { loadSettings, saveSettings, isCliBypassPermissions } from './settings'
+import { buildInventory } from '../ext/inventory'
+import type { ExecCli } from '../cowork/executor'
 import { getWorkspaceForEvent } from '../index'
 import {
   COWORK_AGENTS,
@@ -263,6 +265,46 @@ function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
   return { command: cap.path }
 }
 
+/** 背景執行：使用者平常的 CLI 與完整設定（MCP／skill／外掛／hook 照常載入），不用規劃時的隔離家目錄 */
+function resolveExecCli(agent: CoworkAgent): ExecCli | { error: string } {
+  const cap = capabilities().find((c) => c.agent === agent)
+  if (!cap) return { error: 'unknown agent' }
+  if (!cap.enabled) return { error: 'disabled in Settings' }
+  if (!cap.path) return { error: cap.reason || 'not installed' }
+  return { command: cap.path }
+}
+
+const MAX_SKILL_BYTES = 24 * 1024
+
+/**
+ * 設定裡勾選的 skill → SKILL.md 內容。路徑一律由這裡從盤點結果找，不信任 renderer 傳來的路徑；
+ * 同一個 skill 裝在多家時取第一個讀得到的。
+ */
+function readSelectedSkills(workspace: string, keys: string[]): { key: string; name: string; content: string }[] {
+  if (!keys.length) return []
+  let items
+  try {
+    items = buildInventory(workspace, new Set())
+  } catch {
+    return []
+  }
+  const out: { key: string; name: string; content: string }[] = []
+  for (const key of keys) {
+    const item = items.find((i) => i.kind === 'skill' && i.id === key)
+    if (!item) continue
+    for (const a of item.agents) {
+      if (!a.detail || path.basename(a.detail) !== 'SKILL.md') continue
+      try {
+        out.push({ key, name: item.name, content: fs.readFileSync(a.detail, 'utf8').slice(0, MAX_SKILL_BYTES) })
+        break
+      } catch {
+        /* 換下一家 */
+      }
+    }
+  }
+  return out
+}
+
 /**
  * agy 沒有 flag 能在單次執行停用使用者的全域 MCP／外掛／hooks，所以規劃時給它一個隔離的家目錄
  * （Go 在 Windows 以 USERPROFILE 找家目錄）。登入憑證在 OS 認證管理員，不受影響（2026-10-08 實測）。
@@ -337,7 +379,7 @@ export function shutdownCowork(): void {
 }
 
 export function registerCoworkHandlers(): void {
-  service = new CoworkService({ dataDir: path.join(app.getPath('userData'), 'cowork'), resolveCli, emit: broadcast })
+  service = new CoworkService({ dataDir: path.join(app.getPath('userData'), 'cowork'), resolveCli, resolveExecCli, emit: broadcast })
   try {
     service.init()
   } catch (e) {
@@ -362,8 +404,11 @@ export function registerCoworkHandlers(): void {
         const settings = loadSettings()
         const cw = sanitizeCoworkSettings(settings.cowork)
         const participants = Array.isArray(req?.participants) ? req.participants.filter((a) => COWORK_AGENTS.includes(a)) : []
+        const workspace = getWorkspaceForEvent(event)
         const run = await svc().start({
-          workspace: getWorkspaceForEvent(event),
+          workspace,
+          skills: readSelectedSkills(workspace, cw.skills),
+          projectInstructions: cw.projectInstructions,
           prompt: req?.prompt,
           chair: req?.chair,
           participants,
@@ -415,4 +460,23 @@ export function registerCoworkHandlers(): void {
     wrap(() => svc().logDispatch(String(runId), String(taskId), String(target ?? '')))
   )
   ipcMain.handle('cowork:delete', async (_e, runId: string) => wrap(() => svc().delete(String(runId))))
+  // 背景執行：權限照使用者目前的 Bypass 設定（開始時記下來，整場沿用）
+  ipcMain.handle('cowork:execStart', async (_e, runId: string, opts: { mode?: string; linkDeps?: boolean }) =>
+    wrap(() =>
+      svc().execStart(String(runId), {
+        mode: opts?.mode === 'parallel' ? 'parallel' : 'sequential',
+        linkDeps: opts?.linkDeps !== false,
+        bypass: isCliBypassPermissions()
+      })
+    )
+  )
+  ipcMain.handle('cowork:execMessage', async (_e, runId: string, taskId: string, text: string) =>
+    wrap(() => svc().execMessage(String(runId), String(taskId), String(text ?? '')))
+  )
+  ipcMain.handle('cowork:execRetry', async (_e, runId: string, taskId: string) => wrap(() => svc().execRetry(String(runId), String(taskId))))
+  ipcMain.handle('cowork:execPause', async (_e, runId: string) => wrap(() => svc().execPause(String(runId))))
+  ipcMain.handle('cowork:execResume', async (_e, runId: string) => wrap(() => svc().execResume(String(runId))))
+  ipcMain.handle('cowork:execMerge', async (_e, runId: string) => wrap(() => svc().execMerge(String(runId))))
+  ipcMain.handle('cowork:execCleanup', async (_e, runId: string) => wrap(() => svc().execCleanup(String(runId))))
+  ipcMain.handle('cowork:bypass', async () => wrap(() => isCliBypassPermissions()))
 }

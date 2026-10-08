@@ -30,7 +30,49 @@ if (isAgy) {
 
 const step = (prompt.match(/^Cowork step: (\S+)/m) || [])[1]
 // 記下每次呼叫：誰、哪一步、收到的參數（測模型與強度有沒有傳對）
-if (cfg.logFile) appendFileSync(cfg.logFile, JSON.stringify({ me, step, argv }) + '\n')
+if (cfg.logFile) appendFileSync(cfg.logFile, JSON.stringify({ me, step, argv, head: prompt.slice(0, 4000) }) + '\n')
+
+// ── 背景執行（沒有 schema 參數）：改 cwd 裡的檔，照各家 stream 格式回報；接續時沿用 session id ──
+if (!step) {
+  const resumeId = isCodex
+    ? argv.includes('resume') ? argv[argv.length - 2] : null
+    : argv.includes('--resume') ? argv[argv.indexOf('--resume') + 1] : argv.includes('--conversation') ? argv[argv.indexOf('--conversation') + 1] : null
+  const task = (prompt.match(/^Cowork execution: task (\S+)/m) || [])[1]
+  const sid = resumeId || `sess-${me}-${task || 'x'}`
+  if (cfg.execSlowMs) await new Promise((r) => setTimeout(r, cfg.execSlowMs))
+  const failed = task && cfg.execFail === task
+  if (!failed) {
+    if (task) {
+      writeFileSync(join(process.cwd(), `${task}.txt`), `${me} did ${task}\n`)
+      if (cfg.execConflict) writeFileSync(join(process.cwd(), 'shared.txt'), `${task}\n`)
+    } else {
+      appendFileSync(join(process.cwd(), 'followup.txt'), `${me}: ${prompt.slice(0, 60)}\n`)
+    }
+  }
+  const reply = failed ? '' : task ? `Done ${task}.` : `Follow-up done.`
+  const ev = (e) => process.stdout.write(JSON.stringify(e) + '\n')
+  const file = join(process.cwd(), task ? `${task}.txt` : 'followup.txt')
+  if (isCodex) {
+    ev({ type: 'thread.started', thread_id: sid })
+    ev({ type: 'item.started', item: { type: 'command_execution', command: 'npm test' } })
+    if (failed) ev({ type: 'turn.failed', error: { message: 'fake exec failure' } })
+    else {
+      writeFileSync(argv[argv.indexOf('-o') + 1], reply)
+      ev({ type: 'item.completed', item: { type: 'agent_message', text: reply } })
+      ev({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 10, output_tokens: 5 } })
+    }
+  } else if (isAgy) {
+    ev({ event: 'init', conversation_id: sid })
+    ev({ event: 'step_update', step_update: { state: 'ACTIVE', step_type: 'tool', tool_name: 'write_to_file', tool_info: { parameters: { TargetFile: file } } } })
+    for (const ch of reply.match(/.{1,4}/g) || []) ev({ event: 'step_update', step_update: { step_type: 'agent_response', text_delta: ch } })
+    ev({ event: 'result', result: { status: failed ? 'ERROR' : 'SUCCESS', error: failed ? 'fake exec failure' : undefined, response: reply, conversation_id: sid, usage: { input_tokens: 10, output_tokens: 2 } } })
+  } else {
+    ev({ type: 'system', subtype: 'init', session_id: sid, model: 'fake-model' })
+    ev({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: file } }] } })
+    ev({ type: 'result', subtype: failed ? 'error_during_execution' : 'success', is_error: !!failed, result: reply || 'fake exec failure', session_id: sid, total_cost_usd: 0.02, usage: { input_tokens: 5, output_tokens: 3 } })
+  }
+  process.exit(failed ? 1 : 0)
+}
 const repair = prompt.includes('Your previous reply failed validation')
 const assignable = ((prompt.match(/assignee: one of ([a-z, ]+)\./) || [])[1] || 'claude').split(',').map((s) => s.trim())
 

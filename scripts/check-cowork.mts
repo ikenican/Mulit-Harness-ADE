@@ -673,6 +673,151 @@ const three = { ...base, participants: ['claude', 'codex', 'antigravity'] as any
   console.log('e2e antigravity no output ok')
 }
 
+// ── 背景執行（§12.5）：worktree、依序／同時、追問接續、失敗重試、停止、重啟、合併、清理 ──
+{
+  const erepo = makeRepo('repo-exec')
+  fs.writeFileSync(path.join(erepo, 'CLAUDE.md'), 'PROJECT RULE: keep it small\n')
+  g(erepo, 'add', '-A')
+  g(erepo, 'commit', '-qm', 'instructions')
+  const log = path.join(tmp, 'exec-argv.log')
+  const execDeps = {
+    ...deps,
+    // 執行用使用者平常的 CLI：agy 不帶隔離家目錄
+    resolveExecCli: (agent: string) => (ineligible.has(agent) ? { error: 'not available' } : { command: process.execPath, prefixArgs: [fake] })
+  }
+  const svc5 = new CoworkService(execDeps)
+  svc5.init()
+  const wait5 = async (id: string, cond: (r: any) => boolean, ms = 30000): Promise<any> => {
+    const t0 = Date.now()
+    for (;;) {
+      const r = svc5.get(id)!
+      if (cond(r)) return r
+      if (Date.now() - t0 > ms) throw new Error(`timeout; phase=${r.phase} tasks=${JSON.stringify(r.execution?.tasks)}`)
+      await new Promise((res) => setTimeout(res, 50))
+    }
+  }
+  const meeting = async (extra: Record<string, unknown> = {}): Promise<any> => {
+    const run0 = await svc5.start({ ...three, workspace: erepo, ...extra } as any)
+    const r = await wait5(run0.id, (x) => x.phase !== 'meeting')
+    assert.equal(r.phase, 'awaiting-approval', JSON.stringify(r.block))
+    svc5.approve(r.id, r.planRevision)
+    return r
+  }
+  const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+
+  // 規劃參考資料：基線的 CLAUDE.md 與勾選的 skill 進了 prompt
+  behave({ logFile: log })
+  const skills = [{ key: 'my-skill', name: 'My Skill', content: 'SKILL BODY' }]
+  const r = await meeting({ skills })
+  assert.deepEqual(r.context.instructions, [{ file: 'CLAUDE.md', content: 'PROJECT RULE: keep it small\n' }])
+  assert.equal(r.context.skills[0].name, 'My Skill')
+  const r1call = calls().find((c) => c.step === 'R1')
+  assert.ok(r1call.head.includes('PROJECT RULE') && r1call.head.includes('--- skill: My Skill ---') && r1call.head.includes('SKILL BODY'))
+
+  // 依序：一個 worktree，t1（claude）→ t2（agy）；各一個 commit；主工作區保持乾淨
+  fs.writeFileSync(log, '')
+  await svc5.execStart(r.id, { mode: 'sequential', linkDeps: true, bypass: true })
+  await code(() => svc5.cancel(r.id), 'not-allowed')
+  let x = await wait5(r.id, (y) => y.phase === 'review')
+  const wt = x.execution.worktrees.main
+  assert.equal(path.resolve(wt.path), path.resolve(erepo, '.cowork', r.id, 'main'))
+  assert.equal(wt.branch, `cowork/${r.id}/main`)
+  assert.ok(fs.existsSync(path.join(wt.path, 't1.txt')) && fs.existsSync(path.join(wt.path, 't2.txt')))
+  assert.equal(x.execution.tasks.t1.status, 'done')
+  assert.equal(x.execution.tasks.t1.commits.length, 1)
+  assert.equal(x.execution.tasks.t1.sessionId, 'sess-claude-t1')
+  assert.equal(x.execution.tasks.t2.agent, 'antigravity')
+  assert.equal(x.execution.integration.status, 'ok')
+  assert.match(x.execution.integration.stat, /t1\.txt/)
+  assert.equal(g(erepo, 'status', '--porcelain').trim(), '', '.cowork/ is excluded from the main worktree status')
+  assert.match(g(erepo, 'log', '--format=%s', wt.branch), /t2 Use the helper[\s\S]*t1 Add the helper/)
+  const ex1 = calls()
+  assert.ok(ex1.find((c) => c.me === 'claude').argv.join(' ').includes('--permission-mode bypassPermissions'))
+  const agyExec = ex1.find((c) => c.me === 'antigravity')
+  assert.ok(agyExec.argv.includes('--dangerously-skip-permissions'))
+  assert.ok(agyExec.head.includes('Prerequisite tasks') && agyExec.head.includes('Done t1.'), 'dependent task sees the prerequisite reply')
+  const agentTurn = x.execution.tasks.t2.turns.find((t: any) => t.role === 'agent')
+  assert.equal(agentTurn.text, 'Done t2.')
+  assert.ok(agentTurn.progress[0].startsWith('write_to_file t2.txt'), agentTurn.progress[0])
+
+  // 追問：接續同一個 agy conversation，改動另成一個 commit，整合重算
+  fs.writeFileSync(log, '')
+  await code(svc5.execMessage(r.id, 't2', '   '), 'empty-feedback')
+  await svc5.execMessage(r.id, 't2', 'also add a note')
+  x = await wait5(r.id, (y) => y.phase === 'review' && y.execution.tasks.t2.commits.length === 2)
+  const resumed = calls().find((c) => c.me === 'antigravity')
+  assert.equal(resumed.argv[resumed.argv.indexOf('--conversation') + 1], 'sess-antigravity-t2')
+  assert.ok(fs.existsSync(path.join(wt.path, 'followup.txt')))
+  assert.equal(x.execution.integration.commit, g(wt.path, 'rev-parse', 'HEAD').trim())
+
+  // 有 worktree 不能刪紀錄；合併回來源分支；清理後 worktree 不在、分支還在
+  await code(() => svc5.delete(r.id), 'has-worktrees')
+  // 已追蹤的檔案有改動就不合併；未追蹤的（例如 app 的 .workbench/）不擋
+  fs.writeFileSync(path.join(erepo, 'CLAUDE.md'), 'changed\n')
+  await code(svc5.execMerge(r.id), 'merge-dirty')
+  g(erepo, 'checkout', '--', 'CLAUDE.md')
+  fs.mkdirSync(path.join(erepo, '.workbench'))
+  fs.writeFileSync(path.join(erepo, '.workbench', 'state.json'), '{}')
+  await svc5.execMerge(r.id)
+  x = svc5.get(r.id)!
+  assert.equal(x.phase, 'completed')
+  assert.ok(fs.existsSync(path.join(erepo, 't1.txt')) && fs.existsSync(path.join(erepo, 'followup.txt')))
+  await svc5.execCleanup(r.id)
+  assert.ok(!fs.existsSync(path.join(erepo, '.cowork')))
+  assert.ok(g(erepo, 'branch', '--list', `cowork/${r.id}/main`).trim(), 'branch kept after cleanup')
+  svc5.delete(r.id)
+  console.log('e2e exec sequential ok')
+
+  // 同時：每家一個 worktree；t1 失敗 → t2 等著；重試後 t2 先套用 t1 的 commit；最後整合成一條分支
+  behave({ execFail: 't1' })
+  const p = await meeting()
+  await svc5.execStart(p.id, { mode: 'parallel', linkDeps: false, bypass: false })
+  x = await wait5(p.id, (y) => y.execution.tasks.t1.status === 'failed')
+  assert.equal(x.execution.tasks.t2.status, 'pending')
+  assert.equal(x.phase, 'executing')
+  assert.deepEqual(Object.keys(x.execution.worktrees).sort(), ['antigravity', 'claude'])
+  await code(svc5.execMessage(p.id, 't2', 'hi'), 'busy')
+  behave({ logFile: log })
+  fs.writeFileSync(log, '')
+  await svc5.execRetry(p.id, 't1')
+  x = await wait5(p.id, (y) => y.phase === 'review')
+  assert.ok(fs.existsSync(path.join(x.execution.worktrees.antigravity.path, 't1.txt')), 't1 commit applied before t2')
+  assert.equal(x.execution.integration.status, 'ok')
+  assert.equal(x.execution.integration.branch, `cowork/${p.id}/integration`)
+  const intDir = x.execution.worktrees.integration.path
+  assert.ok(fs.existsSync(path.join(intDir, 't1.txt')) && fs.existsSync(path.join(intDir, 't2.txt')))
+  // 沒開 Bypass：claude 只自動接受改檔
+  assert.ok(calls().find((c) => c.me === 'claude').argv.join(' ').includes('--permission-mode acceptEdits'))
+  await svc5.execCleanup(p.id)
+  assert.equal(svc5.get(p.id)!.phase, 'completed')
+  console.log('e2e exec parallel ok')
+
+  // 停止與重啟：跑到一半停止 → 任務標成被中斷；app 重啟時還在跑的任務也一樣，等使用者繼續
+  behave({ execSlowMs: 4000 })
+  const s = await meeting()
+  await svc5.execStart(s.id, { mode: 'sequential', linkDeps: false, bypass: true })
+  await wait5(s.id, (y) => y.execution.tasks.t1.status === 'running')
+  await svc5.execPause(s.id)
+  x = await wait5(s.id, (y) => y.execution.tasks.t1.status === 'cancelled')
+  assert.equal(x.execution.paused, true)
+  const runFile = path.join(dataDir, fs.readdirSync(dataDir).find((d) => fs.existsSync(path.join(dataDir, d, s.id)))!, s.id, 'run.json')
+  const onDisk = JSON.parse(fs.readFileSync(runFile, 'utf8'))
+  onDisk.execution.tasks.t1.status = 'running'
+  onDisk.execution.paused = false
+  fs.writeFileSync(runFile, JSON.stringify(onDisk))
+  const svc6 = new CoworkService(execDeps)
+  svc6.init()
+  const rec = svc6.get(s.id)!
+  assert.equal(rec.execution!.tasks.t1.status, 'cancelled')
+  assert.equal(rec.execution!.pausedReason, 'restart')
+  behave({})
+  await svc5.execResume(s.id)
+  x = await wait5(s.id, (y) => y.phase === 'review')
+  assert.equal(x.execution.tasks.t2.status, 'done')
+  await svc5.execCleanup(s.id)
+  console.log('e2e exec pause/restart ok')
+}
+
 for (const d of cleanup) {
   try {
     fs.rmSync(d, { recursive: true, force: true })
