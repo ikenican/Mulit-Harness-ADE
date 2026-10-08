@@ -1,5 +1,5 @@
 // 把 CLI 停在「等你回答」的畫面解析成問題與選項，讓手機顯示成有文字的按鈕，
-// 而不是讓人對著「1 / 2 / 3」猜意思。純文字啟發式：解析不出來就回 null，畫面退回通用按鍵。
+// 而不是讓人對著「1 / 2 / 3」猜意思。純文字啟發式：解析不出來就回 null，畫面顯示原文。
 
 export interface PromptOption {
   /** 按下去要送給 pty 的按鍵 */
@@ -24,6 +24,7 @@ function clean(line: string): string {
 }
 
 const OPTION = /^([❯›>▶→]\s*)?(\d)[.)]\s+(.+)$/
+const FOOTER = /^(?:(?:press\s+)?(?:enter|esc(?:ape)?|tab|space)\s+(?:to\b|\/|·)|use\s+(?:the\s+)?arrow\s+keys\b)/i
 
 export function parsePrompt(screen: string): ParsedPrompt | null {
   const lines = screen.split('\n').map(clean)
@@ -52,18 +53,22 @@ export function parsePrompt(screen: string): ParsedPrompt | null {
   }
   if (end === -1) return null
   let start = end
-  // 往上吃掉連號選項；選項折行的那一行夾在兩個選項之間，上面一兩行內還有選項才算
-  const optionAbove = (i: number): boolean => OPTION.test(lines[i - 1] || '') || OPTION.test(lines[i - 2] || '')
-  while (
-    start > 0 &&
-    (OPTION.test(lines[start - 1]) ||
-      (lines[start - 1] && !/[?？:：]$/.test(lines[start - 1]) && optionAbove(start - 1)))
-  ) {
-    start--
+  // 問答選項可以隔著空行與多行說明；只接同一題中往前連號的選項。
+  let number = Number(OPTION.exec(lines[end])![2])
+  for (let i = end - 1; i >= 0 && number > 1; i--) {
+    const m = OPTION.exec(lines[i])
+    if (!m) {
+      if (/[?？]$/.test(lines[i]) || FOOTER.test(lines[i])) break
+      continue
+    }
+    if (Number(m[2]) !== number - 1) break
+    start = i
+    number--
   }
+  if (number !== 1) return null
 
   // 最後一個選項也可能折行：往下吃到空行為止（框線已被清成空字串）
-  while (end + 1 < lines.length && lines[end + 1] && !OPTION.test(lines[end + 1])) end++
+  while (end + 1 < lines.length && lines[end + 1] && !OPTION.test(lines[end + 1]) && !FOOTER.test(lines[end + 1])) end++
 
   const options: PromptOption[] = []
   for (let i = start; i <= end; i++) {

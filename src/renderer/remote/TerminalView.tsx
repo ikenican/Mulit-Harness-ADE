@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { Terminal, type IBufferCell } from '@xterm/xterm'
 import type { RemoteSession, ServerMessage } from '../../shared/remoteProtocol'
+import { readApprovalScreen } from '../../shared/approvalDetect'
 import type { RemoteConnection } from './conn'
 import { t } from './i18n'
 import { parsePrompt, type ParsedPrompt } from './prompt'
@@ -93,18 +94,6 @@ function outputLines(term: Terminal, cursorVisible: boolean): OutputLine[] {
   return lines
 }
 
-function screenText(term: Terminal, lines = 24): string {
-  const buf = term.buffer.active
-  const out: string[] = []
-  // TUIs can park the cursor above the prompt (e.g. on a spinner); read up to the last drawn row instead.
-  let end = buf.length - 1
-  while (end > 0 && !buf.getLine(end)?.translateToString(true).trim()) end--
-  for (let y = Math.max(0, end - lines); y <= end; y++) {
-    out.push(buf.getLine(y)?.translateToString(true) ?? '')
-  }
-  return out.join('\n')
-}
-
 export default function TerminalView({
   conn,
   session,
@@ -129,11 +118,13 @@ export default function TerminalView({
   const [mode, setMode] = useState<'status' | 'term' | 'file' | 'preview'>('term')
   const [filePath, setFilePath] = useState('')
   const [preview, setPreview] = useState<{ url: string | null; error: string | null }>({ url: null, error: null })
-  const [prompt, setPrompt] = useState<ParsedPrompt | null>(null)
+  const [promptScreen, setPromptScreen] = useState('')
   const [answered, setAnswered] = useState(false)
   const [menu, setMenu] = useState(false)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [text, setText] = useState('')
+  const prompt = session.needsApproval ? parsePrompt(promptScreen) : null
+  const promptIdentity = prompt ? JSON.stringify([prompt.question, prompt.details, prompt.options.map(o => [o.key, o.label])]) : ''
 
   const scrollToLatest = useCallback((): void => {
     const scroll = scrollRef.current
@@ -163,7 +154,7 @@ export default function TerminalView({
       const term = termRef.current
       if (!term) return
       setOutput(outputLines(term, cursorVisible.current))
-      setPrompt(parsePrompt(screenText(term)))
+      setPromptScreen(readApprovalScreen(term))
     }, 120)
   }, [])
 
@@ -180,6 +171,7 @@ export default function TerminalView({
     followOutput.current = true
     scrollPosition.current = 0
     setOutput([])
+    setPromptScreen('')
     cursorVisible.current = true
     const cursorModes = ['h', 'l'].map(final => term.parser.registerCsiHandler({ prefix: '?', final }, params => {
       if (params.includes(25)) cursorVisible.current = final === 'h'
@@ -238,7 +230,7 @@ export default function TerminalView({
   // 新的審批出現就重新可以按
   useEffect(() => {
     if (session.needsApproval) setAnswered(false)
-  }, [session.needsApproval])
+  }, [id, session.needsApproval, promptIdentity])
 
   const send = (seq: string): void => {
     conn.send({ t: 'input', id, data: seq })
@@ -347,7 +339,7 @@ export default function TerminalView({
       ) : (
         <div className="dock">
           <div className="dock-inner">
-            {showApproval && <Approval title={session.title} prompt={prompt} onAnswer={answer} />}
+            {showApproval && <Approval title={session.title} prompt={prompt} screen={promptScreen} onAnswer={answer} />}
             <div className="keys" role="toolbar" aria-label={t('otherKeys')}>
               {KEYS.map((k) => (
                 <button key={k.label} className="key press" aria-label={k.name} onClick={() => send(k.seq)}>
@@ -419,24 +411,24 @@ export default function TerminalView({
 /**
  * 審批面板：這個 App 的招牌。把 CLI 畫面上的問題、要執行的內容、每個選項的原文
  * 直接做成按鈕——在手機上一眼看懂要答應什麼，點一下就回覆。
- * CLI 目前選取的預設選項用主要樣式；解析不出選項時退回數字鍵。
+ * CLI 目前選取的預設選項用主要樣式；解析不出選項時顯示原文，用既有按鍵回覆。
  */
 function Approval({
   title,
   prompt,
+  screen,
   onAnswer
 }: {
   title: string
   prompt: ParsedPrompt | null
+  screen: string
   onAnswer: (key: string) => void
 }): JSX.Element {
-  const options = prompt?.options.length
-    ? prompt.options
-    : ['1', '2', '3'].map((k, i) => ({ key: k, label: k, selected: i === 0 }))
+  const options = prompt?.options || []
   const primary = options.findIndex((o) => o.selected)
   return (
     <section className="approval" role="alertdialog" aria-labelledby="approval-q">
-      <span className="pill wait">
+      <span id={prompt?.question ? undefined : 'approval-q'} className="pill wait">
         <span className="dot" />
         {t('wants', { title })}
       </span>
@@ -446,6 +438,10 @@ function Approval({
         </p>
       )}
       {prompt && prompt.details.length > 0 && <pre className="approval-details">{prompt.details.join('\n')}</pre>}
+      {!prompt && <>
+        <p className="approval-q">{t('promptFallback')}</p>
+        <pre className="approval-details">{screen.trim() || t('loading')}</pre>
+      </>}
       <div className="choices">
         {options.map((o, i) => (
           <button key={o.key + i} className={`choice press ${i === (primary === -1 ? 0 : primary) ? 'prominent' : ''}`} onClick={() => onAnswer(o.key)}>

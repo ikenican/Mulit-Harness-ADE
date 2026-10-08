@@ -15,7 +15,7 @@ import {
   getPtySession,
   subscribePty,
   unsubscribePty,
-  getPtyScrollback,
+  getPtyScreenText,
   writePty,
   killPty,
   spawnPty,
@@ -23,7 +23,6 @@ import {
   type PtySessionInfo
 } from '../ipc/pty'
 import { getRecentWorkspaces, isCliBypassPermissions, isCliEnabled, setCliBypassPermissions } from '../ipc/settings'
-import { stripAnsi } from '../../shared/approvalDetect'
 import {
   BUILTIN_LAUNCHERS,
   type ClientMessage,
@@ -811,7 +810,7 @@ export class RemoteBridge {
         lastOutputAt: s.lastOutputAt,
         busy: s.busy,
         devPort: s.devPort,
-        approvalTail: s.needsApproval ? stripAnsi((getPtyScrollback(s.id) || '').slice(-2000)) : undefined
+        approvalTail: s.needsApproval ? (getPtyScreenText(s.id) || '').slice(-2000) : undefined
       }))
     const remoteWindows: RemoteWindow[] = windows.map((e) => ({
       id: e.window.id,
@@ -845,8 +844,7 @@ export class RemoteBridge {
   private onApproval = (id: string): void => {
     const s = getPtySession(id)
     if (!s) return
-    // 提示通常在最後幾行：去掉 ANSI 後給手機顯示在審批卡片上
-    const tail = stripAnsi((getPtyScrollback(id) || '').slice(-3000))
+    const tail = (getPtyScreenText(id) || '').slice(-3000)
     this.broadcast({ t: 'approval', id, title: s.title, tail })
     this.push(id, 'approval', {
       title: `⏳ ${s.title} 等待你的回覆`,

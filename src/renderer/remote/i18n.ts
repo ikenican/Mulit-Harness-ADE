@@ -64,6 +64,7 @@ const zh = {
   send: '送出',
   back: '返回',
   wants: '{title} 需要你決定',
+  promptFallback: '請依下方終端原文回覆。可用方向鍵選擇，再按送出確認，或輸入答案後送出。',
   otherKeys: '其他按鍵',
   // 細節頁
   noHandoff: '這個專案還沒有交接筆記（.project-memory/handoff.md）。',
@@ -177,6 +178,7 @@ const en: typeof zh = {
   send: 'Send',
   back: 'Back',
   wants: '{title} needs a decision',
+  promptFallback: 'Reply using the terminal text below. Use the arrow keys, then Send to confirm, or type and send your answer.',
   otherKeys: 'Other keys',
   noHandoff: 'This project has no handoff notes yet (.project-memory/handoff.md).',
   clean: 'No uncommitted changes',
