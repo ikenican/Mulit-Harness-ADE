@@ -1,0 +1,5 @@
+.workbench-linux/
+node_modules/
+out/
+release/
+*.log

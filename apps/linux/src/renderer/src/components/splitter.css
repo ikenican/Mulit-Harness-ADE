@@ -1,0 +1,71 @@
+.splitter {
+  position: relative;
+  background: var(--border);
+  transition: background 0.15s ease;
+  outline: none;
+}
+/* 視覺只有 1px，靠 ::before 撐出好按的命中範圍 */
+.splitter::before {
+  content: '';
+  position: absolute;
+}
+.splitter-vertical {
+  width: 1px;
+  cursor: col-resize;
+}
+.splitter-vertical::before {
+  inset: 0 -3px;
+}
+.splitter-horizontal {
+  height: 1px;
+  cursor: row-resize;
+}
+.splitter-horizontal::before {
+  inset: -3px 0;
+}
+
+.splitter:hover,
+.splitter:focus-visible {
+  background: var(--accent);
+}
+.splitter:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.splitter-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: var(--fg-dim);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.splitter-vertical .splitter-grip {
+  width: 3px;
+  height: 28px;
+}
+.splitter-horizontal .splitter-grip {
+  width: 28px;
+  height: 3px;
+}
+.splitter:hover .splitter-grip {
+  opacity: 0.5;
+}
+
+/* 拖曳期間鎖住游標與選取，並讓 iframe / 終端不吃事件（否則游標會被它們搶走） */
+body.is-col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.is-row-resizing {
+  cursor: row-resize;
+  user-select: none;
+}
+body.is-col-resizing iframe,
+body.is-row-resizing iframe,
+body.is-col-resizing .term-surface,
+body.is-row-resizing .term-surface {
+  pointer-events: none;
+}

@@ -1,0 +1,534 @@
+.cz-root {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cz-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cz-rescan-icon {
+  display: inline-block;
+  font-weight: bold;
+  transition: transform 0.2s ease;
+}
+@keyframes czSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.cz-rescan-icon.cz-spinning {
+  animation: czSpin 0.7s linear infinite;
+}
+.cz-scan-status {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  animation: fadeIn 0.3s ease;
+}
+.cz-scan-status.scanning {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cz-scan-status.done {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 25%, transparent);
+}
+.cz-install-codex {
+  margin-top: 6px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.15s ease;
+}
+.cz-install-codex:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+.cz-install-codex:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.cz-hint {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+.cz-spacer {
+  flex: 1;
+}
+.cz-error {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+  font-size: 12px;
+}
+
+/* agent 狀態卡 */
+.cz-agents {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.cz-agent-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 140px;
+  min-height: 140px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.cz-agent-card.pending {
+  opacity: 0.68;
+  border-style: dashed;
+}
+.cz-agent-card-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cz-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cz-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.cz-badge.ok {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+.cz-badge.warn {
+  background: color-mix(in srgb, var(--red) 15%, transparent);
+  color: var(--red);
+}
+.cz-badge.pending {
+  background: var(--bg3);
+  color: var(--fg-dim);
+}
+.cz-agent-counts {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+.cz-agent-path {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cz-note {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  padding-left: 10px;
+  position: relative;
+  line-height: 1.45;
+}
+.cz-note::before {
+  content: '·';
+  position: absolute;
+  left: 2px;
+}
+.cz-trust {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+/* 區段與清單 */
+.cz-section h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.cz-count {
+  background: var(--bg3);
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 4px;
+  font-size: 10px;
+}
+.cz-empty {
+  color: var(--fg-dim);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.cz-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cz-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg2);
+  transition: all 0.15s ease;
+}
+.cz-kind-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.cz-kind-badge.is-clickable {
+  cursor: pointer;
+}
+.cz-kind-badge.is-clickable:hover {
+  transform: scale(1.06);
+}
+.cz-kind-badge.cz-kind-plugin {
+  background: color-mix(in srgb, #a855f7 15%, transparent);
+  color: #a855f7;
+  border: 1px solid color-mix(in srgb, #a855f7 30%, transparent);
+}
+.cz-kind-badge.cz-kind-skill {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #f59e0b;
+  border: 1px solid color-mix(in srgb, #f59e0b 30%, transparent);
+}
+.cz-kind-badge.cz-kind-mcp {
+  background: color-mix(in srgb, #06b6d4 15%, transparent);
+  color: #06b6d4;
+  border: 1px solid color-mix(in srgb, #06b6d4 30%, transparent);
+}
+.cz-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.cz-item-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 500;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.cz-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.cz-ver {
+  font-size: 10px;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+}
+.cz-managed {
+  font-size: 9.5px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.cz-item-desc {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cz-needs {
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  margin-top: 4px;
+}
+.cz-conn {
+  margin-left: 5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+}
+.cz-conn.ok {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  color: var(--green);
+}
+.cz-conn.miss {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  color: var(--red);
+}
+
+/* 三家狀態燈 */
+.cz-item-agents {
+  display: flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+}
+.cz-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 104px;
+  min-width: 104px;
+  max-width: 104px;
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  padding: 0 7px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--fg-dim);
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+button.cz-chip {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: normal;
+}
+.cz-chip.is-clickable {
+  cursor: pointer;
+}
+.cz-chip.is-clickable:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+.cz-chip-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+.cz-chip-name {
+  font-size: 10.5px;
+  font-weight: 500;
+}
+.cz-chip em {
+  font-style: normal;
+  opacity: 0.75;
+}
+.cz-chip.cz-mini em {
+  display: none;
+}
+.cz-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+  transition: background 0.15s ease;
+}
+.cz-chip.cz-installed-on {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg2));
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--fg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.cz-chip.cz-installed-on .cz-dot {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
+}
+.cz-chip.cz-installed-off {
+  background: var(--bg2);
+  border-color: var(--border);
+  color: var(--fg-dim);
+  opacity: 0.55;
+}
+.cz-chip.cz-installed-off:hover {
+  opacity: 0.9;
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.cz-chip.cz-installed-off .cz-dot {
+  background: var(--fg-dim);
+  opacity: 0.4;
+}
+.cz-chip-toggle-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  min-width: 27px;
+  max-width: 27px;
+  height: 16px;
+  min-height: 16px;
+  max-height: 16px;
+  box-sizing: border-box;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 0;
+  border-radius: 4px;
+  line-height: 1;
+  text-align: center;
+  flex-shrink: 0;
+}
+.cz-chip-toggle-placeholder {
+  display: inline-block;
+  width: 27px;
+  min-width: 27px;
+  max-width: 27px;
+  height: 16px;
+  flex-shrink: 0;
+  visibility: hidden;
+}
+.cz-chip.cz-installed-on .cz-chip-toggle-badge {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+.cz-chip.cz-installed-off .cz-chip-toggle-badge {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+}
+.cz-missing {
+  color: var(--fg-dim);
+  opacity: 0.5;
+}
+.cz-unsupported {
+  color: var(--fg-dim);
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+.cz-pending {
+  color: var(--fg-dim);
+  border-style: dashed;
+  opacity: 0.8;
+}
+.cz-error {
+  color: var(--red);
+}
+
+/* 連線表單 */
+.cz-conn-note {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.cz-conn-note code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.cz-conn-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cz-conn-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px var(--font);
+  outline: none;
+}
+.cz-conn-form input:focus {
+  border-color: var(--accent);
+}
+
+/* 同步預覽 modal */
+.cz-modal-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.cz-modal {
+  width: min(1100px, 92vw);
+  height: min(720px, 88vh);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cz-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.cz-modal-files {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.cz-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font: 11px var(--mono);
+  white-space: nowrap;
+}
+.cz-file.on {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: var(--bg);
+}
+.cz-modal-note {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--bg3);
+}
+.cz-modal-diff {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Toggle Switch for Skills / MCP / Plugins */
+.cz-item.is-disabled {
+  opacity: 0.6;
+  filter: grayscale(30%);
+}

@@ -1,0 +1,25 @@
+.runnable {
+  position: relative;
+}
+.runnable-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  background: var(--bg2);
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px 9px;
+  font: 11px var(--font);
+  cursor: pointer;
+}
+.runnable:hover .runnable-btn,
+.runnable-btn:focus-visible {
+  opacity: 1;
+}
+.runnable-btn:hover {
+  background: var(--bg3);
+}

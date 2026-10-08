@@ -1,0 +1,71 @@
+name: Independent Linux App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/linux/**'
+      - '.github/workflows/linux-app.yml'
+    tags: ['linux-v*']
+  pull_request:
+    paths:
+      - 'apps/linux/**'
+      - '.github/workflows/linux-app.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/linux
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/linux/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run check:linux
+      - run: npm run check:pty
+      - run: npm run dist
+      - name: Verify main and terminal windows
+        run: xvfb-run -a ./node_modules/.bin/electron scripts/check-linux-startup.cjs
+      - name: Verify packaged native PTY
+        run: ELECTRON_RUN_AS_NODE=1 ./release/linux-unpacked/agent-workbench-linux scripts/check-linux-pty.cjs release/linux-unpacked
+      - uses: actions/upload-artifact@v7
+        with:
+          name: agent-workbench-linux-x64
+          path: |
+            apps/linux/release/*.AppImage
+            apps/linux/release/*.deb
+            apps/linux/release/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/linux-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: agent-workbench-linux-x64
+          path: linux-release
+      - name: Publish isolated Linux preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./apps/linux/package.json').version")
+          test "$GITHUB_REF_NAME" = "linux-v$version"
+          gh release create "$GITHUB_REF_NAME" linux-release/* \
+            --verify-tag --prerelease --latest=false \
+            --title "Agent Workbench Linux $version" \
+            --notes "Independent Linux preview. Windows releases and update metadata are unchanged."

@@ -1,0 +1,577 @@
+/* ── Apple-style 設計系統：亮暗雙主題 token ──────────────────────────
+   panel 一律用這些 CSS 變數上色，不寫死顏色；主題由 store 在 <html data-theme> 切換。 */
+:root {
+  /* Light（預設） */
+  --bg: #f5f5f7;
+  --bg2: #ffffff;
+  --bg3: #ececef;
+  --bg-elevated: rgba(255, 255, 255, 0.72);
+  --bg-surface: #ffffff;
+  --fg: #1d1d1f;
+  --fg-dim: #6e6e73;
+  --accent: #0071e3;
+  --accent-fg: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --green: #1a7f37;
+  --red: #d70015;
+  --orange: #c93b00;
+  --purple: #8944ab;
+  --blue: #0071e3;
+  --yellow: #b25000;
+  --morandi-blue: #0071e3;
+  --morandi-green: #34c759;
+  --morandi-orange: #ff9500;
+  --morandi-purple: #af52de;
+  --morandi-red: #ff3b30;
+  --morandi-cyan: #0071e3;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.16), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --toolbar-h: 38px;
+  --subtoolbar-h: 34px;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI',
+    system-ui, 'Helvetica Neue', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+  --mono: 'SF Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace;
+
+  /* 依用途命名的尺寸 token（參考 AgentsDock DESIGN_SYSTEM）；新元件請用這些，舊元件漸進遷移 */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 24px;
+  --text-size-caption: 11px;
+  --text-size-meta: 12px;
+  --text-size-label: 13px;
+  --text-size-ui: 14px;
+  --text-size-title: 16px;
+  --radius-control: 8px;
+  --radius-dialog: 12px;
+  --radius-pill: 999px;
+  /* 跟著各主題的 --accent 走，Vibe／Dev 同一色調 */
+  --vibe-gradient: linear-gradient(135deg, var(--accent) 0%, color-mix(in srgb, var(--accent) 70%, var(--fg)) 100%);
+}
+
+/* 系統偏好暗色時、JS 尚未設定 data-theme 前的 FOUC 保護 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='light-morandi']) {
+    --bg: #161618;
+    --bg2: #1e1e20;
+    --bg3: #28282c;
+    --bg-elevated: rgba(30, 30, 34, 0.85);
+    --bg-surface: #1e1e22;
+    --fg: #f5f5f7;
+    --fg-dim: #98989d;
+    --accent: #0a84ff;
+    --accent-fg: #ffffff;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --green: #30d158;
+    --red: #ff453a;
+    --orange: #ff9f0a;
+    --purple: #bf5af2;
+    --blue: #0a84ff;
+    --yellow: #ffd60a;
+    --morandi-blue: #0a84ff;
+    --morandi-green: #30d158;
+    --morandi-orange: #ff9f0a;
+    --morandi-purple: #bf5af2;
+    --morandi-red: #ff453a;
+    --morandi-cyan: #0a84ff;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+    --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* 明確選暗色（store 切換的權威來源） */
+:root[data-theme='dark'] {
+  --bg: #161618;
+  --bg2: #1e1e20;
+  --bg3: #28282c;
+  --bg-elevated: rgba(30, 30, 34, 0.85);
+  --bg-surface: #1e1e22;
+  --fg: #f5f5f7;
+  --fg-dim: #98989d;
+  --accent: #0a84ff;
+  --accent-fg: #ffffff;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --green: #30d158;
+  --red: #ff453a;
+  --orange: #ff9f0a;
+  --purple: #bf5af2;
+  --blue: #0a84ff;
+  --yellow: #ffd60a;
+  --morandi-blue: #0a84ff;
+  --morandi-green: #30d158;
+  --morandi-orange: #ff9f0a;
+  --morandi-purple: #bf5af2;
+  --morandi-red: #ff453a;
+  --morandi-cyan: #0a84ff;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+/* ── 亮色·莫蘭迪色系（晨霧暖調） ─────────────────────────────────── */
+:root[data-theme='light-morandi'] {
+  --bg: #ece7df;
+  --bg0: #e5dfd6;
+  --bg1: #ece7df;
+  --bg2: #f6f4ee;
+  --bg3: #dfd9cf;
+  --bg-elevated: rgba(246, 244, 238, 0.90);
+  --bg-surface: #f6f4ee;
+  --fg: #202428;
+  --fg-dim: #59626b;
+  --fg-subtle: #79828c;
+  --accent: #486a6d;
+  --accent-fg: #ffffff;
+  --border: rgba(32, 36, 40, 0.13);
+  --border-strong: rgba(32, 36, 40, 0.24);
+  --border-subtle: rgba(32, 36, 40, 0.08);
+  --green: #486c4e;
+  --red: #9e4644;
+  --orange: #a86b40;
+  --purple: #725d7b;
+  --blue: #446476;
+  --yellow: #8a6a2f;
+  --morandi-blue: #446476;
+  --morandi-green: #486c4e;
+  --morandi-orange: #a86b40;
+  --morandi-purple: #725d7b;
+  --morandi-red: #9e4644;
+  --morandi-cyan: #486a6d;
+  --shadow: 0 1px 3px rgba(32, 36, 40, 0.08), 0 8px 24px rgba(32, 36, 40, 0.06);
+  --shadow-modal: 0 24px 64px rgba(32, 36, 40, 0.22), 0 4px 16px rgba(32, 36, 40, 0.08);
+}
+
+/* ── 暗色·莫蘭迪色系（暮靄冷調） ─────────────────────────────────── */
+:root[data-theme='dark-morandi'] {
+  --bg: #1c2023;
+  --bg0: #16191c;
+  --bg1: #1c2023;
+  --bg2: #25292d;
+  --bg3: #30363c;
+  --bg-elevated: rgba(37, 41, 45, 0.86);
+  --bg-surface: #25292d;
+  --fg: #e2ded6;
+  --fg-dim: #9aa1a8;
+  --fg-subtle: #737c84;
+  --accent: #79a3a3;
+  --accent-fg: #1c2023;
+  --border: rgba(226, 222, 214, 0.10);
+  --border-strong: rgba(226, 222, 214, 0.18);
+  --border-subtle: rgba(226, 222, 214, 0.06);
+  --green: #76a481;
+  --red: #d47772;
+  --orange: #ce946b;
+  --purple: #9f8ca9;
+  --blue: #6f92a2;
+  --yellow: #d1b577;
+  --morandi-blue: #6f92a2;
+  --morandi-green: #76a481;
+  --morandi-orange: #ce946b;
+  --morandi-purple: #9f8ca9;
+  --morandi-red: #d47772;
+  --morandi-cyan: #79a3a3;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(226, 222, 214, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+/* 全域字型統一：確保所有表單控制項與按鈕繼承 Apple 系統字型 */
+button,
+input,
+select,
+textarea {
+  font-family: var(--font);
+  font-size: inherit;
+  color: inherit;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--mono);
+}
+
+/* ── 版面：無框融合設計（頂部 Header 融合入工作區，釋放 44px 空間） ── */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.workarea {
+  flex: 1 1 auto;
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  width: 100%;
+  /* grid-template-* 由 App.tsx 依目前欄寬與停靠位置以 inline style 指定 */
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+/* 終端停靠底部時，分隔線由 splitter 提供，欄位本身不再畫邊框 */
+.dock-bottom .col-term {
+  border-top: none;
+}
+
+/* ── 頂層全域無縫 Header（整合 Windows/macOS 視窗控制項） ── */
+.app-unified-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  user-select: none;
+  -webkit-app-region: drag;
+  z-index: 100;
+  box-sizing: border-box;
+  padding-right: 142px; /* 預留 Windows 系統視窗控制項（最小化/最大化/關閉）之空間 */
+}
+
+.app-unified-header button,
+.app-unified-header .segmented,
+.app-unified-header input,
+.app-unified-header a {
+  -webkit-app-region: no-drag;
+}
+
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.app-brand {
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.app-brand .dot {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.app-header-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.btn-collapse-left,
+.btn-expand-left {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  padding: 0 7px;
+  gap: 4px;
+}
+.btn-collapse-left:hover,
+.btn-expand-left:hover {
+  background: var(--bg3);
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.dock-switch button {
+  font-size: 11px;
+  padding: 3px 8px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── segmented-control 風格 tabbar ───────────────────────────── */
+.tabbar {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  height: var(--toolbar-h);
+  min-height: var(--toolbar-h);
+  max-height: var(--toolbar-h);
+  flex: 0 0 var(--toolbar-h);
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  box-sizing: border-box;
+}
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+}
+.segmented button {
+  background: transparent;
+  color: var(--fg-dim);
+  border: none;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: 12px/1.2 var(--font);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.segmented button:hover {
+  color: var(--fg);
+}
+.segmented button.on {
+  background: var(--bg2);
+  color: var(--fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.left-segmented {
+  width: 100%;
+  display: flex;
+  box-sizing: border-box;
+}
+.left-segmented button {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: center;
+}
+.tabbar.static {
+  color: var(--fg-dim);
+  font-weight: 600;
+  padding: 12px 14px;
+}
+
+/* 通用按鈕 */
+button {
+  font-family: var(--font);
+}
+.btn {
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+.btn:hover {
+  background: var(--bg3);
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+}
+.btn-primary:hover {
+  filter: brightness(1.05);
+}
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+.btn-icon:hover {
+  background: var(--bg3);
+  color: var(--fg);
+}
+.btn-icon.active {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.detached-term-app {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.detached-term-app .term-root {
+  flex: 1;
+  height: 100%;
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  position: relative;
+  overflow: hidden;
+}
+.fill {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+.panel-stub {
+  padding: 20px;
+  color: var(--fg-dim);
+}
+.panel-stub code {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+/* 捲軸（Apple 風細捲軸） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-dim);
+  background-clip: padding-box;
+}
+
+/* ── Vibe Coding 模式（<html data-mode="vibe">）────────────────────
+   只覆寫圓角與少數外框，配色沿用 Dev 模式的主題 token；版面切換由 App.tsx 的 grid-template-areas 負責。 */
+:root[data-mode='vibe'] {
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-control: 10px;
+}
+:root[data-mode='vibe'] .app-brand .dot {
+  background: var(--vibe-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:root[data-mode='vibe'] .app-header-center .segmented button {
+  font-size: var(--text-size-label);
+  padding: 4px 16px;
+}
+/* 對話欄：Agent 工作中時外框呼吸光暈 */
+:root[data-mode='vibe'] .col-term {
+  /* 左右卡片各留一半間距（中間分隔線兩側對稱） */
+  margin: var(--space-4) var(--space-2) var(--space-4) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: box-shadow 0.4s ease, border-color 0.4s ease;
+}
+:root[data-mode='vibe'] .col-term.agent-busy {
+  border-color: var(--accent);
+  animation: vibe-glow 2s ease-in-out infinite;
+}
+@keyframes vibe-glow {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 15%, transparent); }
+  50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 24px color-mix(in srgb, var(--accent) 30%, transparent); }
+}
+:root[data-mode='vibe'] .col-center {
+  margin: var(--space-4) var(--space-4) var(--space-4) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.tabbar[hidden] {
+  display: none;
+}
+.dev-url-chip {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font: 11px var(--mono);
+  cursor: pointer;
+}
+.usage-range-switch button {
+  font-size: 11px;
+  padding: 3px 10px;
+}
+.usage-range-switch.compact button {
+  padding: 2px 8px;
+  font-size: 10.5px;
+}
