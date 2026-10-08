@@ -42,7 +42,7 @@ export interface GitCommitDiffTarget {
   files?: Array<{ path: string; status: string }>
 }
 
-export type SettingsTab = 'appearance' | 'cli' | 'doctools' | 'extensions' | 'remote' | 'about'
+export type SettingsTab = 'appearance' | 'cli' | 'doctools' | 'extensions' | 'remote' | 'cowork' | 'about'
 
 export interface SettingsModalState {
   isOpen: boolean
@@ -61,6 +61,8 @@ export interface WorkbenchState {
   terminalDispatch: TerminalDispatch | null
   terminalOpenSession: TerminalOpenSessionRequest | null
   workspaceRoot: string
+  /** 編輯器裡尚未存檔的檔案（Cowork 開會前提醒：這些內容不會被規劃看到） */
+  editorDirtyPaths: string[]
   centerMaximized: boolean
   isTerminalDetached: boolean
   settingsModal: SettingsModalState
@@ -179,6 +181,7 @@ let state: WorkbenchState = {
   terminalDispatch: null,
   terminalOpenSession: null,
   workspaceRoot: '',
+  editorDirtyPaths: [],
   centerMaximized: false,
   isTerminalDetached: false,
   settingsModal: { isOpen: false, tab: 'appearance' },
@@ -345,6 +348,12 @@ export function pulseAgentActivity(): void {
   if (!state.agentBusy) set({ agentBusy: true })
   clearTimeout(agentBusyTimer)
   agentBusyTimer = setTimeout(() => set({ agentBusy: false }), 1500)
+}
+
+export function setEditorDirtyPaths(paths: string[]): void {
+  const prev = state.editorDirtyPaths
+  if (paths.length === prev.length && paths.every((p, i) => p === prev[i])) return
+  set({ editorDirtyPaths: paths })
 }
 
 export function setWorkspaceRoot(path: string): void {

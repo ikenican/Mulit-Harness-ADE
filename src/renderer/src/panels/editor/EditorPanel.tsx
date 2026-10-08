@@ -9,6 +9,7 @@ import {
   clearAgentModified,
   setEditorDraft,
   clearEditorDraft,
+  setEditorDirtyPaths,
   type GitCommitDiffTarget
 } from '@/store'
 import { useTranslation } from '@/i18n'
@@ -191,6 +192,9 @@ export default function EditorPanel(): JSX.Element {
       .filter(([, m]) => m.content !== m.initial)
       .map(([p]) => p)
   )
+  const dirtyKey = [...dirtyPaths].sort().join('\n')
+  // Cowork 以已提交的快照規劃；開會前要能提醒「編輯器裡還有沒存檔的修改」
+  useEffect(() => setEditorDirtyPaths(dirtyKey ? dirtyKey.split('\n') : []), [dirtyKey])
 
   // Diff mode state
   const [diffData, setDiffData] = useState<{ head: string; work: string }>({

@@ -16,6 +16,7 @@ import { registerSettingsHandlers, getLastWorkspace, isProtectedPath, saveLastWo
 import { registerDashboardHandlers, loadDashboardState } from './ipc/dashboard'
 import { registerUpdaterHandlers } from './ipc/updater'
 import { registerRemoteHandlers, stopRemote } from './remote'
+import { registerCoworkHandlers, shutdownCowork } from './ipc/cowork'
 import { initJumpList, parseCommandLineArgs } from './jumplist'
 
 // 在 Windows 最早期設定 Application User Model ID，確保工作列 Jump List 與釘選關聯正確
@@ -441,6 +442,7 @@ if (!gotTheLock) {
     registerUpdaterHandlers()
     registerWindowHandlers()
     registerRemoteHandlers()
+    registerCoworkHandlers()
 
     // 檢查冷啟動命令列是否帶有目標專案路徑
     const { targetPath } = parseCommandLineArgs(process.argv)
@@ -460,6 +462,8 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     void stopRemote()
+    // 還在跑的規劃 CLI 一起收掉；下次啟動時會議會轉成 paused
+    shutdownCowork()
   })
 
   app.on('window-all-closed', () => {

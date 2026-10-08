@@ -11,6 +11,7 @@ app.on('window-all-closed', () => {})
 const fixture = `
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import AppleAlertDialog from '/src/renderer/src/components/AppleAlertDialog.tsx'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { trackComposition, isImeKey } from '/src/renderer/src/panels/terminal/imeGuard.ts'
@@ -18,6 +19,22 @@ import { looksLikeApprovalPrompt, readApprovalScreen } from '/src/shared/approva
 import TerminalView from '/src/renderer/remote/TerminalView.tsx'
 import { Home, SettingsSheet } from '/src/renderer/remote/App.tsx'
 import '/src/renderer/remote/remote.css'
+window.mountDialog = () => {
+  window.homeRoot?.unmount()
+  window.mobileRoot?.unmount()
+  document.body.innerHTML = '<button id="trigger">Open</button><div id="dialog"></div>'
+  document.getElementById('trigger').focus()
+  window.dialogActions = []
+  function Dialog() {
+    const [open, setOpen] = React.useState(true)
+    window.openDialog = () => setOpen(true)
+    return <AppleAlertDialog isOpen={open} title="Cancel meeting" confirmLabel="Cancel meeting" cancelLabel="Keep meeting"
+      onClose={() => { window.dialogActions.push('keep'); setOpen(false) }}
+      onConfirm={() => { window.dialogActions.push('cancel'); setOpen(false) }}/>
+  }
+  window.dialogRoot = createRoot(document.getElementById('dialog'))
+  window.dialogRoot.render(<Dialog/> )
+}
 window.makeTerminal = (guarded) => {
   window.term?.dispose()
   document.body.innerHTML = '<div id="desktop" style="width:600px;height:300px"></div>'
@@ -578,6 +595,29 @@ app.whenReady().then(async () => {
     assert.ok(await run(`document.body.textContent.includes(${JSON.stringify('v' + version)})`), 'show loaded mobile interface version')
     assert.ok(await run('Array.from(document.querySelectorAll("button")).some(b => /Reload mobile interface|重新載入手機介面/.test(b.textContent))'), 'standalone PWA has a reload action')
     console.log('mobile interface version / reload control: passed')
+    await run('window.mountDialog()')
+    await pause()
+    assert.equal(await run('document.activeElement.textContent'), 'Keep meeting', 'destructive dialog focuses the safe action')
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, text:'\r'})
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13})
+    await pause()
+    assert.deepEqual(await run('window.dialogActions'), ['keep'], 'Enter activates the focused safe button')
+    assert.equal(await run('document.activeElement.id'), 'trigger', 'dialog restores focus')
+    await run('window.openDialog()')
+    await pause()
+    await run('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",shiftKey:true,bubbles:true,cancelable:true}))')
+    assert.equal(await run('document.activeElement.textContent'), 'Cancel meeting', 'Shift+Tab stays in dialog')
+    await run('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true}))')
+    assert.equal(await run('document.activeElement.textContent'), 'Keep meeting', 'Tab wraps within dialog')
+    await run('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true}))')
+    await pause()
+    assert.equal(await run('!!document.querySelector("[role=alertdialog]")'), false, 'Escape dismisses dialog')
+    await run('window.openDialog()')
+    await pause()
+    await run('document.querySelector(".apple-alert-btn-destructive").click()')
+    await pause()
+    assert.deepEqual(await run('window.dialogActions'), ['keep', 'keep', 'cancel'], 'explicit confirm performs destructive action')
+    console.log('Apple alert focus / keyboard / safe action: passed')
   } finally {
     win.destroy()
   }

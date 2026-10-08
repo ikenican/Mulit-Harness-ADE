@@ -1,5 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { RemoteVibeStatus } from '../shared/remoteProtocol'
+import type {
+  AgentModelChoice,
+  CoworkAgent,
+  CoworkBaselineInfo,
+  CoworkCapability,
+  CoworkModelCatalog,
+  CoworkResult,
+  CoworkRun,
+  CoworkRunSummary,
+  CoworkSettings
+} from '../shared/cowork'
 
 // ── Workbench IPC 契約（唯一整合縫合處）────────────────────────────────
 // 所有 renderer panel 一律透過 window.api.* 呼叫；main 端各 handler 檔各自實作。
@@ -212,6 +223,67 @@ const api = {
       return () => ipcRenderer.removeListener('remote:status', listener)
     }
   },
+  // Cowork 多 agent 規劃會議 —— main/ipc/cowork.ts（設計見 cowork.md）
+  cowork: {
+    capabilities: (force?: boolean): Promise<CoworkResult<{ agents: CoworkCapability[]; baseline: CoworkBaselineInfo }>> =>
+      ipcRenderer.invoke('cowork:capabilities', force),
+    // 三家的可選模型（設定頁與開會表單用）；第一次會跑 CLI 讀清單，之後快取
+    models: (force?: boolean): Promise<CoworkResult<CoworkModelCatalog[]>> => ipcRenderer.invoke('cowork:models', force),
+    list: (): Promise<CoworkResult<CoworkRunSummary[]>> => ipcRenderer.invoke('cowork:list'),
+    get: (runId: string): Promise<CoworkResult<CoworkRun | null>> => ipcRenderer.invoke('cowork:get', runId),
+    start: (req: {
+      mode?: 'discussion' | 'project'
+      autoEffort?: boolean
+      summarizer?: CoworkAgent
+      summarizeEachRound?: boolean
+      prompt: string
+      chair: CoworkAgent
+      participants: CoworkAgent[]
+      language: 'en' | 'zh-TW'
+      models?: Partial<Record<CoworkAgent, AgentModelChoice>>
+    }): Promise<CoworkResult<CoworkRun>> => ipcRenderer.invoke('cowork:start', req),
+    cancel: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:cancel', runId),
+    discuss: (runId: string, text: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:discuss', runId, text),
+    setSummarizer: (runId: string, agent: CoworkAgent): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:summarizer', runId, agent),
+    summarize: (runId: string, conclude?: boolean): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:summarize', runId, conclude),
+    retry: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:retry', runId),
+    dropFailedReviewers: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:drop', runId),
+    addNote: (runId: string, text: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:note', runId, text),
+    feedback: (runId: string, text: string): Promise<CoworkResult<void>> =>
+      ipcRenderer.invoke('cowork:feedback', runId, text),
+    editBoard: (
+      runId: string,
+      basePlanRevision: number,
+      tasks: unknown
+    ): Promise<CoworkResult<{ ok: true } | { ok: false; errors: string[] }>> =>
+      ipcRenderer.invoke('cowork:editBoard', runId, basePlanRevision, tasks),
+    dismissUnresolved: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:dismiss', runId),
+    approve: (runId: string, planRevision: number): Promise<CoworkResult<void>> =>
+      ipcRenderer.invoke('cowork:approve', runId, planRevision),
+    raiseLimits: (
+      runId: string,
+      limits: { maxPlanningCalls?: number; maxPlanningMinutes?: number }
+    ): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:raiseLimits', runId, limits),
+    logDispatch: (runId: string, taskId: string, target: string): Promise<CoworkResult<void>> =>
+      ipcRenderer.invoke('cowork:logDispatch', runId, taskId, target),
+    delete: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:delete', runId),
+    // 背景執行：在 repo 內的 .cowork/<runId>/ worktree 裡跑，進度與回覆經 onUpdate 回來
+    execStart: (runId: string, opts: { mode: 'sequential' | 'parallel'; linkDeps: boolean }): Promise<CoworkResult<void>> =>
+      ipcRenderer.invoke('cowork:execStart', runId, opts),
+    execMessage: (runId: string, taskId: string, text: string): Promise<CoworkResult<void>> =>
+      ipcRenderer.invoke('cowork:execMessage', runId, taskId, text),
+    execRetry: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execRetry', runId, taskId),
+    execPause: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execPause', runId),
+    execResume: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execResume', runId),
+    execMerge: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execMerge', runId),
+    execCleanup: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execCleanup', runId),
+    bypass: (): Promise<CoworkResult<boolean>> => ipcRenderer.invoke('cowork:bypass'),
+    onUpdate: (cb: (run: CoworkRun) => void): (() => void) => {
+      const listener = (_e: unknown, run: CoworkRun): void => cb(run)
+      ipcRenderer.on('cowork:update', listener)
+      return () => ipcRenderer.removeListener('cowork:update', listener)
+    }
+  },
   // 視窗管理（獨立彈出終端等）
   window: {
     detachTerminal: (): Promise<boolean> => ipcRenderer.invoke('window:openTerminalWindow'),
@@ -330,6 +402,8 @@ export interface WorkbenchSettings {
   recentWorkspaces?: string[]
   autoCheckUpdates?: boolean
   autoDownloadUpdates?: boolean
+  /** Cowork 主席、與會者與預算上限；只認全域設定，repo 不能放寬（cowork.md §8） */
+  cowork?: CoworkSettings
 }
 
 export interface UpdateInfo {
