@@ -22,7 +22,7 @@ React + Vite.
 - **Multi-CLI terminals** — each CLI gets its own `xterm.js` terminal tab, run
   natively as a child process via `node-pty`. No keys stored; the CLIs use their
   own subscriptions/auth.
-- **Cowork meetings** — independent tabs for Claude Code, Codex, and Antigravity; visible discussion, a selectable recorder, chair conclusions, code-aware project planning, and background execution after user approval. See [Cowork](#cowork) and its [functional architecture](docs/cowork-architecture.md).
+- **Cowork meetings** — independent tabs for Claude Code, Codex, and Antigravity; visible discussion, a selectable recorder, chair conclusions, code-aware project planning, and background execution after user approval. See [Cowork](#cowork) and its [rendered architecture](docs/architecture.html#cowork).
 - **Collapsible Developer Mode preview** — the center pane starts collapsed and can be toggled from the title bar.
 - **Preview & Documents** — live Markdown / HTML preview that auto-syncs on edit and save, plus built-in document viewing for Word, Excel, PowerPoint, and PDF.
 - **Vibe Coding Mode** — an alternative, task-first layout (Settings → Appearance → Work Mode): an icon rail (Sessions / Status / Handoff / Files / Git / Settings) whose panels fade in on hover and pin on click, the agent terminal in the middle, and the live result on the right. Dev-server URLs printed in the terminal (`http://localhost:PORT`) open automatically, and the Handoff panel summarises `.project-memory/handoff.md`. Developer Mode keeps the classic code-first layout.
@@ -54,22 +54,7 @@ These are call/time budgets, not a currency or token spending cap. Summaries, ch
 
 Multiple discussions and project-planning meetings may run concurrently, including in the same repository. **Actual background execution is limited to one run per repository until its execution is merged or cleaned up**; paused/review worktrees still hold that slot. Different repositories may execute concurrently. All tabs share each provider's account quota.
 
-```mermaid
-flowchart TD
-  UI[Independent Cowork tabs and settings] --> IPC[Preload and main IPC]
-  IPC --> Service[Cowork service: state, budgets, cancellation]
-  Service --> Discussion[Sequential public discussion]
-  Discussion --> Recorder[Cumulative meeting records]
-  Recorder --> Chair[Chair conclusion]
-  Chair --> User[User edits Project proposal]
-  Service --> Project[Code-aware proposal and independent reviews]
-  User --> Project
-  Project --> Approval[User reviews and approves task board]
-  Approval --> Execution[Background tasks in Git worktrees]
-  Execution --> Review[User reviews, merges or cleans up]
-```
-
-Implementation boundaries, storage, CLI isolation, scheduling, and recovery are documented in [Cowork functional architecture / Cowork 功能架構](docs/cowork-architecture.md).
+Open the rendered [Cowork architecture and meeting flow](docs/architecture.html#cowork) in a browser. [Implementation notes](docs/cowork-architecture.md) cover storage, CLI isolation, scheduling and recovery.
 
 ## Installation
 
@@ -290,7 +275,7 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 - **Git 面板**——狀態、暫存、commit、切換分支、commit graph，以及最近 commit／檔案 diff。
 - **多 CLI 終端**——每個 CLI 各有一個 `xterm.js` 終端分頁，透過 `node-pty` 以子行程原生執行。
   不儲存金鑰；CLI 使用其自身的訂閱／驗證。
-- **Cowork 多 agent 會議**——獨立分頁、可見討論、指定摘要 agent、主席結論、專案規劃與核准後背景執行。支援 Claude Code、Codex、Antigravity；詳見下方〈Cowork 使用方式〉及 [功能架構](docs/cowork-architecture.md)。
+- **Cowork 多 agent 會議**——獨立分頁、可見討論、指定摘要 agent、主席結論、專案規劃與核准後背景執行。支援 Claude Code、Codex、Antigravity；詳見下方〈Cowork 使用方式〉及 [架構圖](docs/architecture.html#cowork)。
 - **開發者模式中央預覽收合**——預設收合，可用標題列按鈕切換。
 - **預覽與文件**——Markdown／HTML 即時預覽（編輯與存檔自動同步），並內建 Word、Excel、PowerPoint 與 PDF 檢視器。
 - **Vibe Coding 模式**——任務優先的另一種版面（設定 → 外觀 → 工作模式）：最左側圖示列（Sessions／Status／Handoff／Files／Git／Settings）游標移過去就淡入彈出、點擊可固定；中間是 Agent 終端，右側是即時成品。終端輸出的 dev server 網址（`http://localhost:PORT`）會自動開啟，Handoff 面板會整理 `.project-memory/handoff.md`。開發者模式維持原本程式碼優先的版面。
@@ -320,7 +305,7 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 
 同一 repository 可同時開多場討論與規劃，但**實際背景執行同時限一場，直到合併或清理該次執行**；暫停或等待檢視的 worktree 仍占用名額。不同 repository 可同時執行，各分頁共用供應商帳號用量。關閉分頁只關閉畫面，要停止會議請按 Cancel meeting；紀錄可從歷史重新開啟，分頁版面與未送出草稿只保留於本次程式執行。
 
-上方 [Cowork](#cowork) 附流程圖，完整的模組、資料保存、隔離與執行架構見 [Cowork 功能架構](docs/cowork-architecture.md)。
+以瀏覽器開啟 [架構總覽的 Cowork 章節](docs/architecture.html#cowork)，可查看已渲染的模組架構與會議流程圖；資料保存、隔離與恢復細節見 [實作筆記](docs/cowork-architecture.md)。
 
 ## 安裝指南
 
