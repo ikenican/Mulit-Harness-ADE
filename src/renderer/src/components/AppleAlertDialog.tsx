@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { IconTrash, IconFolderMinus } from './Icons'
 import './appleAlertDialog.css'
@@ -28,26 +28,49 @@ export default function AppleAlertDialog({
   onConfirm,
   onClose
 }: AppleAlertDialogProps): JSX.Element | null {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const actionsRef = useRef({ onClose, onConfirm })
+  actionsRef.current = { onClose, onConfirm }
   useEffect(() => {
     if (!isOpen) return
+    const previousFocus = document.activeElement as HTMLElement | null
+    dialogRef.current?.querySelector<HTMLButtonElement>('.apple-alert-btn-cancel')?.focus()
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        onClose()
-      } else if (e.key === 'Enter') {
+        e.stopPropagation()
+        actionsRef.current.onClose()
+      } else if (e.key === 'Tab') {
+        const controls = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')
+        if (!controls?.length) return
+        const first = controls[0]
+        const last = controls[controls.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      } else if (e.key === 'Enter' && document.activeElement?.tagName !== 'BUTTON') {
         e.preventDefault()
-        onConfirm()
+        e.stopPropagation()
+        actionsRef.current.onConfirm()
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onConfirm, onClose])
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true)
+      previousFocus?.focus()
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
   return createPortal(
     <div className="apple-alert-backdrop" onClick={onClose}>
       <div
+        ref={dialogRef}
         className="apple-alert-dialog"
         role="alertdialog"
         aria-modal="true"

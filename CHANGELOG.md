@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.1.39] - 2026-10-08
+
+### Added / 新增
+- Cowork 多 agent 會議：Discussion 公開依序討論與追問、指定摘要 agent 保存累積紀錄、主席總結，以及可編輯的轉 Project 提案。
+- Project 專案規劃、獨立審查、任務板與使用者核准後背景執行；支援 worktree 任務相依／資源排程、結果檢視、合併與清理。
+- Cowork 多分頁，入口整合至終端 `+` 選單與 New Terminal 卡片；可同時討論／規劃，同一 repository 的實際執行限制一場。
+- Cowork 設定包含參與者、主席、摘要 agent、完整版本模型、自動／手動推理強度及會議預算；README 補上使用方式與雙語功能架構。
+- 開發者模式預設收合中央 Preview，標題列提供一鍵切換按鈕。（PR #35）
+
+### Fixed / 修復
+- Cowork Windows Claude CLI 啟動、取消確認視窗主題、agent 卡片對齊與 Settings 窄視窗／中英文排版；移除模型 Custom 輸入選項。（PR #36）
+- 手機審批改以目前已解析的終端畫面偵測，避免舊輸出誤觸發、空白選項與提示消失後殘留審批卡片。（PR #37）
+
+## [0.1.38] - 2026-10-07
+
+### Fixed / 修復
+- 桌面終端微軟注音重複輸入：組字緩衝區滿了會先送出前段、後段繼續組字，xterm 5.5 以舊位置切 textarea，把還在組字的後段一起送出、之後又送一次。組字事件改由 `imeGuard` 全權處理，只送 `compositionend.data`，組字預覽照常顯示。
+- 手機端 Claude Code / Antigravity 畫面疊成好幾份、分隔線斷成數行：
+  - 手機 snapshot 原本是用現在寬度重播原始輸出紀錄；改為 main 為每個 PTY 維護 headless xterm，snapshot 為其序列化畫面，輸出與尺寸變更依同一順序送到桌面與手機。
+  - Windows ConPTY 改尺寸後會重畫可見區：改尺寸前先清可見區，舊畫面不再被 reflow 推進捲動歷史；Claude / Antigravity 會整段重印對話，連捲動歷史一起清，只留一份。
+  - 桌面改尺寸合併為停止拖動後一次，窗格小於 20×5 時不縮 PTY。
+
+## [0.1.37] - 2026-10-07
+
+### Fixed / 修復
+- 手機端 Claude Code 終端：Claude Code 的 fullscreen TUI（`"tui": "fullscreen"`）會進入備用螢幕＋滑鼠模式，手機只剩一頁、無 scrollback。現在啟動 Claude 時自動注入 `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1`（等同 Codex 的 `--no-alt-screen`；launcher 自訂 env 優先）。
+- 手機審批面板只顯示「1 / 2 / 3」：Claude 把游標停在 spinner 列（選項上方），解析只往游標上方讀而抓不到選項；改為讀到畫面最後一列有內容處，選項文字恢復顯示。
+- 移除 v0.1.36 的 `ClaudeHistoryStream`：它把每次清螢幕轉成分隔線＋整頁空行，造成手機畫面重複畫面與大段空白。
+
+## [0.1.36] - 2026-10-05
+
+### Added / 新增
+- 終端跨 Agent 歷史回溯強化（DEC-007）：
+  - **Codex CLI**：自動注入 `--no-alt-screen` 通用參數，停用備用螢幕模式（Alternate Screen Mode），切換為 inline 串流輸出，完整保留 xterm scrollback 歷史。
+  - **Claude Code CLI**：在手機端終端視圖實作 `ClaudeHistoryStream`，攔截 React Ink 產生的 ANSI 清螢幕序列（`\x1b[2J\x1b[H`），轉化為向 scrollback 推進換行並自動繪製淡色橫向回合分隔線（`─`），使前幾回合的交談與工具輸出自然保留在卷軸緩衝區中，隨時可向上滑動回顧多回合交談紀錄。
+  - 手機端 upstream prompt 輸入框、快捷按鍵（如 Tab、Ctrl+C）與審批按鈕走獨立管道，完全不受影響，保持 100% 正常操作。
+
+## [0.1.35] - 2026-10-02
+
+### Fixed / 修復
+- 手機 Terminal 維持可讀字級：先以桌面欄／列座標解析 ANSI，再將文字依手機寬度換行，保留色彩、文字樣式、游標及上下滑動；移除整張桌面畫布縮放，無需左右滑動，也不改變桌面 PTY 尺寸。
+- 修復切換 Terminal／Status／File／Preview、重新開啟會話及桌面尺寸更新後的殘缺畫面；保留歷史閱讀位置與新輸出自動跟隨，並驗證中文、emoji、長網址及 ANSI 相對游標重畫。
+
 ## [0.1.34] - 2026-10-02
 
 ### Fixed / 修復

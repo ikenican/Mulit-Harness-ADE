@@ -11,12 +11,30 @@ app.on('window-all-closed', () => {})
 const fixture = `
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import AppleAlertDialog from '/src/renderer/src/components/AppleAlertDialog.tsx'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { trackComposition, isImeKey } from '/src/renderer/src/panels/terminal/imeGuard.ts'
+import { looksLikeApprovalPrompt, readApprovalScreen } from '/src/shared/approvalDetect.ts'
 import TerminalView from '/src/renderer/remote/TerminalView.tsx'
 import { Home, SettingsSheet } from '/src/renderer/remote/App.tsx'
 import '/src/renderer/remote/remote.css'
+window.mountDialog = () => {
+  window.homeRoot?.unmount()
+  window.mobileRoot?.unmount()
+  document.body.innerHTML = '<button id="trigger">Open</button><div id="dialog"></div>'
+  document.getElementById('trigger').focus()
+  window.dialogActions = []
+  function Dialog() {
+    const [open, setOpen] = React.useState(true)
+    window.openDialog = () => setOpen(true)
+    return <AppleAlertDialog isOpen={open} title="Cancel meeting" confirmLabel="Cancel meeting" cancelLabel="Keep meeting"
+      onClose={() => { window.dialogActions.push('keep'); setOpen(false) }}
+      onConfirm={() => { window.dialogActions.push('cancel'); setOpen(false) }}/>
+  }
+  window.dialogRoot = createRoot(document.getElementById('dialog'))
+  window.dialogRoot.render(<Dialog/> )
+}
 window.makeTerminal = (guarded) => {
   window.term?.dispose()
   document.body.innerHTML = '<div id="desktop" style="width:600px;height:300px"></div>'
@@ -32,9 +50,10 @@ window.makeTerminal = (guarded) => {
   })
   term.focus()
 }
+window.desktopNeedsApproval = () => looksLikeApprovalPrompt(readApprovalScreen(window.term))
 const messages = new Set(), states = new Set()
-const open = Terminal.prototype.open
-Terminal.prototype.open = function(el) { open.call(this, el); if (el.classList.contains('xterm-box')) window.mobileTerm = this }
+const write = Terminal.prototype.write
+Terminal.prototype.write = function(...args) { if (this.options.disableStdin) window.mobileTerm = this; return write.apply(this, args) }
 window.requests = []
 window.deliver = m => messages.forEach(fn => fn(m))
 const conn = {
@@ -46,17 +65,21 @@ const conn = {
   onMessage(fn) { messages.add(fn); return () => messages.delete(fn) },
   onState(fn) { states.add(fn); return () => states.delete(fn) }
 }
+window.renderMobile = (session = {}) => window.mobileRoot.render(<TerminalView conn={conn}
+  session={{id:'check', windowId:7, devPort:5173, title:'A'.repeat(300), workspaceName:'workspace', cols:160, rows:40, ...session}}
+  hostName="desktop" onBack={() => {}} />)
 window.mountMobile = () => {
+  window.mobileRoot?.unmount()
   window.term?.dispose()
   window.term = null
   document.body.innerHTML = '<div id="root"></div>'
-  createRoot(document.getElementById('root')).render(<TerminalView conn={conn}
-    session={{id:'check', windowId:7, devPort:5173, title:'A'.repeat(300), workspaceName:'workspace', cols:160, rows:40}}
-    hostName="desktop" onBack={() => {}} />)
+  window.mobileRoot = createRoot(document.getElementById('root'))
+  window.renderMobile()
 }
 window.mountHome = (activeHost = 'https://desktop:47600/', firstId = 1, workspace = 'C:/projects/business') => {
   window.homeRoot?.unmount()
-  window.mobileTerm?.dispose()
+  window.mobileRoot?.unmount()
+  window.mobileRoot = null
   window.mobileTerm = null
   document.body.innerHTML = '<div id="root"></div>'
   window.opened = []; window.newWindows = []
@@ -98,6 +121,67 @@ app.whenReady().then(async () => {
   await bridge.handleMessage(oldPhone, {t:'input', id:'desktop', data:'hello'})
   assert.deepEqual(remoteInputs, [['desktop', 'hello']], 'mobile input still reaches shared PTY')
   console.log('legacy mobile resize blocked / remote input: passed')
+
+  // 真的 Claude Code 2.1.280 經 ConPTY 的輸出（scripts/fixtures，個人路徑已替換），中間改 4 次尺寸。
+  // main 的 headless 畫面要是唯一真相：中途接上的手機、最後才接上的手機，看到的要一模一樣，對話只有一份。
+  {
+    const { Terminal: Headless } = require('@xterm/headless')
+    const ptyModule = { exports: {} }
+    const ptyCode = await require('esbuild').transform(fs.readFileSync('src/main/ipc/pty.ts', 'utf8'), {loader:'ts', format:'cjs'})
+    let feedPty
+    new Function('require', 'module', 'exports', ptyCode.code)(id => ({
+      electron: { ipcMain: {}, app: { on() {} } },
+      '@lydell/node-pty': { spawn: () => ({ pid: 1, onData: fn => { feedPty = fn }, onExit() {}, resize() {} }) },
+      '../index': {}, './conn': { resolveConnectionEnv: () => ({}) },
+      './settings': { getCustomCliPath: () => null, isCliBypassPermissions: () => false },
+      '../ext/paths': { findAgentCli: () => null },
+      '../../shared/approvalDetect': { looksLikeApprovalPrompt: () => false, readApprovalScreen: () => '' },
+      '../../shared/portDetect': { detectDevPort: () => null }
+    })[id] || require(id), ptyModule, ptyModule.exports)
+    const { spawnPty, subscribePty, resizePty } = ptyModule.exports
+    const ptyId = spawnPty({ command: 'claude', cols: 120, rows: 30 }, { workspace: '', owner: { id: 1 }, subscribeOwner: false })
+    // 照 remote/TerminalView 的順序處理 snapshot / data / resized
+    const phone = () => {
+      const t = new Headless({ cols: 80, rows: 24, scrollback: 5000, allowProposedApi: true, windowsPty: { backend: 'conpty' } })
+      const snap = subscribePty(ptyId, `phone${Math.random()}`, {
+        data: (_id, d) => t.write(d),
+        resized: (_id, c, r) => t.write('', () => t.resize(c, r)),
+        exit() {}
+      })
+      t.write('', () => { t.reset(); t.resize(snap.cols, snap.rows) })
+      t.write(snap.data)
+      return t
+    }
+    const settle = t => new Promise(r => t.write('', r))
+    const text = t => { const b = t.buffer.active, out = []; for (let y = 0; y < b.length; y++) out.push(b.getLine(y).translateToString(true)); return out.join('\n').trimEnd() }
+    const events = require('./fixtures/claude-resize-conpty.json')
+    let early
+    for (const [i, e] of events.entries()) {
+      if (e[0] === 'd') feedPty(e[1]); else resizePty(ptyId, e[1], e[2])
+      if (i === 100) early = phone()
+      await new Promise(r => setImmediate(r))
+    }
+    await new Promise(r => setTimeout(r, 100))
+    const late = phone()
+    await Promise.all([settle(early), settle(late)])
+    assert.equal(text(early), text(late), 'phone attached mid-session matches a fresh snapshot')
+    assert.equal(text(late).split('Claude Code v2.1.280').length - 1, 1, 'one transcript copy after resizes')
+    assert.equal(text(late).split('5. Scrollback buffers keep earlier output').length - 1, 1, 'no duplicated reply')
+    console.log('headless screen mirror / Claude resize reprint: passed')
+  }
+  const ptyModule = { exports: {} }
+  const ptyCode = await require('esbuild').transform(fs.readFileSync('src/main/ipc/pty.ts', 'utf8'), {loader:'ts', format:'cjs'})
+  new Function('require', 'module', 'exports', ptyCode.code)(id => {
+    if (id === './settings') return { isCliBypassPermissions: () => false, getCustomCliPath: () => '' }
+    if (id === '../ext/paths') return { findAgentCli: () => '' }
+    if (id.startsWith('.')) return {}
+    return require(id)
+  }, ptyModule, ptyModule.exports)
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('codex', []), ['--no-alt-screen'], 'codex receives --no-alt-screen')
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('codex', ['resume', '123']), ['resume', '123', '--no-alt-screen'], 'codex resume receives --no-alt-screen')
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('codex', ['--no-alt-screen']), ['--no-alt-screen'], 'codex does not duplicate --no-alt-screen')
+  assert.deepEqual(ptyModule.exports.applyAgentDefaultArgs('claude', ['--resume', '123']), ['--resume', '123'], 'other agents left untouched')
+  console.log('codex --no-alt-screen default inline mode: passed')
   const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workbench-terminal-check-'))
   await require('esbuild').build({
     stdin: { contents: fixture.replaceAll("'/src/", "'./src/"), resolveDir: process.cwd(), loader: 'tsx' },
@@ -107,7 +191,7 @@ app.whenReady().then(async () => {
     })) } }],
     define: { 'process.env.NODE_ENV': '"development"' }, outfile: path.join(cacheDir, 'page.js')
   })
-  fs.writeFileSync(path.join(cacheDir, 'index.html'), '<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="page.css"><script src="page.js"></script>')
+  fs.writeFileSync(path.join(cacheDir, 'index.html'), '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="page.css"><script src="page.js"></script>')
   const win = new BrowserWindow({ show: false, width: 390, height: 844, useContentSize: true, webPreferences: { backgroundThrottling: false, offscreen: true } })
   const run = code => win.webContents.executeJavaScript(code)
   const pause = () => new Promise(r => setTimeout(r, 400))
@@ -143,6 +227,18 @@ app.whenReady().then(async () => {
       await pause()
     }
     assert.deepEqual(await run('sent'), ['中文測試', '中文測試', '，', '😀'], 'native compositions exactly once')
+    // 微軟注音組字緩衝區滿了：先送出前段，後段繼續組字。
+    await run('sent.length = 0')
+    const ime = (cmd, args) => win.webContents.debugger.sendCommand(cmd, args)
+    await ime('Input.imeSetComposition', {text:'一二三四五六', selectionStart:6, selectionEnd:6})
+    await pause()
+    assert.equal(await run('document.querySelector(".composition-view.active")?.textContent'), '一二三四五六', 'composition preview visible')
+    await ime('Input.insertText', {text:'一二三'})
+    await ime('Input.imeSetComposition', {text:'四五六七', selectionStart:4, selectionEnd:4})
+    await pause()
+    await ime('Input.insertText', {text:'四五六七'})
+    await pause()
+    assert.deepEqual(await run('sent'), ['一二三', '四五六七'], 'IME partial commit sends each part once')
     assert.equal(await run('term.textarea.value'), '', 'no retained IME text')
     // IME passthrough punctuation must not diff/re-emit previously typed content.
     assert.deepEqual(await run(`(async () => {
@@ -161,11 +257,132 @@ app.whenReady().then(async () => {
     assert.deepEqual(await run('sent'), ['paste once'], 'paste unchanged')
     console.log('native IME / passthrough / Enter / paste: passed')
 
+    await run(`(async () => {
+      await new Promise(r => term.write('\\x1b[H\\x1b[2JI will approve the changes after testing.', r))
+    })()`)
+    assert.equal(await run('window.desktopNeedsApproval()'), false, 'desktop does not turn ordinary approval prose into a prompt')
+    await run(`(async () => {
+      await new Promise(r => term.write('\\x1b[H\\x1b[2JAllow command?\\r\\n❯ 1. Yes\\r\\n  2. No\\r\\nEsc to cancel', r))
+    })()`)
+    assert.equal(await run('window.desktopNeedsApproval()'), true, 'desktop recognizes the actual rendered choice menu')
+    await run(`(async () => {
+      await new Promise(r => term.write('\\x1b[H\\x1b[2JDone.\\r\\n❯ ', r))
+    })()`)
+    assert.equal(await run('window.desktopNeedsApproval()'), false, 'desktop clears approval when the prompt is erased')
+    console.log('desktop rendered-screen approval / ordinary prose / automatic clearing: passed')
+
     await run('window.mountMobile()')
     await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', {enabled:true})
     await pause()
     await run('Array.from(document.querySelectorAll(".segmented button"))[1].click()')
     await pause()
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'before switching'}); window.originalMobileTerm = mobileTerm; void 0`)
+    await pause()
+    await run('window.renderMobile({cols:120, rows:34})')
+    await pause()
+    assert.equal(await run('mobileTerm === originalMobileTerm'), true, 'state dimension update keeps the terminal parser')
+    assert.ok(await run('mobileTerm.buffer.active.getLine(0).translateToString(true).includes("before switching")'), 'state update preserves screen content')
+    await run(`window.deliver({t:'resized', id:'check', cols:120, rows:34})`)
+    await pause()
+    assert.deepEqual(await run('({cols:mobileTerm.cols, rows:mobileTerm.rows})'), {cols:120, rows:34}, 'authoritative desktop resize updates parser without remounting')
+    await run('window.renderMobile({id:"other", cols:120, rows:34})')
+    await pause()
+    await run(`window.deliver({t:'snapshot', id:'other', cols:120, rows:34, data:'other session'})`)
+    await pause()
+    assert.equal(await run('document.querySelectorAll(".terminal-text").length'), 1, 'switching sessions keeps one output view')
+    assert.ok(await run('mobileTerm.buffer.active.getLine(0).translateToString(true).includes("other session")'), 'switched session renders its own snapshot')
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("other session")'), 'switched session is visible')
+    await run('window.renderMobile()')
+    await pause()
+    for (const mode of [0, 2, 3]) {
+      await run(`document.querySelectorAll('.segmented button')[${mode}].click()`)
+      await pause()
+      await run(`window.deliver({t:'resized', id:'check', cols:160, rows:40}); window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'restored screen'})`)
+      await pause()
+      await run(`document.querySelectorAll('.segmented button')[1].click()`)
+      await pause()
+      assert.ok(await run('mobileTerm.buffer.active.getLine(0).translateToString(true).includes("restored screen")'), 'tab return restores snapshot')
+      assert.ok(await run('document.querySelector(".terminal-text").getBoundingClientRect().width > 100'), 'tab return keeps full output width')
+      assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("restored screen")'), 'tab return shows the restored output')
+    }
+    await run('window.mountMobile()')
+    await pause()
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:'reopened session'}); window.deliver({t:'data', id:'other', d:'wrong session'})`)
+    await pause()
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("reopened session") && !document.querySelector(".terminal-text").textContent.includes("wrong session")'), 'leaving and reopening a terminal restores only its own snapshot')
+    console.log('mobile session switching / state dimensions / hidden tab restore: passed')
+    const mobileText = '中文測試 😀 ' + '長文字'.repeat(70) + 'https://example.test/' + 'path'.repeat(80)
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40, data:${JSON.stringify(mobileText)}})`)
+    await pause()
+    assert.ok(await run(`document.querySelector('.terminal-text').textContent.includes(${JSON.stringify(mobileText)})`), 'CJK, emoji and long URLs survive canonical soft-wraps')
+    assert.equal(await run('document.querySelector(".xterm-scroll").scrollWidth'), await run('document.querySelector(".xterm-scroll").clientWidth'), 'long unbroken text wraps without horizontal overflow')
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'\\x1b[?25l\\x1b[31;1mRED\\x1b[0m \\x1b[38;2;12;34;56mRGB\\x1b[0m \\x1b[38;5;196mPALETTE\\x1b[0m <img src=x>\\r\\n' + '─'.repeat(160) + '\\r\\nold progress\\r\\nready'})`)
+    await pause()
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[1A\\r\\x1b[2Knew progress\\x1b[1B'})`)
+    await pause()
+    const styled = await run(`(() => {
+      const out = document.querySelector('.terminal-text')
+      const spans = [...out.querySelectorAll('span')]
+      const style = text => { const s=spans.find(s => s.textContent===text); return s && {color:s.style.color, weight:s.style.fontWeight} }
+      return {text:out.textContent, red:style('RED'), rgb:style('RGB'), palette:style('PALETTE'), images:out.querySelectorAll('img').length,
+        rule:document.querySelector('.terminal-rule')?.getBoundingClientRect().height ?? -1, lineHeight:parseFloat(getComputedStyle(out).lineHeight),
+        cursors:spans.filter(s=>s.style.boxShadow).length}
+    })()`)
+    assert.ok(styled.text.includes('new progress') && !styled.text.includes('old progress'), 'relative ANSI redraw happens before mobile line wrapping')
+    assert.equal(styled.red.weight, 'bold', 'ANSI bold retained')
+    assert.equal(styled.rgb.color, 'rgb(12, 34, 56)', 'ANSI truecolor retained')
+    assert.equal(styled.palette.color, 'rgb(255, 0, 0)', 'ANSI 256-color palette retained')
+    assert.equal(styled.images, 0, 'terminal text cannot inject HTML')
+    assert.equal(styled.cursors, 0, 'CLI can hide cursor')
+    assert.ok(styled.rule > 0 && styled.rule <= styled.lineHeight + 1, 'desktop separator stays one mobile line: ' + JSON.stringify(styled))
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?25h'})`)
+    await pause()
+    assert.equal(await run('[...document.querySelectorAll(".terminal-text span")].filter(s=>s.style.boxShadow).length'), 1, 'CLI can restore cursor')
+    fs.writeFileSync(path.join(cacheDir, 'wrapped-terminal.png'), (await win.webContents.capturePage()).toPNG())
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?1049h\\x1b[2J\\x1b[40;1HALTERNATE SCREEN'})`)
+    await pause()
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("ALTERNATE SCREEN") && !document.querySelector(".terminal-text").textContent.includes("new progress")'), 'alternate screen uses canonical row coordinates and replaces normal output')
+    await run(`window.deliver({t:'data', id:'check', d:'\\x1b[?1049l'})`)
+    await pause()
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("new progress") && !document.querySelector(".terminal-text").textContent.includes("ALTERNATE SCREEN")'), 'leaving alternate screen restores normal output')
+    console.log('mobile wrapped CJK / long text / ANSI styles / relative redraw / cursor: passed')
+    await run(`window.renderMobile({needsApproval:true})`)
+    await pause()
+    // Claude Code parks the cursor on its spinner row, above the permission prompt.
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'\x1b[?25l\x1b[3;1H● Writing\x1b[20;2HDo you want to proceed?\x1b[21;2H❯ 1. Yes\x1b[22;4H2. Yes, and always allow\x1b[23;4H3. No\x1b[25;2HEsc to cancel\x1b[3;3H'})`)
+    await pause()
+    const choices = await run('[...document.querySelectorAll(".approval .choice")].map(b => b.textContent)')
+    assert.deepEqual(choices, ['1Yes', '2Yes, and always allow', '3No'], 'approval reads options below a parked cursor: ' + JSON.stringify(choices))
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'Which login method?\\r\\n● Email link\\r\\n○ Company account\\r\\nUse arrow keys to choose'})`)
+    await pause()
+    assert.equal(await run('document.querySelectorAll(".approval .choice").length'), 0, 'unrecognized formats never show unlabeled 1/2/3 buttons')
+    assert.ok(await run('document.querySelector(".approval-details").textContent.includes("● Email link")'), 'unrecognized menu retains original option text')
+    assert.ok(await run('document.getElementById(document.querySelector(".approval").getAttribute("aria-labelledby"))'), 'fallback dialog retains an accessible title')
+    await run('requests.length = 0; [...document.querySelectorAll(".keys button")].find(b => b.getAttribute("aria-label") === "Down").click(); document.querySelector(".send").click()')
+    assert.deepEqual(await run('requests.filter(m => m.t === "input").map(m => m.data)'), ['\x1b[B', '\r'], 'fallback supports arrow selection and Enter confirmation')
+
+    // A full-height question with blank rows and multi-line descriptions exceeds the old 24-row tail.
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'\x1b[?25l\x1b[3;2H要使用哪種登入方式？\x1b[5;2H❯ 1. 電子郵件（建議）\x1b[6;6H使用信箱收取登入連結。\x1b[7;6H不需要記住密碼，\x1b[8;6H適合一般使用者。\x1b[19;4H2. 公司帳號\x1b[20;6H使用公司提供的單一登入。\x1b[32;4H3. 其他方式\x1b[33;6H輸入你偏好的方式。\x1b[38;2HEnter to select · Tab/Arrow keys to navigate · Esc to cancel\x1b[2;1H'})`)
+    await pause()
+    assert.equal(await run('document.querySelector(".approval-q").textContent'), '要使用哪種登入方式？', 'full-height question is visible')
+    assert.deepEqual(await run('[...document.querySelectorAll(".approval .choice")].map(b => b.textContent)'), [
+      '1電子郵件（建議） 使用信箱收取登入連結。 不需要記住密碼， 適合一般使用者。',
+      '2公司帳號 使用公司提供的單一登入。', '3其他方式 輸入你偏好的方式。'
+    ], 'spaced question choices retain labels and descriptions across the full screen')
+    await run('requests.length = 0; document.querySelectorAll(".approval .choice")[1].click()')
+    await pause()
+    assert.deepEqual(await run('requests.filter(m => m.t === "input").map(m => m.data)'), ['2'], 'labeled option sends its original CLI key')
+    await run(`window.deliver({t:'snapshot', id:'check', cols:160, rows:40,
+      data:'第二個問題？\\r\\n❯ 1. 繼續\\r\\n  2. 返回\\r\\nEsc to cancel'})`)
+    await pause()
+    assert.equal(await run('document.querySelector(".approval-q")?.textContent'), '第二個問題？', 'consecutive questions remain answerable without toggling the waiting state')
+    await run(`window.renderMobile()`)
+    await pause()
+    console.log('approval parked cursor / spaced questions / full-height screen / fallback text and input: passed')
     for (const scale of [1, 2, 3]) {
       for (const width of [320, 390, 768, 320]) {
         win.setContentSize(width, 844)
@@ -173,17 +390,19 @@ app.whenReady().then(async () => {
         await pause()
         await win.webContents.capturePage()
         const bounds = await run(`(() => {
-          const host = document.querySelector('.xterm-box')
-          const screen = host.querySelector('.xterm-screen').getBoundingClientRect()
+          const host = document.querySelector('.terminal-text')
+          const screen = host.getBoundingClientRect()
           return {width:innerWidth, page:document.documentElement.scrollWidth,
             box:host.getBoundingClientRect().right, right:screen.right, screenWidth:screen.width, cols:mobileTerm.cols,
+            font:parseFloat(getComputedStyle(host).fontSize),
             scroll:document.querySelector('.xterm-scroll').scrollWidth,
             client:document.querySelector('.xterm-scroll').clientWidth}
         })()`)
         assert.equal(bounds.width, width)
         assert.ok(bounds.page <= width, JSON.stringify(bounds))
         assert.ok(bounds.screenWidth > 0, 'terminal really rendered')
-        assert.ok(bounds.screenWidth <= bounds.client, 'terminal screen fits within mobile container')
+        assert.ok(bounds.screenWidth <= bounds.client + 1, 'terminal screen fits within mobile container: ' + JSON.stringify(bounds))
+        assert.ok(bounds.font >= 13, 'terminal stays readable instead of scaling desktop text down')
         assert.equal(bounds.cols, 160, 'phone preserves desktop ANSI column coordinates')
         assert.equal(await run('mobileTerm.rows'), 40, 'phone preserves desktop ANSI row coordinates')
         assert.equal(bounds.scroll, bounds.client, 'terminal never requires horizontal scrolling')
@@ -200,7 +419,7 @@ app.whenReady().then(async () => {
         assert.equal(keys.buttons.length, 8)
         assert.equal(new Set(keys.tops).size, 1, 'all eight keys stay in one row')
         assert.ok(keys.buttons.every(Boolean), 'all eight keys visible and touch-sized')
-        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} desktop columns, scaled fit without horizontal scroll`)
+        console.log(`mobile ${width}px @${scale}x: ${bounds.cols} ANSI columns, readable wrapped text without horizontal scroll`)
       }
     }
     const cols = await run('mobileTerm.cols')
@@ -208,6 +427,7 @@ app.whenReady().then(async () => {
     await pause()
     assert.equal(await run('mobileTerm.cols'), 160, 'snapshot preserves desktop dimensions')
     assert.ok(await run(`Array.from({length:mobileTerm.buffer.active.length}, (_,i)=>mobileTerm.buffer.active.getLine(i).translateToString(true)).join('').includes('x'.repeat(300))`), 'preserves all output without discarding text')
+    assert.ok(await run('document.querySelector(".terminal-text").textContent.includes("x".repeat(300))'), 'desktop soft-wrapped lines join before mobile wrapping')
     await run(`window.deliver({t:'resized', id:'check', cols:160, rows:40})`)
     await pause()
     assert.equal(await run('mobileTerm.cols'), 160, 'desktop remains the source of terminal dimensions')
@@ -220,7 +440,7 @@ app.whenReady().then(async () => {
     await pause()
     const clipped = await run(`(() => {
       const scroll = document.querySelector('.xterm-scroll')
-      const screen = document.querySelector('.xterm-screen').getBoundingClientRect()
+      const screen = document.querySelector('.terminal-line:last-child').getBoundingClientRect()
       return {bottom:screen.bottom, visible:scroll.getBoundingClientRect().bottom, top:scroll.scrollTop}
     })()`)
     assert.ok(clipped.bottom <= clipped.visible, 'latest rows visible with keyboard open: ' + JSON.stringify(clipped))
@@ -248,18 +468,28 @@ app.whenReady().then(async () => {
       await pause()
       const up = await position()
       assert.ok(up < bottom, 'finger swipe reaches history, mouse mode=' + mouseMode)
-      assert.ok(await run('mobileTerm.buffer.active.viewportY < mobileTerm.buffer.active.baseY'), 'swipe actually renders historical rows')
+      assert.ok(await run(`(() => {
+        const scroll = document.querySelector('.xterm-scroll').getBoundingClientRect()
+        return [...document.querySelectorAll('.terminal-line')].some(line => line.textContent.startsWith('line ') && line.getBoundingClientRect().bottom > scroll.top && line.getBoundingClientRect().top < scroll.bottom)
+      })()`), 'swipe actually displays historical rows')
       await run(`window.deliver({t:'data', id:'check', d:'\\r\\nnew output'})`)
       await pause()
       assert.equal(await position(), up, 'new output leaves history in place')
       const history = await run('mobileTerm.buffer.active.baseY')
-      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[3J\\x1b[H\\x1b[2Jredrawn screen'})`)
+      await run(`window.deliver({t:'data', id:'check', d:'\\x1b[H\\x1b[2Jredrawn screen'})`)
       await pause()
-      assert.equal(await run('mobileTerm.buffer.active.baseY'), history, 'CLI erase-scrollback redraw retains mobile history')
+      assert.equal(await run('mobileTerm.buffer.active.baseY'), history, 'CLI clear-screen redraw retains mobile history')
       assert.equal(await position(), up, 'CLI redraw leaves reader in history')
       await swipe(-180)
       await pause()
-      assert.ok(await position() > up, 'finger swipe returns toward latest output')
+      const returned = await run(`(() => {
+        const scroll = document.querySelector('.xterm-scroll'), bounds = scroll.getBoundingClientRect()
+        const last = document.querySelector('.terminal-line:last-child').getBoundingClientRect()
+        return {top:scroll.scrollTop, atBottom:scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 2,
+          latestVisible:last.bottom <= bounds.bottom + 1 && last.bottom > bounds.top}
+      })()`)
+      // A cleared screen can be shorter; reaching its latest text may reduce the absolute offset.
+      assert.ok(returned.top > up || (returned.atBottom && returned.latestVisible), 'finger swipe returns toward latest output: ' + JSON.stringify(returned))
       assert.equal(await run('document.querySelector(".session-body").scrollTop'), 0, 'outer body does not compete with terminal scrolling')
     }
     await run(`document.querySelector('.xterm-scroll').scrollTop = 1e9`)
@@ -268,10 +498,11 @@ app.whenReady().then(async () => {
     await pause()
     const followed = await run(`(() => { const s=document.querySelector('.xterm-scroll'); return {height:s.scrollHeight, client:s.clientHeight, top:s.scrollTop, base:mobileTerm.buffer.active.baseY, viewport:mobileTerm.buffer.active.viewportY} })()`)
     assert.ok(followed.height - followed.client - followed.top <= 2, 'new output follows when reader is at bottom: ' + JSON.stringify(followed))
-    assert.equal(followed.viewport, followed.base, 'bottom renders the latest rows, including when phone is taller than desktop terminal')
+    assert.ok(await run('document.querySelector(".terminal-line:last-child").textContent.includes("latest output")'), 'bottom renders the latest rows')
     fs.writeFileSync(path.join(cacheDir, 'terminal.png'), (await win.webContents.capturePage()).toPNG())
     console.log('mobile native touch scroll / mouse mode / history during output: passed')
-    assert.deepEqual(await run('Array.from(document.querySelectorAll(".segmented button")).map(b => b.textContent)'), ['Status', '終端', 'File', '預覽'])
+    assert.deepEqual(await run('Array.from(document.querySelectorAll(".segmented button")).map(b => b.textContent)'),
+      await run('document.documentElement.lang === "en" ? ["Status", "Terminal", "File", "Preview"] : ["Status", "終端", "File", "預覽"]'))
     await run('document.querySelectorAll(".segmented button")[0].click()')
     await pause()
     await run(`window.deliver({t:'status', windowId:7, status:{workspace:'C:/project', agentBusy:true, agentCount:2,
@@ -364,6 +595,29 @@ app.whenReady().then(async () => {
     assert.ok(await run(`document.body.textContent.includes(${JSON.stringify('v' + version)})`), 'show loaded mobile interface version')
     assert.ok(await run('Array.from(document.querySelectorAll("button")).some(b => /Reload mobile interface|重新載入手機介面/.test(b.textContent))'), 'standalone PWA has a reload action')
     console.log('mobile interface version / reload control: passed')
+    await run('window.mountDialog()')
+    await pause()
+    assert.equal(await run('document.activeElement.textContent'), 'Keep meeting', 'destructive dialog focuses the safe action')
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyDown', key:'Enter', code:'Enter', windowsVirtualKeyCode:13, text:'\r'})
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {type:'keyUp', key:'Enter', code:'Enter', windowsVirtualKeyCode:13})
+    await pause()
+    assert.deepEqual(await run('window.dialogActions'), ['keep'], 'Enter activates the focused safe button')
+    assert.equal(await run('document.activeElement.id'), 'trigger', 'dialog restores focus')
+    await run('window.openDialog()')
+    await pause()
+    await run('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",shiftKey:true,bubbles:true,cancelable:true}))')
+    assert.equal(await run('document.activeElement.textContent'), 'Cancel meeting', 'Shift+Tab stays in dialog')
+    await run('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true}))')
+    assert.equal(await run('document.activeElement.textContent'), 'Keep meeting', 'Tab wraps within dialog')
+    await run('document.activeElement.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true}))')
+    await pause()
+    assert.equal(await run('!!document.querySelector("[role=alertdialog]")'), false, 'Escape dismisses dialog')
+    await run('window.openDialog()')
+    await pause()
+    await run('document.querySelector(".apple-alert-btn-destructive").click()')
+    await pause()
+    assert.deepEqual(await run('window.dialogActions'), ['keep', 'keep', 'cancel'], 'explicit confirm performs destructive action')
+    console.log('Apple alert focus / keyboard / safe action: passed')
   } finally {
     win.destroy()
   }

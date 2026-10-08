@@ -13,10 +13,12 @@ import {
 } from '@/store'
 import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
-import { looksLikeApprovalPrompt } from './approvalDetect'
+import { looksLikeApprovalPrompt, readApprovalScreen } from './approvalDetect'
 import { detectDevUrl } from './portDetect'
 import { focusTerm, isComposing, isImeKey, trackComposition } from './imeGuard'
 import AgentMark from '@/components/AgentMark'
+import CoworkPanel from '@panels/cowork/CoworkPanel'
+import type { CoworkAgent, CoworkPhase } from '../../../../shared/cowork'
 import {
   IconPlus,
   IconChevronDown,
@@ -31,7 +33,8 @@ import {
   IconSplitVertical,
   IconSplitGrid,
   IconSparkles,
-  IconSend
+  IconSend,
+  IconCowork
 } from '@/components/Icons'
 import type { CliLauncher, WorkbenchSettings } from '../../../../preload/index'
 
@@ -219,6 +222,10 @@ export default function TerminalPanel(): JSX.Element {
   const [sessions, setSessions] = useState<TerminalSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [splitMode, setSplitMode] = useState<SplitMode>('single')
+  // Cowork 是終端區的一個兄弟分頁：開著時蓋在終端畫面上，終端本身保持掛載
+  const [coworkTabs, setCoworkTabs] = useState<{ id: string; number: number; prompt: string | null; phase: CoworkPhase | null }[]>([])
+  const [activeCoworkId, setActiveCoworkId] = useState<string | null>(null)
+  const coworkTabCounter = useRef(0)
   // 最近使用順序：分割時就顯示最近用過的前 N 個，不必再另外挑面板
   const [mru, setMru] = useState<string[]>([])
 
@@ -385,6 +392,31 @@ export default function TerminalPanel(): JSX.Element {
     tryOnce()
   }, [])
 
+  /**
+   * 剛開的 CLI 還沒畫完畫面、還沒開 bracketed paste 時就貼，開頭幾行的換行會被當成一般按鍵吃掉
+   * （2026-10-07 實測 Codex）。等它的輸出靜止 1.5 秒（最多 20 秒）才貼。
+   */
+  const pasteWhenReady = useCallback(
+    (sessionId: string, text: string): void => {
+      const t0 = Date.now()
+      let lastWrite = 0
+      let sub: { dispose(): void } | null = null
+      const tick = (): void => {
+        const s = sessionsRef.current.find((x) => x.id === sessionId)
+        if (s && !sub) sub = s.term.onWriteParsed(() => (lastWrite = Date.now()))
+        const settled = lastWrite > 0 && Date.now() - lastWrite > 1500
+        if (settled || Date.now() - t0 > 20000) {
+          sub?.dispose()
+          sendToSession(sessionId, text)
+          return
+        }
+        setTimeout(tick, 200)
+      }
+      tick()
+    },
+    [sendToSession]
+  )
+
   const termTheme = useMemo(() => {
     switch (theme) {
       case 'light-morandi':
@@ -519,6 +551,7 @@ export default function TerminalPanel(): JSX.Element {
 
   // 切到某分頁即視為使用者已看到，清掉紅點；同時把它移到 MRU 最前面
   const selectSession = useCallback((id: string): void => {
+    setActiveCoworkId(null)
     setActiveSessionId(id)
     setMru((prev) => [id, ...prev.filter((x) => x !== id)])
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, needsApproval: false } : s)))
@@ -543,7 +576,9 @@ export default function TerminalPanel(): JSX.Element {
         minimumContrastRatio: minContrast,
         fontFamily: "'SF Mono', 'JetBrains Mono', 'Cascadia Code', ui-monospace, Menlo, Consolas, monospace",
         fontSize: 12,
-        cursorBlink: true
+        cursorBlink: true,
+        // 跟 main 的 headless 畫面同一套 ConPTY 行為（pty.ts），尺寸變化後三方才會一致
+        windowsPty: { backend: 'conpty' }
       })
       const fitAddon = new FitAddon()
       term.loadAddon(fitAddon)
@@ -614,6 +649,7 @@ export default function TerminalPanel(): JSX.Element {
         }
       ])
       setMru((prev) => [sessionId, ...prev])
+      setActiveCoworkId(null)
       setActiveSessionId(sessionId)
       return sessionId
     },
@@ -814,7 +850,7 @@ export default function TerminalPanel(): JSX.Element {
     const running = sessionsRef.current.find((s) => !s.isExited && SHELL_IDS.includes(s.launcherKey))
     const fallbackKey = enabledShells[0]?.id || BUILTIN_SHELLS[0].id
     const id = running ? running.id : handleNewTerminal(fallbackKey)
-    setActiveSessionId(id)
+    selectSession(id)
     sendToSession(id, terminalDispatch.text)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalDispatch, enabledShells, enabledAgents])
@@ -847,7 +883,7 @@ export default function TerminalPanel(): JSX.Element {
     const text = readTerm(src.term)
     if (!text) return
     sendToSession(targetId, text)
-    setActiveSessionId(targetId)
+    selectSession(targetId)
   }
 
   const closeTerminal = (id: string, e?: React.MouseEvent): void => {
@@ -1086,13 +1122,28 @@ export default function TerminalPanel(): JSX.Element {
     </div>
   )
 
+  const openCowork = (): void => {
+    const id = crypto.randomUUID()
+    const number = ++coworkTabCounter.current
+    setCoworkTabs((prev) => [...prev, { id, number, prompt: null, phase: null }])
+    setActiveCoworkId(id)
+    setAddMenuOpen(false)
+  }
+
+  const closeCowork = (id: string): void => {
+    const index = coworkTabs.findIndex((tab) => tab.id === id)
+    const next = coworkTabs.filter((tab) => tab.id !== id)
+    setCoworkTabs(next)
+    setActiveCoworkId((active) => active === id ? next[Math.max(0, index - 1)]?.id || null : active)
+  }
+
   // 渲染新增終端選單（支援 PowerShell, Command Prompt 與 AI Agents）
   const renderAddMenu = (): JSX.Element => (
     <div className="term-agent-picker-wrap">
       <button
         className={`term-add-dropdown-btn ${addMenuOpen ? 'open' : ''}`}
         onClick={toggleAddMenu}
-        title="New Terminal: PowerShell, Command Prompt, or Agent"
+        title="New Terminal or Cowork"
       >
         <IconPlus size={11} />
         <IconChevronDown size={8} />
@@ -1171,6 +1222,15 @@ export default function TerminalPanel(): JSX.Element {
               </>
             )}
 
+            {(enabledShells.length > 0 || enabledAgents.length > 0) && <div className="term-popover-divider" />}
+            <button type="button" className="term-popover-item" onClick={openCowork}>
+              <IconCowork size={15} />
+              <div className="term-popover-item-details">
+                <span className="term-popover-name">{t('cowork.tab')}</span>
+                <span className="term-popover-desc">{t('cowork.buttonTitle')}</span>
+              </div>
+            </button>
+
             {launchers.length > 0 && (
               <>
                 {(enabledShells.length > 0 || enabledAgents.length > 0) && <div className="term-popover-divider" />}
@@ -1191,9 +1251,6 @@ export default function TerminalPanel(): JSX.Element {
               </>
             )}
 
-            {enabledShells.length === 0 && enabledAgents.length === 0 && launchers.length === 0 && (
-              <div className="term-popover-empty">No terminals enabled in Settings</div>
-            )}
           </div>,
           document.body
         )}
@@ -1519,7 +1576,7 @@ export default function TerminalPanel(): JSX.Element {
       </div>
 
       {/* Row 2: Dedicated Session Tabs Bar (Displayed when one or more sessions exist) */}
-      {sessions.length > 0 && (
+      {(sessions.length > 0 || coworkTabs.length > 0) && (
         <div
           className="term-tabs-row"
           onDragOver={(e) => {
@@ -1535,6 +1592,28 @@ export default function TerminalPanel(): JSX.Element {
           }}
         >
           <div className="term-strip-tabs">
+            {coworkTabs.map((tab) => (
+              <div
+                key={tab.id}
+                className={`term-unified-tab term-cowork-tab ${activeCoworkId === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveCoworkId(tab.id)}
+                title={tab.prompt || t('cowork.buttonTitle')}
+              >
+                <IconCowork size={12} />
+                <span className="term-tab-title">{tab.prompt || `${t('cowork.tab')} ${tab.number}`}</span>
+                {tab.phase && <span className={`cw-tab-dot phase-${tab.phase}`} title={t(`cowork.phase_${tab.phase}`)} />}
+                <button
+                  className="term-tab-close"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeCowork(tab.id)
+                  }}
+                  title={t('cowork.close')}
+                >
+                  <IconClose size={10} />
+                </button>
+              </div>
+            ))}
             {sessions.map((s) => {
               const isHovered = hoveredTabId === s.id
               const dragged = getDraggedSession()
@@ -1544,7 +1623,7 @@ export default function TerminalPanel(): JSX.Element {
               return (
                 <div
                   key={s.id}
-                  className={`term-unified-tab ${activeSessionId === s.id ? 'active' : ''} ${
+                  className={`term-unified-tab ${!activeCoworkId && activeSessionId === s.id ? 'active' : ''} ${
                     s.isExited ? 'exited' : ''
                   } ${paneCount > 1 && visibleIds.includes(s.id) ? 'shown' : ''} ${
                     isHandoffTab ? 'drag-handoff-target' : ''
@@ -1615,6 +1694,29 @@ export default function TerminalPanel(): JSX.Element {
         onDragOver={handleStageDragOver}
         onDrop={handleStageDrop}
       >
+        {coworkTabs.map((tab) => (
+          <div key={tab.id} className="cw-host" hidden={activeCoworkId !== tab.id}>
+            <CoworkPanel
+              initialRunId={null}
+              sessions={sessions.map((s) => ({
+                id: s.id,
+                title: s.title,
+                launcherKey: s.launcherKey,
+                isExited: s.isExited,
+                needsApproval: s.needsApproval
+              }))}
+              onPaste={(id, text, fresh) => {
+                // 只貼上、不送 Enter：使用者在終端裡確認內容後自己送出（cowork.md §5.1）
+                if (fresh) pasteWhenReady(id, text)
+                else sendToSession(id, text)
+                selectSession(id)
+              }}
+              onOpenAgent={(agent: CoworkAgent) => handleNewTerminal(agent)}
+              onClose={() => closeCowork(tab.id)}
+              onRunChange={(run) => setCoworkTabs((prev) => prev.map((item) => item.id === tab.id && (item.prompt !== (run?.prompt || null) || item.phase !== (run?.phase || null)) ? { ...item, prompt: run?.prompt || null, phase: run?.phase || null } : item))}
+            />
+          </div>
+        ))}
         {dragOverInfo && (
           <div className={`term-drag-overlay mode-${dragOverInfo.mode}`}>
             <div className={`term-drag-pill mode-${dragOverInfo.mode}`}>
@@ -1773,6 +1875,18 @@ export default function TerminalPanel(): JSX.Element {
                   )
                 })()}
 
+                <button type="button" className="launchpad-card card-cowork" onClick={openCowork} title={t('cowork.buttonTitle')}>
+                  <div className="launchpad-card-icon"><IconCowork size={28} /></div>
+                  <div className="launchpad-card-name">{t('cowork.tab')}</div>
+                  <div className="launchpad-card-sub">{t('cowork.newMeeting')}</div>
+                  <div className="launchpad-card-meta" title="Claude · Codex · Antigravity">
+                    <AgentMark agent="claude" size={14} />
+                    <AgentMark agent="codex" size={14} />
+                    <AgentMark agent="antigravity" size={14} />
+                  </div>
+                  <div className="launchpad-card-action">{t('cowork.open')} →</div>
+                </button>
+
                 {!isWindows && isCliEnabled('bash') && (() => {
                   const lp = getLaunchpadDragProps('bash')
                   return (
@@ -1807,7 +1921,7 @@ export default function TerminalPanel(): JSX.Element {
             key={s.id}
             session={s}
             isVisible={visibleIds.includes(s.id)}
-            isActive={s.id === activeSessionId}
+            isActive={!activeCoworkId && s.id === activeSessionId}
             multi={paneCount > 1}
             onFocusPane={() => selectSession(s.id)}
             onContextMenu={(x, y) => setTermContextMenu({ x, y, sessionId: s.id })}
@@ -1911,6 +2025,22 @@ export default function TerminalPanel(): JSX.Element {
   )
 }
 
+// 比這還窄／矮就當作窗格正在收合或動畫中，不跟著縮：PTY 一縮，CLI 就照那個寬度重畫，捲動歷史留下窄版殘片
+const MIN_COLS = 20
+const MIN_ROWS = 5
+
+/**
+ * 依窗格大小調整終端。接著 pty 時不直接改 xterm：送給 main，main 依輸出順序套用後回 pty:resized 才改，
+ * 桌面、main 的畫面與手機三方才會一致（見 pty.ts resizePty）。
+ */
+function fitToPane(session: TerminalSession, ptyId: string | null): void {
+  const dims = session.fitAddon.proposeDimensions()
+  if (!dims || dims.cols < MIN_COLS || dims.rows < MIN_ROWS) return
+  if (dims.cols === session.term.cols && dims.rows === session.term.rows) return
+  if (ptyId) window.api.pty.resize(ptyId, dims.cols, dims.rows)
+  else session.term.resize(dims.cols, dims.rows)
+}
+
 function TerminalInstance({
   session,
   isVisible,
@@ -1948,7 +2078,13 @@ function TerminalInstance({
 
     // remount 時 term 要重新掛進新的 DOM 節點，但底下的 spawn 只能做一次。
     session.term.open(elRef.current)
-    session.fitAddon.fit()
+    if (session.bootstrapped) {
+      ptyIdRef.current = session.isExited ? null : session.ptyId || null
+      fitToPane(session, ptyIdRef.current)
+    } else {
+      // 還沒 spawn：直接量，spawn 用這個尺寸
+      session.fitAddon.fit()
+    }
     const untrackIme = trackComposition(session.term)
 
     // 杜絕手掌誤觸觸控板產生的中鍵（Button 1）貼上：以 capture 階段攔截，防止 xterm 接收 auxclick
@@ -1961,24 +2097,20 @@ function TerminalInstance({
     }
     targetEl.addEventListener('auxclick', handleAuxClick, true)
 
+    // 拖分隔線、展開收合會連續觸發：停下來才調整一次，CLI 只重畫一次
+    let fitTimer: ReturnType<typeof setTimeout> | undefined
     const ro = new ResizeObserver(() => {
-      // 組字中改尺寸會讓 xterm 重繪並中止組字，殘留的字會在下一鍵被重送（見 imeGuard）
-      if (isComposing(session.term)) return
-      try {
-        session.fitAddon.fit()
-        const pid = ptyIdRef.current || session.ptyId
-        if (pid) {
-          window.api.pty.resize(pid, session.term.cols, session.term.rows)
-        }
-      } catch {
-        /* 尺寸為 0 時 fit 會丟例外，忽略 */
-      }
+      clearTimeout(fitTimer)
+      fitTimer = setTimeout(() => {
+        // 組字中改尺寸會讓 xterm 重繪並中止組字（見 imeGuard）
+        if (!isComposing(session.term)) fitToPane(session, ptyIdRef.current)
+      }, 100)
     })
     ro.observe(elRef.current)
 
     if (session.bootstrapped) {
-      ptyIdRef.current = session.ptyId || null
       return () => {
+        clearTimeout(fitTimer)
         ro.disconnect()
         untrackIme()
         targetEl.removeEventListener('auxclick', handleAuxClick, true)
@@ -2013,8 +2145,9 @@ function TerminalInstance({
     const ready: Promise<string> = attachId
       ? window.api.pty.attach(attachId).then((res) => {
           if (!res) throw new Error('remote terminal is no longer running')
+          // 先用 pty 現在的尺寸還原畫面，下面掛好 handler 後再調成窗格大小
+          session.term.resize(res.cols, res.rows)
           session.term.write(res.snapshot)
-          window.api.pty.resize(attachId, session.term.cols, session.term.rows)
           return attachId
         })
       : window.api.pty.spawn(opts)
@@ -2027,8 +2160,24 @@ function TerminalInstance({
         const isAgent = AGENT_IDS.includes(session.launcherKey)
         // 保留上一段尾巴，避免網址剛好被切在兩個 chunk 之間
         let urlTail = ''
+        let approvalTimer: ReturnType<typeof setTimeout> | undefined
+        const checkApproval = (): void => {
+          if (approvalTimer || !ptyIdRef.current) return
+          approvalTimer = setTimeout(() => {
+            approvalTimer = undefined
+            const waiting = looksLikeApprovalPrompt(readApprovalScreen(session.term))
+            if (waiting === approvalRef.current) return
+            approvalRef.current = waiting
+            setSessions((prev) =>
+              prev.map((s) => (s.id === session.id ? { ...s, needsApproval: waiting } : s))
+            )
+            if (waiting && !isVisibleRef.current) {
+              window.api.notify.show('Approval needed', `${session.title} is waiting for a response`)
+            }
+          }, 120)
+        }
         const unsubData = window.api.pty.onData(ptyId, (data) => {
-          session.term.write(data)
+          session.term.write(data, checkApproval)
 
           if (isAgent) pulseAgentActivity()
           const scan = urlTail + data
@@ -2037,20 +2186,17 @@ function TerminalInstance({
             const devUrl = detectDevUrl(scan)
             if (devUrl) reportDevUrl(devUrl)
           }
+        })
 
-          // 待審批偵測：false→true 才提醒，避免同一個提示連發通知
-          if (!approvalRef.current && looksLikeApprovalPrompt(data)) {
-            approvalRef.current = true
-            setSessions((prev) =>
-              prev.map((s) => (s.id === session.id ? { ...s, needsApproval: true } : s))
-            )
-            if (!isVisibleRef.current) {
-              window.api.notify.show('Approval needed', `${session.title} is waiting for a response`)
-            }
-          }
+        // 排在已收到的輸出後面才改尺寸，跟 main 套用的順序一樣
+        const unsubResized = window.api.pty.onResized(ptyId, (cols, rows) => {
+          session.term.write('', () => { session.term.resize(cols, rows); checkApproval() })
         })
 
         const unsubExit = window.api.pty.onExit(ptyId, (code) => {
+          clearTimeout(approvalTimer)
+          // 結束後 main 不再處理 resize，改回直接調整 xterm
+          ptyIdRef.current = null
           approvalRef.current = false
           setSessions((prev) =>
             prev.map((s) =>
@@ -2062,18 +2208,18 @@ function TerminalInstance({
           window.api.notify.show('Task finished', `${session.title} exited with code ${code}`)
         })
 
-        // 使用者一輸入就代表他在回應，清掉待審批狀態
         const termDataDisp = session.term.onData((data) => {
-          if (approvalRef.current) {
-            approvalRef.current = false
-            setSessions((prev) =>
-              prev.map((s) => (s.id === session.id ? { ...s, needsApproval: false } : s))
-            )
-          }
           window.api.pty.write(ptyId, data)
         })
 
-        session.disposables.push(unsubData, unsubExit, () => termDataDisp.dispose())
+        session.disposables.push(unsubData, unsubResized, unsubExit, () => termDataDisp.dispose(), () => clearTimeout(approvalTimer))
+        session.term.write('', checkApproval)
+        // spawn 期間窗格變過的話 xterm 已直接改了尺寸，pty 還是 spawn 時的大小
+        if (!attachId && (session.term.cols !== opts.cols || session.term.rows !== opts.rows)) {
+          window.api.pty.resize(ptyId, session.term.cols, session.term.rows)
+        }
+        // attach 的 pty 是手機開的尺寸，調成窗格大小
+        fitToPane(session, ptyId)
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)
@@ -2081,6 +2227,7 @@ function TerminalInstance({
       })
 
     return () => {
+      clearTimeout(fitTimer)
       ro.disconnect()
       untrackIme()
       targetEl.removeEventListener('auxclick', handleAuxClick, true)
@@ -2093,11 +2240,7 @@ function TerminalInstance({
     const timer = setTimeout(() => {
       if (isComposing(session.term)) return
       try {
-        session.fitAddon.fit()
-        const pid = ptyIdRef.current || session.ptyId
-        if (pid) {
-          window.api.pty.resize(pid, session.term.cols, session.term.rows)
-        }
+        fitToPane(session, ptyIdRef.current)
         if (isActive) focusTerm(session.term)
       } catch {
         /* 尺寸尚未穩定時忽略 */

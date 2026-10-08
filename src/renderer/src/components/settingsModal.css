@@ -288,6 +288,41 @@
 }
 
 /* Inset Group Row */
+.macos-cowork-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  container-type: inline-size;
+}
+.macos-cowork-settings .macos-row-info { flex: 1; }
+.macos-cowork-settings .macos-row-sub {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.macos-cowork-settings .macos-row-main > p { flex: 1; min-width: 0; }
+.macos-cowork-settings .macos-row-title-row { flex-wrap: wrap; }
+.macos-cowork-settings .macos-row-title { overflow-wrap: anywhere; }
+.macos-cowork-settings .macos-lang-name { overflow-wrap: anywhere; }
+.macos-cowork-settings .macos-cowork-model-row {
+  display: grid;
+  grid-template-columns: minmax(128px, 1fr) minmax(0, 300px);
+}
+.macos-cowork-model-row .macos-row-right { min-width: 0; width: 100%; }
+.macos-cowork-model-row .cw-model-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px;
+  width: 100%;
+}
+.macos-cowork-model-row .cw-select { width: 100%; max-width: 100%; height: 28px; font-size: 12px; text-overflow: ellipsis; }
+.macos-cowork-settings select.macos-input { font-family: var(--font); width: 188px; max-width: 100%; height: 28px; }
+@container (max-width: 440px) {
+  .macos-cowork-settings .macos-lang-cards { grid-template-columns: 1fr; }
+  .macos-cowork-settings .macos-cowork-model-row { grid-template-columns: minmax(0, 1fr); }
+  .macos-cowork-settings .macos-cowork-option-row { flex-direction: column; align-items: stretch; }
+  .macos-cowork-option-row select.macos-input { width: 100%; }
+}
+
 .macos-row {
   display: flex;
   flex-direction: column;

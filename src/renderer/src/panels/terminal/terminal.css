@@ -279,6 +279,17 @@
   color: var(--accent);
 }
 
+button.term-popover-item {
+  width: 100%;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+}
+button.term-popover-item:hover {
+  background: var(--bg3);
+}
+
 .term-popover-item.selected {
   background: color-mix(in srgb, var(--accent) 15%, var(--bg2));
   color: var(--accent);
@@ -1166,6 +1177,16 @@
   transform: translateY(-2px) scale(1.02);
   border-color: var(--accent);
   box-shadow: 0 6px 20px -3px rgba(0, 0, 0, 0.14);
+}
+
+button.launchpad-card {
+  font: inherit;
+  color: var(--fg);
+}
+.card-cowork .launchpad-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .launchpad-card.drag-handoff {

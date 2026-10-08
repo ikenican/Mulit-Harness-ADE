@@ -6,6 +6,7 @@ import { promisify } from 'util'
 import { workspace } from '../index'
 import { findCli } from '../ext/paths'
 import type { AgentId, WorkbenchSettings } from '../../preload/index'
+import { sanitizeCoworkSettings } from '../../shared/cowork'
 
 const execFileAsync = promisify(execFile)
 const execAsync = promisify(exec)
@@ -194,7 +195,9 @@ export function loadSettings(): WorkbenchSettings {
           .map((p: string) => resolve(p))
       : undefined,
     autoCheckUpdates: parsed.autoCheckUpdates ?? true,
-    autoDownloadUpdates: parsed.autoDownloadUpdates ?? false
+    autoDownloadUpdates: parsed.autoDownloadUpdates ?? false,
+    // 預算上限只認使用者全域設定；工作區的 settings.json 跟著 repo 走，不能拿來放寬
+    cowork: sanitizeCoworkSettings(parsedGlobal.cowork)
   }
 }
 

@@ -1197,36 +1197,19 @@ p {
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }
-.terminal-scroll-space {
-  width: 100%;
-  max-width: 100%;
-  touch-action: pan-y pinch-zoom;
-}
-.xterm-scaler-box {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  position: sticky;
-  top: 0;
-  overflow: hidden;
-  touch-action: pan-y pinch-zoom;
-}
-.xterm-scaler {
-  transform-origin: top left;
-}
-.xterm-box {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-}
-.xterm-box .xterm {
+.terminal-text {
   padding: 10px;
-  touch-action: pan-y pinch-zoom;
   box-sizing: border-box;
+  font: 13px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.xterm-box .xterm-viewport {
+.terminal-line {
+  min-height: 1.5em;
+}
+.terminal-rule {
+  white-space: pre;
   overflow: hidden;
-  pointer-events: none;
 }
 /* 成品預覽：iframe 吃滿剩下的高度，和輸出泡泡同一個圓角 */
 .preview-pane {
@@ -1241,9 +1224,6 @@ p {
   border-radius: var(--r-bubble);
   background: var(--surface);
   box-shadow: var(--glass-edge), var(--shadow-bubble);
-}
-.xterm-box .xterm-helper-textarea {
-  display: none;
 }
 .ended {
   display: flex;

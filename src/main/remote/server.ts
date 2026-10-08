@@ -15,7 +15,7 @@ import {
   getPtySession,
   subscribePty,
   unsubscribePty,
-  getPtyScrollback,
+  getPtyScreenText,
   writePty,
   killPty,
   spawnPty,
@@ -23,7 +23,6 @@ import {
   type PtySessionInfo
 } from '../ipc/pty'
 import { getRecentWorkspaces, isCliBypassPermissions, isCliEnabled, setCliBypassPermissions } from '../ipc/settings'
-import { stripAnsi } from '../../shared/approvalDetect'
 import {
   BUILTIN_LAUNCHERS,
   type ClientMessage,
@@ -289,7 +288,6 @@ export class RemoteBridge {
       ptyEvents.on('changed', this.scheduleState)
       ptyEvents.on('approval', this.onApproval)
       ptyEvents.on('exit', this.onExit)
-      ptyEvents.on('resized', this.onResized)
       ptyEvents.on('activity', this.onActivity)
       audit('bridge.start', { port, addresses: this.addresses })
     } catch (e) {
@@ -306,7 +304,6 @@ export class RemoteBridge {
     ptyEvents.off('changed', this.scheduleState)
     ptyEvents.off('approval', this.onApproval)
     ptyEvents.off('exit', this.onExit)
-    ptyEvents.off('resized', this.onResized)
     ptyEvents.off('activity', this.onActivity)
     for (const c of this.clients) this.dropClient(c, 1001)
     this.clients.clear()
@@ -629,16 +626,16 @@ export class RemoteBridge {
         return
       }
       case 'attach': {
-        const info = getPtySession(msg.id)
-        const snapshot = subscribePty(msg.id, subKey, {
+        const snap = subscribePty(msg.id, subKey, {
           data: (id, d) => this.send(c, { t: 'data', id, d }),
+          resized: (id, cols, rows) => this.send(c, { t: 'resized', id, cols, rows }),
           exit: () => {
             c.attached.delete(msg.id)
           }
         })
-        if (snapshot === null || !info) return this.send(c, { t: 'error', message: 'session not found' })
+        if (!snap) return this.send(c, { t: 'error', message: 'session not found' })
         c.attached.add(msg.id)
-        return this.send(c, { t: 'snapshot', id: msg.id, data: snapshot, cols: info.cols, rows: info.rows })
+        return this.send(c, { t: 'snapshot', id: msg.id, data: snap.data, cols: snap.cols, rows: snap.rows })
       }
       case 'detach':
         unsubscribePty(msg.id, subKey)
@@ -813,7 +810,7 @@ export class RemoteBridge {
         lastOutputAt: s.lastOutputAt,
         busy: s.busy,
         devPort: s.devPort,
-        approvalTail: s.needsApproval ? stripAnsi((getPtyScrollback(s.id) || '').slice(-2000)) : undefined
+        approvalTail: s.needsApproval ? (getPtyScreenText(s.id) || '').slice(-2000) : undefined
       }))
     const remoteWindows: RemoteWindow[] = windows.map((e) => ({
       id: e.window.id,
@@ -844,15 +841,10 @@ export class RemoteBridge {
     this.broadcast({ t: 'activity', id, busy })
   }
 
-  private onResized = (id: string, cols: number, rows: number): void => {
-    this.broadcast({ t: 'resized', id, cols, rows }, (c) => c.attached.has(id))
-  }
-
   private onApproval = (id: string): void => {
     const s = getPtySession(id)
     if (!s) return
-    // 提示通常在最後幾行：去掉 ANSI 後給手機顯示在審批卡片上
-    const tail = stripAnsi((getPtyScrollback(id) || '').slice(-3000))
+    const tail = (getPtyScreenText(id) || '').slice(-3000)
     this.broadcast({ t: 'approval', id, title: s.title, tail })
     this.push(id, 'approval', {
       title: `⏳ ${s.title} 等待你的回覆`,
