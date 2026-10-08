@@ -6,29 +6,7 @@ Cowork 協調已安裝的官方 CLI；工作台負責會議狀態、預算、紀
 
 ## Components / 模組
 
-```mermaid
-flowchart LR
-  subgraph Renderer[Renderer / 介面]
-    Tabs[TerminalPanel: independent tabs]
-    Panel[CoworkPanel: discussion and task board]
-    Settings[CoworkSettings and ModelPicker]
-    ExecUI[ExecView: results and review]
-    Tabs --> Panel
-    Panel --> ExecUI
-  end
-  Renderer <-->|typed IPC and updates| Preload[preload/index.ts]
-  Preload <--> IPC[main/ipc/cowork.ts]
-  IPC --> Service[orchestrator.ts: CoworkService]
-  Service --> Runner[runner.ts: bounded CLI processes]
-  Runner --> CLIs[Claude / Codex / Antigravity]
-  Service --> Store[store.ts: atomic JSON with backup]
-  Service --> Git[git.ts: baseline and planning snapshot]
-  Service --> Executor[executor.ts: approved task scheduling]
-  Executor --> Runner
-  Executor --> Worktrees[Git execution worktrees]
-  Shared[shared/cowork.ts: contracts, validation and prompts] -.-> Renderer
-  Shared -.-> Service
-```
+Open the rendered diagram in [architecture.html: Cowork](architecture.html#cowork). / 以瀏覽器開啟 [架構總覽的 Cowork 章節](architecture.html#cowork) 查看圖解。
 
 | Boundary / 邊界 | Responsibility / 責任 |
 | --- | --- |
@@ -44,26 +22,7 @@ flowchart LR
 
 ## Meeting and approval flow / 會議與核准流程
 
-```mermaid
-flowchart TD
-  Start[User selects mode and participants] --> Mode{Mode}
-  Mode -->|Discussion| Turns[Chair then sequential participant replies]
-  Turns --> Memory[Selected recorder: cumulative records]
-  Memory --> Follow{User action}
-  Follow -->|Follow-up| Turns
-  Follow -->|Conclude| Conclusion[Chair recommendation]
-  Conclusion --> Proposal[User edits and starts a Project proposal]
-  Mode -->|Project| R1[Chair: code-aware opening proposal]
-  Proposal --> R1
-  R1 --> R2[Other participants: parallel independent reviews]
-  R2 --> R34[Chair: resolve reviews and finalize task board]
-  R34 --> Decision{User decision}
-  Decision -->|Request revision| Revision[Chair revises the current task board]
-  Revision --> Decision
-  Decision -->|Approve| Execute[Tasks in isolated Git worktrees]
-  Execute --> Results[User reviews results]
-  Results --> Merge[Merge or clean up]
-```
+Open the rendered diagram in [architecture.html: Cowork](architecture.html#cowork). / 以瀏覽器開啟 [架構總覽的 Cowork 章節](architecture.html#cowork) 查看圖解。
 
 Discussion is a public-turn conversation, not a display of private model reasoning. A follow-up starts another round; the system does not debate indefinitely on its own. A recorder saves cumulative structured records (summary, consensus, disagreements, questions) while retaining raw messages. Before unsummarized context grows beyond the configured internal threshold (20 messages or 18,000 serialized characters), a checkpoint compresses the oldest uncovered chunk. Manual/final summaries cover all remaining chunks. A failed summary does not advance its coverage marker.
 
