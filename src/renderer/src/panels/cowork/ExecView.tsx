@@ -80,7 +80,6 @@ export function ExecLauncher({ run, t, act, onChangePlan }: { run: CoworkRun; t:
           {t('cowork.changePlan')}
         </button>
       </div>
-      <div className="cw-muted small">{t('cowork.execManualHint')}</div>
     </div>
   )
 }
@@ -171,12 +170,12 @@ function ExecTaskCard({
       {(canTalk || canRetry) && te.status !== 'running' && te.status !== 'pending' && (
         <div className="cw-task-actions">
           {canTalk && te.status !== 'blocked' && (
-            <button type="button" className="term-btn-action" onClick={() => onFollowUp(task.id)}>
+            <button type="button" className="cw-btn sm" onClick={() => onFollowUp(task.id)}>
               {t('cowork.execFollowUp')}
             </button>
           )}
           {canRetry && (
-            <button type="button" className="term-btn-action" onClick={() => act(window.api.cowork.execRetry(run.id, task.id))}>
+            <button type="button" className="cw-btn sm" onClick={() => act(window.api.cowork.execRetry(run.id, task.id))}>
               {t('cowork.execRetry')}
             </button>
           )}
@@ -205,7 +204,7 @@ function AgentTurn({
       {steps.length > 0 && (
         <div className="cw-exec-steps">
           {steps.length > shown.length && (
-            <button type="button" className="cw-link small" onClick={() => setAllSteps(true)}>
+            <button type="button" className="cw-disclosure" onClick={() => setAllSteps(true)}>
               {t('cowork.execMoreSteps', { count: steps.length - shown.length })}
             </button>
           )}
@@ -249,7 +248,7 @@ export function ExecTurnCard({ run, t, act }: { run: CoworkRun; t: T; act: Act }
   const cleanupBtn = !ex.cleaned && (
     <button
       type="button"
-      className="cw-btn"
+      className="cw-btn danger"
       disabled={busy || running}
       onClick={() => window.confirm(t('cowork.execConfirmCleanup')) && run1(window.api.cowork.execCleanup(run.id))}
     >
@@ -260,7 +259,6 @@ export function ExecTurnCard({ run, t, act }: { run: CoworkRun; t: T; act: Act }
   if (run.phase === 'executing') {
     return (
       <div className={`cw-turn ${ex.paused || (!running && stuck) ? 'warn' : ''}`} role="status" ref={ref} tabIndex={-1}>
-        {ex.paused || (!running && stuck) ? <div className="cw-turn-badge">{t('cowork.turnTitle')}</div> : null}
         <div className="cw-turn-title">
           {ex.paused ? t(`cowork.execPaused_${ex.pausedReason || 'user'}`) : t('cowork.execProgress', { done, total: tasks.length })}
         </div>
@@ -288,7 +286,6 @@ export function ExecTurnCard({ run, t, act }: { run: CoworkRun; t: T; act: Act }
     const ok = it?.status === 'ok'
     return (
       <div className={`cw-turn ${ok ? '' : 'warn'}`} role="status" ref={ref} tabIndex={-1}>
-        <div className="cw-turn-badge">{t('cowork.turnTitle')}</div>
         <div className="cw-turn-title">{ok ? t('cowork.execReviewTitle', { count: tasks.length }) : t(`cowork.execIntegration_${it?.status || 'error'}`)}</div>
         {it?.branch && (
           <div className="cw-turn-desc">
@@ -305,7 +302,6 @@ export function ExecTurnCard({ run, t, act }: { run: CoworkRun; t: T; act: Act }
           )}
           {cleanupBtn}
         </div>
-        <div className="cw-muted small">{t('cowork.execReviewHint')}</div>
       </div>
     )
   }
@@ -367,7 +363,7 @@ export function ExecComposer({
       <textarea
         ref={inputRef}
         className="cw-textarea"
-        rows={2}
+        rows={1}
         value={text}
         placeholder={t('cowork.execPlaceholder', { agent: agentLabel(ex.tasks[sel].agent) })}
         onChange={(e) => setText(e.target.value)}

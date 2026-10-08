@@ -48,7 +48,7 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
     if (!c) return ''
     if (!c.enabled) return t('cowork.reason_disabled')
     if (c.reason) return t(`cowork.reason_${c.reason}`)
-    return a === 'antigravity' ? t('cowork.eligibleSlow') : t('cowork.eligible')
+    return a === 'antigravity' ? t('cowork.eligibleSlow') : ''
   }
 
   const setChair = (a: CoworkAgent): void => {

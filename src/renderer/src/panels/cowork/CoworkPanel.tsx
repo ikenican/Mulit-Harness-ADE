@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import AgentMark from '@/components/AgentMark'
-import { IconChevronDown, IconClose, IconCowork, IconPlus, IconTrash } from '@/components/Icons'
+import { IconChevronDown, IconClose, IconPlus, IconTrash } from '@/components/Icons'
 import { useWorkbench, openSettings } from '@/store'
 import ModelPicker, { choiceLabel, useModelCatalogs } from './ModelPicker'
 import { ExecComposer, ExecLauncher, ExecTasks, ExecTurnCard } from './ExecView'
@@ -142,14 +142,15 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
     } else window.alert(errorText(t, r))
   }
 
+  const stopRun = (): void => {
+    if (run && window.confirm(t('cowork.confirmCancel'))) void window.api.cowork.cancel(run.id)
+  }
+
   return (
     <div className="cw-root">
       <div className="cw-topbar">
-        <div className="cw-topbar-left">
-          <IconCowork size={14} className="cw-topbar-icon" />
-          <span className="cw-topbar-title">{t('cowork.title')}</span>
-          <div className="cw-picker">
-            <button type="button" className="cw-picker-btn" onClick={() => setPickerOpen((v) => !v)} aria-expanded={pickerOpen}>
+        <div className="cw-picker">
+            <button type="button" className="cw-btn cw-picker-btn" onClick={() => setPickerOpen((v) => !v)} aria-expanded={pickerOpen}>
               <span className="cw-picker-label">{run ? run.prompt : t('cowork.newMeeting')}</span>
               {run && <PhasePill phase={run.phase} t={t} />}
               <IconChevronDown size={9} />
@@ -177,15 +178,19 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
                 </div>
               </>
             )}
-          </div>
         </div>
         <div className="cw-topbar-actions">
+          {run?.phase === 'meeting' && (
+            <button type="button" className="cw-btn danger" onClick={stopRun}>
+              {t('cowork.stopMeeting')}
+            </button>
+          )}
           {run && run.phase !== 'meeting' && run.phase !== 'executing' && (
-            <button type="button" className="term-btn-icon" title={t('cowork.deleteMeeting')} onClick={deleteRun}>
+            <button type="button" className="cw-btn icon" title={t('cowork.deleteMeeting')} onClick={deleteRun}>
               <IconTrash size={13} />
             </button>
           )}
-          <button type="button" className="term-btn-icon" title={t('cowork.close')} onClick={onClose}>
+          <button type="button" className="cw-btn icon" title={t('cowork.close')} onClick={onClose}>
             <IconClose size={12} />
           </button>
         </div>
@@ -318,18 +323,21 @@ function StartForm({
                   <AgentMark agent={a} size={16} />
                   <span className="cw-agent-card-text">
                     <span className="cw-agent-card-name">{agentLabel(a)}</span>
-                    <span className="cw-agent-card-sub">{ok ? (a === 'antigravity' ? t('cowork.eligibleSlow') : t('cowork.eligible')) : reason}</span>
+                    {(ok ? a === 'antigravity' : !!reason) && (
+                      <span className="cw-agent-card-sub">{ok ? t('cowork.eligibleSlow') : reason}</span>
+                    )}
                   </span>
                 </button>
                 {on && (
-                  <button
-                    type="button"
-                    className={`cw-chair-toggle ${chair === a ? 'on' : ''}`}
-                    onClick={() => setChair(a)}
-                    aria-pressed={chair === a}
-                  >
-                    {chair === a ? `★ ${t('cowork.chair')}` : t('cowork.makeChair')}
-                  </button>
+                  <div className="cw-agent-card-foot">
+                    {chair === a ? (
+                      <span className="cw-role chair">★ {t('cowork.chair')}</span>
+                    ) : (
+                      <button type="button" className="cw-btn sm" onClick={() => setChair(a)}>
+                        {t('cowork.makeChair')}
+                      </button>
+                    )}
+                  </div>
                 )}
                 {on && (
                   <ModelPicker
@@ -375,14 +383,17 @@ function StartForm({
         </div>
 
         <div className="cw-start-footer">
-          <button type="button" className="cw-link cw-muted" onClick={() => openSettings('cowork')}>
-            {t('cowork.limitsLine', { calls: limits.calls, minutes: limits.minutes })}
-          </button>
+          {picked.length < 2 && caps ? (
+            <span className="cw-warn small">{t('cowork.needTwo')}</span>
+          ) : (
+            <button type="button" className="cw-link cw-muted small" onClick={() => openSettings('cowork')}>
+              {t('cowork.limitsLine', { calls: limits.calls, minutes: limits.minutes })}
+            </button>
+          )}
           <button type="button" className="cw-btn primary" onClick={start} disabled={!canStart}>
             {busy ? t('cowork.starting') : t('cowork.start')}
           </button>
         </div>
-        {picked.length < 2 && caps && <div className="cw-muted cw-start-hint">{t('cowork.needTwo')}</div>}
         {error && (
           <div className="cw-error" role="alert">
             {error.text}
@@ -463,7 +474,7 @@ function RunView({
   return (
     <div className={`cw-run ${boardOpen ? '' : 'board-closed'}`}>
       <div className="cw-main">
-        <Roster run={run} t={t} now={now} onCancel={() => act(window.api.cowork.cancel(run.id))} />
+        <Roster run={run} t={t} now={now} />
         <div className="cw-timeline" ref={timelineRef}>
           <Timeline
             run={run}
@@ -504,15 +515,6 @@ function RunView({
       </div>
       <aside className="cw-board">
         <div className="cw-board-head">
-          <button
-            type="button"
-            className="cw-board-toggle"
-            onClick={() => setBoardOpen((v) => !v)}
-            aria-expanded={boardOpen}
-            title={boardOpen ? t('cowork.collapseBoard') : t('cowork.expandBoard')}
-          >
-            <IconChevronDown size={10} className={boardOpen ? 'rot-r' : 'rot-l'} />
-          </button>
           {boardOpen && (
             <>
               <span className="cw-board-title">{t('cowork.board')}</span>
@@ -526,6 +528,15 @@ function RunView({
               )}
             </>
           )}
+          <button
+            type="button"
+            className="cw-btn icon sm cw-board-toggle"
+            onClick={() => setBoardOpen((v) => !v)}
+            aria-expanded={boardOpen}
+            title={boardOpen ? t('cowork.collapseBoard') : t('cowork.expandBoard')}
+          >
+            <IconChevronDown size={10} className={boardOpen ? 'rot-r' : 'rot-l'} />
+          </button>
         </div>
         {boardOpen &&
           (editing && board ? (
@@ -553,7 +564,7 @@ function RunView({
 
 // ── 與會者列 ───────────────────────────────────────────────────────
 
-function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; onCancel: () => void }): JSX.Element {
+function Roster({ run, t, now }: { run: CoworkRun; t: T; now: number }): JSX.Element {
   const running = run.calls.filter((c) => c.status === 'running')
   const ex = run.execution
   const yourTurn =
@@ -567,7 +578,7 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
     return choiceLabel(t, last?.model || run.models?.[a]?.model, last?.effort || run.models?.[a]?.effort)
   }
 
-  const statusOf = (a: CoworkAgent): { text: string; cls: string; call?: (typeof running)[number] } => {
+  const statusOf = (a: CoworkAgent): { text: string; cls: string } => {
     if (ex) {
       const mine = Object.entries(ex.tasks).filter(([, x]) => x.agent === a)
       const busy = mine.find(([, x]) => x.status === 'running')
@@ -581,8 +592,7 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
     if (call) {
       return {
         text: t('cowork.status_thinking', { elapsed: mmss(now - call.startedAt), limit: mmss(call.timeoutMs) }),
-        cls: 'thinking',
-        call
+        cls: 'thinking'
       }
     }
     if (a === run.chair) return run.r1 ? { text: t('cowork.status_spoke'), cls: 'done' } : { text: t('cowork.status_waiting'), cls: '' }
@@ -593,30 +603,35 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
     return { text: t('cowork.status_waiting'), cls: '' }
   }
 
+  // 列上只放兩個數字（規劃：次數＋分鐘；執行：分鐘＋花費），完整明細在 tooltip
+  const budget = [
+    ex && t('cowork.budgetExec', { used: execMin, max: run.limits.maxExecutionMinutes }),
+    execCost > 0 && t('cowork.budgetExecCost', { cost: execCost.toFixed(2) }),
+    t('cowork.budgetCalls', { used: run.budget.planningCallsUsed, max: run.limits.maxPlanningCalls }),
+    t('cowork.budgetMinutes', { used: usedMin, max: run.limits.maxPlanningMinutes }),
+    run.budget.costUsd > 0 && t('cowork.budgetCost', { cost: run.budget.costUsd.toFixed(2) }),
+    run.budget.tokens > 0 && t('cowork.budgetTokens', { tokens: run.budget.tokens.toLocaleString() })
+  ].filter((x): x is string => !!x)
+
   return (
     <div className="cw-roster">
       <div className="cw-roster-people">
         {run.participants.map((a) => {
           const s = statusOf(a)
           return (
-            <div key={a} data-agent={a} className={`cw-person ${s.cls}`}>
+            <div
+              key={a}
+              data-agent={a}
+              className={`cw-person ${s.cls}`}
+              title={`${a === run.chair ? t('cowork.role_chair') : t('cowork.role_reviewer')} · ${modelOf(a)}`}
+            >
               <AgentMark agent={a} size={14} />
               <span className="cw-person-name">{agentLabel(a)}</span>
-              <span className="cw-person-model" title={t('cowork.modelLabel')}>
-                {modelOf(a)}
-              </span>
-              <span className={`cw-role ${a === run.chair ? 'chair' : ''}`}>
-                {a === run.chair ? `★ ${t('cowork.role_chair')}` : t('cowork.role_reviewer')}
-              </span>
+              {a === run.chair && <span className="cw-person-chair">★</span>}
               <span className="cw-person-status" aria-live="polite">
                 {s.cls === 'thinking' && <span className="cw-dots" aria-hidden />}
                 {s.text}
               </span>
-              {s.call && (
-                <button type="button" className="cw-mini-btn" onClick={onCancel} title={t('cowork.stopMeeting')}>
-                  {t('cowork.stopMeeting')}
-                </button>
-              )}
             </div>
           )
         })}
@@ -626,13 +641,10 @@ function Roster({ run, t, now, onCancel }: { run: CoworkRun; t: T; now: number; 
           <span className="cw-person-status">{yourTurn ? t('cowork.status_yourTurn') : t('cowork.status_listening')}</span>
         </div>
       </div>
-      <div className="cw-budget" title={t('cowork.budgetTitle')}>
-        {ex && <span>{t('cowork.budgetExec', { used: execMin, max: run.limits.maxExecutionMinutes })}</span>}
-        {execCost > 0 && <span>{t('cowork.budgetExecCost', { cost: execCost.toFixed(2) })}</span>}
-        <span>{t('cowork.budgetCalls', { used: run.budget.planningCallsUsed, max: run.limits.maxPlanningCalls })}</span>
-        <span>{t('cowork.budgetMinutes', { used: usedMin, max: run.limits.maxPlanningMinutes })}</span>
-        {run.budget.costUsd > 0 && <span>{t('cowork.budgetCost', { cost: run.budget.costUsd.toFixed(2) })}</span>}
-        {run.budget.tokens > 0 && <span className="cw-muted">{t('cowork.budgetTokens', { tokens: run.budget.tokens.toLocaleString() })}</span>}
+      <div className="cw-budget" title={[t('cowork.budgetTitle'), ...budget].join('\n')}>
+        {budget.slice(0, ex ? (execCost > 0 ? 2 : 1) : 2).map((x) => (
+          <span key={x}>{x}</span>
+        ))}
       </div>
     </div>
   )
@@ -863,8 +875,8 @@ function ChairOpening({ run, t, highlight, onHighlight }: { run: CoworkRun; t: T
       </div>
       <div className="cw-msg-body">
         <p className="cw-lead">{r1.summary}</p>
-        <button type="button" className="cw-link" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          {open ? '▾' : '▸'} {t('cowork.framing')} · {t('cowork.draftTasks')} {r1.tasks.length} · {t('cowork.questions')} {r1.questions.length}
+        <button type="button" className="cw-disclosure" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {t('cowork.framing')} · {t('cowork.draftTasks')} {r1.tasks.length} · {t('cowork.questions')} {r1.questions.length}
         </button>
         {open && (
           <div className="cw-expand">
@@ -1103,7 +1115,7 @@ function TurnCard({
     if (window.confirm(t('cowork.confirmCancel'))) void act(window.api.cowork.cancel(run.id))
   }
   const cancelBtn = (
-    <button type="button" className="cw-btn ghost" onClick={cancel}>
+    <button type="button" className="cw-btn danger" onClick={cancel}>
       {t('cowork.cancelMeeting')}
     </button>
   )
@@ -1123,7 +1135,6 @@ function TurnCard({
   if (run.phase === 'awaiting-approval') {
     return (
       <div className="cw-turn" role="status" ref={ref} tabIndex={-1}>
-        <div className="cw-turn-badge">{t('cowork.turnTitle')}</div>
         <div className="cw-turn-title">{t('cowork.approveQuestion', { rev: run.planRevision })}</div>
         <div className="cw-turn-desc">{t('cowork.approveDesc')}</div>
         <div className="cw-turn-actions">
@@ -1147,7 +1158,6 @@ function TurnCard({
   const reviewersOk = reviewersOf(run).some((a) => run.reviewers[a]?.status === 'ok')
   return (
     <div className={`cw-turn ${kind === 'side-effects' ? 'error' : 'warn'}`} role="status" ref={ref} tabIndex={-1}>
-      <div className="cw-turn-badge">{t('cowork.turnTitle')}</div>
       <div className="cw-turn-title">{t(`cowork.block_${kind}`)}</div>
       {kind === 'unresolved' && <div className="cw-turn-desc">{t('cowork.unresolvedHint')}</div>}
       {kind === 'side-effects' && <div className="cw-turn-desc">{t('cowork.sideEffectsHint')}</div>}
@@ -1256,7 +1266,7 @@ function Composer({
       <textarea
         ref={inputRef}
         className="cw-textarea"
-        rows={2}
+        rows={1}
         value={text}
         placeholder={mode === 'note' ? t('cowork.notePlaceholder') : t('cowork.feedbackPlaceholder')}
         onChange={(e) => setText(e.target.value)}
@@ -1389,8 +1399,8 @@ function TaskCard({
           ))}
         </div>
       )}
-      <button type="button" className="cw-link small" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        {open ? '▾' : '▸'} {t('cowork.detailAndAcceptance')}
+      <button type="button" className="cw-disclosure" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        {t('cowork.detailAndAcceptance')}
       </button>
       {open && (
         <div className="cw-expand">
@@ -1416,7 +1426,7 @@ function TaskCard({
         <div className="cw-task-actions">
           <button
             type="button"
-            className="term-btn-action"
+            className="cw-btn sm"
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect()
               // 選單最寬 340px：靠右的任務卡要往左推，不能超出視窗
@@ -1427,7 +1437,7 @@ function TaskCard({
           </button>
           <button
             type="button"
-            className="term-btn-action"
+            className="cw-btn sm"
             onClick={async () => {
               await navigator.clipboard.writeText(taskDispatchText(run, task))
               setCopied(true)
@@ -1553,7 +1563,7 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
               />
               <button
                 type="button"
-                className="term-btn-icon"
+                className="cw-btn icon"
                 title={t('cowork.removeTask')}
                 onClick={() => setDrafts((x) => x.filter((_, j) => j !== i))}
               >
@@ -1565,7 +1575,7 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
               {assignable.map((a) => (
                 <button key={a} type="button" className={d.assignee === a ? 'on' : ''} onClick={() => patch(i, { assignee: a })}>
                   <AgentMark agent={a} size={11} />
-                  &nbsp;{agentLabel(a)}
+                  {agentLabel(a)}
                 </button>
               ))}
             </div>
@@ -1581,7 +1591,7 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
         ))}
         <button
           type="button"
-          className="term-btn-action cw-add-task"
+          className="cw-btn sm cw-add-task"
           onClick={() =>
             setDrafts((x) => [
               ...x,
@@ -1589,7 +1599,8 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
             ])
           }
         >
-          <IconPlus size={11} /> {t('cowork.addTask')}
+          <IconPlus size={11} />
+          {t('cowork.addTask')}
         </button>
       </div>
       {errors.length > 0 && (
@@ -1600,7 +1611,7 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
         </ul>
       )}
       <div className="cw-editor-footer">
-        <button type="button" className="cw-btn ghost" onClick={onDone}>
+        <button type="button" className="cw-btn" onClick={onDone}>
           {t('cowork.cancelEdit')}
         </button>
         <button type="button" className="cw-btn primary" onClick={save} disabled={saving || drafts.length === 0}>
