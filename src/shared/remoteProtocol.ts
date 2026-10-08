@@ -2,6 +2,7 @@
 // 桌面 main（src/main/remote/server.ts）與手機端（src/renderer/remote/）共用這份型別。
 // 每則訊息都是 JSON，以 `t` 區分種類。
 import type { BgTask, FsEntry } from '../preload/index'
+import type { CoworkResult, CoworkRun } from './cowork'
 
 export interface RemoteVibeStatus {
   workspace: string
@@ -80,6 +81,8 @@ export type ClientMessage =
   | { t: 'visibility'; visible: boolean }
   /** 手機切換 Bypass 模式（只影響之後啟動的 agent） */
   | { t: 'setBypass'; enabled: boolean }
+  /** Cowork 操作：op／args 與桌面 window.api.cowork 相同（main/ipc/cowork.ts 的 ops），工作區由 windowId 決定 */
+  | { t: 'cowork'; reqId: number; windowId: number; op: string; args: unknown[] }
   | { t: 'ping' }
 
 export type ServerMessage =
@@ -116,6 +119,9 @@ export type ServerMessage =
       files: RemoteGitFile[]
       error?: string
     }
+  | { t: 'cowork'; reqId: number; result: CoworkResult<unknown> }
+  /** 任何一場 Cowork 有變化（不含 context） */
+  | { t: 'coworkRun'; run: CoworkRun }
   | { t: 'error'; message: string }
   | { t: 'pong' }
 
