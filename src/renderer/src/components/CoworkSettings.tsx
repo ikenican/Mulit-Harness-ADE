@@ -61,7 +61,7 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
   }
 
   return (
-    <>
+    <div className="macos-cowork-settings">
       <div className="macos-section">
         <span className="macos-section-header">{t('settings.coworkChairSection')}</span>
         <div className="macos-inset-group" style={{ padding: '14px 16px' }}>
@@ -142,7 +142,7 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
             const status = !catalogs ? t('cowork.modelLoading') : cat?.error ? t('cowork.modelListError') : ''
             return (
               <div key={a} className="macos-row">
-                <div className="macos-row-main">
+                <div className="macos-row-main macos-cowork-model-row">
                   <div className="macos-row-left">
                     <AgentMark agent={a} size={18} />
                     <div className="macos-row-info">
@@ -261,8 +261,28 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
       </div>
 
       <div className="macos-section">
+        <span className="macos-section-header">{t('settings.coworkSummarySection')}</span>
+        <div className="macos-inset-group">
+          <div className="macos-row"><div className="macos-row-main macos-cowork-option-row">
+            <div className="macos-row-info"><span className="macos-row-title">{t('cowork.summarizer')}</span><span className="macos-row-sub">{t('cowork.summaryHint')}</span></div>
+            <div className="macos-row-right"><select className="macos-input" aria-label={t('cowork.summarizer')} value={cw.summarizer || ''} onChange={(e) => onChange({ ...cw, summarizer: (e.target.value || null) as CoworkAgent | null })}>
+              <option value="">{t('cowork.followChair')}</option>
+              {COWORK_AGENTS.map((a) => <option key={a} value={a} disabled={!usable(a)}>{agentLabel(a)}</option>)}
+            </select></div>
+          </div></div>
+          <div className="macos-row"><div className="macos-row-main macos-cowork-option-row">
+            <div className="macos-row-info"><span className="macos-row-title">{t('cowork.summaryTiming')}</span><span className="macos-row-sub">{t('cowork.summaryBudgetHint')}</span></div>
+            <div className="macos-row-right"><select className="macos-input" aria-label={t('cowork.summaryTiming')} value={cw.summarizeEachRound ? 'round' : 'context'} onChange={(e) => onChange({ ...cw, summarizeEachRound: e.target.value === 'round' })}>
+              <option value="context">{t('cowork.summaryOnDemand')}</option><option value="round">{t('cowork.summaryEachRound')}</option>
+            </select></div>
+          </div></div>
+        </div>
+      </div>
+
+      <div className="macos-section">
         <span className="macos-section-header">{t('settings.coworkLimitsSection')}</span>
         <div className="macos-inset-group">
+          <div className="macos-row"><div className="macos-row-main"><p className="macos-row-sub" style={{ margin: 0 }}>{t('settings.coworkLimitsSub')}</p></div></div>
           {LIMIT_FIELDS.map((f) => (
             <div key={f.key} className="macos-row">
               <div className="macos-row-main">
@@ -273,6 +293,7 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
                 <div className="macos-row-right">
                   <input
                     type="number"
+                    aria-label={t(f.label)}
                     className="macos-input"
                     style={{ width: 76, flex: '0 0 76px', textAlign: 'right' }}
                     min={f.min}
@@ -290,6 +311,6 @@ export default function CoworkSettings({ value, onChange }: { value: unknown; on
           ))}
         </div>
       </div>
-    </>
+    </div>
   )
 }

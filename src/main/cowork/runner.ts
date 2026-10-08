@@ -1,6 +1,8 @@
 // 跑一次 headless CLI：prompt 走 stdin、輸出有上限、逾時與取消都會連子行程一起收掉。
 // 只用 node 內建模組，scripts/check-cowork.mts 可以直接拿假 CLI 測。
 import { spawn, execFileSync } from 'node:child_process'
+import { readFileSync, existsSync } from 'node:fs'
+import path from 'node:path'
 
 export interface RunSpec {
   command: string
@@ -13,6 +15,7 @@ export interface RunSpec {
   env?: NodeJS.ProcessEnv
   /** 收到輸出時通知（給 UI 顯示「還活著」） */
   onActivity?: (totalBytes: number) => void
+  onSpawn?: () => void
   /** stdout 每一完整行的即時檢查；回傳理由就立刻終止（agy 的工具白名單） */
   onStdoutLine?: (line: string) => string | null
 }
@@ -38,6 +41,22 @@ const CMD_UNSAFE = /["%\r\n]/
 export function launchPlan(command: string, args: string[]): { file: string; args: string[]; verbatim: boolean } | { error: string } {
   const lower = command.toLowerCase()
   if (process.platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
+    // npm shims only forward to a native binary or Node entrypoint. Bypass cmd.exe
+    // so JSON schemas and TOML values arrive unchanged, including quotes and %.
+    try {
+      const shim = readFileSync(command, 'utf8')
+      const target = shim.match(/"%dp0%[\\/](node_modules[\\/][^"\r\n]+\.(exe|[cm]?js))"\s+%\*\s*$/im)
+      if (target) {
+        const entry = path.resolve(path.dirname(command), target[1])
+        if (existsSync(entry)) {
+          if (target[2].toLowerCase() === 'exe') return { file: entry, args, verbatim: false }
+          const node = path.join(path.dirname(command), 'node.exe')
+          return { file: existsSync(node) ? node : 'node.exe', args: [entry, ...args], verbatim: false }
+        }
+      }
+    } catch {
+      /* Non-npm scripts still use the guarded cmd.exe path below. */
+    }
     const all = [command, ...args]
     const bad = all.find((a) => CMD_UNSAFE.test(a))
     if (bad !== undefined) return { error: `refusing to pass an argument containing quotes, % or newlines to cmd.exe: ${bad.slice(0, 80)}` }
@@ -106,6 +125,7 @@ export function runProcess(spec: RunSpec, signal?: AbortSignal): Promise<RunResu
       return
     }
 
+    child.once('spawn', () => spec.onSpawn?.())
     const stop = (): void => killTree(child.pid)
     const timer = setTimeout(() => {
       timedOut = true

@@ -23,6 +23,14 @@ import {
   DEFAULT_COWORK_LIMITS,
   assignableAgents,
   buildR1Prompt,
+  buildDiscussionPrompt,
+  checkDiscussion,
+  buildDiscussionSummaryPrompt,
+  buildDiscussionConclusionPrompt,
+  checkDiscussionSummary,
+  discussionSummaryChunk,
+  discussionNeedsSummary,
+  latestDiscussionSummary,
   buildR2Prompt,
   buildR34Prompt,
   buildRepairPrompt,
@@ -50,6 +58,7 @@ import {
   type CoworkContext,
   type CoworkExecMode,
   type CoworkLimits,
+  type CoworkMode,
   type CoworkRun,
   type CoworkRunSummary,
   type CoworkStep,
@@ -74,6 +83,7 @@ export interface ResolvedCli {
    */
   defaultModel?: string
   defaultEffort?: string
+  modelEfforts?: Record<string, string[]>
 }
 
 export interface CoworkDeps {
@@ -87,6 +97,10 @@ export interface CoworkDeps {
 }
 
 export interface StartOptions {
+  mode?: CoworkMode
+  autoEffort?: boolean
+  summarizer?: CoworkAgent
+  summarizeEachRound?: boolean
   workspace: string
   prompt: string
   chair: CoworkAgent
@@ -137,6 +151,7 @@ export class CoworkService {
   private snapshotBuilding = new Map<string, Promise<void>>()
   private budgetTimers = new Map<string, NodeJS.Timeout>()
   private lastActivityEmit = new Map<string, number>()
+  private executionStarting = new Map<string, string>()
   private shuttingDown = false
   private deps: CoworkDeps
   private executor: CoworkExecutor
@@ -150,7 +165,7 @@ export class CoworkService {
       resolveExecCli: (agent) => (this.deps.resolveExecCli ? this.deps.resolveExecCli(agent) : { error: 'execution is not available' }),
       otherActiveRun: (run) =>
         [...this.runs.values()].find(
-          (r) => r.id !== run.id && repoIdOf(r.repo.commonDir) === repoIdOf(run.repo.commonDir) && !COWORK_TERMINAL_PHASES.includes(r.phase)
+          (r) => r.id !== run.id && repoIdOf(r.repo.commonDir) === repoIdOf(run.repo.commonDir) && r.execution && !r.execution.cleaned && !r.execution.merged
         ),
       now: () => this.now()
     })
@@ -220,15 +235,10 @@ export class CoworkService {
   // ── 查詢 ───────────────────────────────────────────────────────────
 
   async list(workspace: string): Promise<CoworkRunSummary[]> {
-    let base: Baseline
-    try {
-      base = await readBaseline(workspace)
-    } catch {
-      return []
-    }
+    const base = await discussionBaseline(workspace)
     const repoId = repoIdOf(base.commonDir)
     return [...this.runs.values()]
-      .filter((r) => repoIdOf(r.repo.commonDir) === repoId)
+      .filter((r) => repoIdOf(r.repo.commonDir) === repoId || (r.mode === 'discussion' && repoIdOf(r.repo.root) === repoIdOf(workspace)))
       .sort((a, b) => b.createdAt - a.createdAt)
       .map(summarizeRun)
   }
@@ -240,12 +250,15 @@ export class CoworkService {
   // ── 開會 ───────────────────────────────────────────────────────────
 
   async start(opts: StartOptions): Promise<CoworkRun> {
+    const requestedAt = this.now()
+    const discussion = opts.mode === 'discussion'
     const prompt = typeof opts.prompt === 'string' ? opts.prompt.trim() : ''
     if (!prompt) throw new CoworkError('empty-prompt')
     if (prompt.length > 20000) throw new CoworkError('prompt-too-long')
     const participants = [...new Set(opts.participants)]
     if (!participants.includes(opts.chair)) throw new CoworkError('chair-not-participant')
     if (participants.length < 2) throw new CoworkError('need-two-participants')
+    if (opts.summarizer && !participants.includes(opts.summarizer)) throw new CoworkError('not-allowed', 'The recorder must be a participant.')
     for (const a of participants) {
       const cli = this.deps.resolveCli(a)
       if ('error' in cli) throw new CoworkError('agent-not-eligible', `${a}: ${cli.error}`, { agent: a, reason: cli.error })
@@ -253,21 +266,19 @@ export class CoworkService {
 
     let base: Baseline
     try {
-      base = await readBaseline(opts.workspace)
+      base = discussion ? await discussionBaseline(opts.workspace) : await readBaseline(opts.workspace)
     } catch (e) {
       throw new CoworkError((e as Error).message)
     }
     const repoId = repoIdOf(base.commonDir)
-    const active = [...this.runs.values()].find(
-      (r) => repoIdOf(r.repo.commonDir) === repoId && !COWORK_TERMINAL_PHASES.includes(r.phase)
-    )
-    if (active) throw new CoworkError('active-run-exists', undefined, { runId: active.id })
 
-    const context = await buildContext(base.root, base.head, opts)
+    const context = discussion ? undefined : await buildContext(base.root, base.head, opts)
     const id = newRunId()
     const now = this.now()
     const run: CoworkRun = {
       schemaVersion: 1,
+      ...(opts.mode ? { mode: opts.mode, autoEffort: opts.autoEffort !== false } : {}),
+      ...(discussion ? { discussion: { messages: [{ id: 'm1', agent: null, message: prompt, replyTo: null, at: now }], order: [opts.chair, ...participants.filter((a) => a !== opts.chair)], cursor: 0, excluded: [], summarizer: opts.summarizer || opts.chair, summarizeEachRound: opts.summarizeEachRound === true, summaries: [] } } : {}),
       id,
       revision: 0,
       planRevision: 1,
@@ -283,7 +294,7 @@ export class CoworkService {
         baseCommit: base.head,
         excludedDirty: base.dirty.slice(0, 500)
       },
-      snapshotDir: snapshotDirFor(base.commonDir, id),
+      snapshotDir: discussion ? path.join(this.deps.dataDir, repoId, id, 'conversation') : snapshotDirFor(base.commonDir, id),
       chair: opts.chair,
       participants,
       chairExecutes: opts.chairExecutes,
@@ -317,7 +328,8 @@ export class CoworkService {
     this.save(run)
 
     try {
-      await createSnapshot(base.root, run.snapshotDir, base.head)
+      if (discussion) fs.mkdirSync(run.snapshotDir, { recursive: true })
+      else await createSnapshot(base.root, run.snapshotDir, base.head)
     } catch (e) {
       run.phase = 'failed'
       run.block = { kind: 'step-failed', message: `Could not create the planning snapshot: ${(e as Error).message}`, at: this.now() }
@@ -325,6 +337,8 @@ export class CoworkService {
       this.save(run)
       return run
     }
+    run.preparationMs = this.now() - requestedAt
+    this.save(run)
     void this.advance(run)
     return run
   }
@@ -335,7 +349,10 @@ export class CoworkService {
     const step = run.pending?.step || this.nextStep(run)
     if (!step) return
     try {
-      if (step === 'r1') await this.stepR1(run)
+      if (step === 'discussion') await this.stepDiscussion(run)
+      else if (step === 'summary') await this.stepSummary(run)
+      else if (step === 'conclusion') await this.stepConclusion(run)
+      else if (step === 'r1') await this.stepR1(run)
       else if (step === 'r2') await this.stepR2(run)
       else if (step === 'r34') await this.stepR34(run)
       else await this.stepRevise(run, run.pending?.feedback || '')
@@ -346,11 +363,128 @@ export class CoworkService {
   }
 
   private nextStep(run: CoworkRun): CoworkStep | null {
+    if (run.mode === 'discussion') return run.discussion && run.discussion.cursor < run.discussion.order.length ? 'discussion' : null
     if (!run.r1) return 'r1'
     const reviewers = reviewersOf(run)
     if (reviewers.some((a) => ['pending', 'running', 'failed'].includes(run.reviewers[a]?.status || 'pending'))) return 'r2'
     if (!run.boards.length) return 'r34'
     return null
+  }
+
+  private async stepDiscussion(run: CoworkRun): Promise<void> {
+    const d = run.discussion!
+    if (discussionNeedsSummary(run)) {
+      d.summaryNext = 'discussion'
+      run.pending = { step: 'summary' }
+      this.save(run)
+      return this.advance(run)
+    }
+    const agent = d.order[d.cursor]
+    if (!agent) {
+      run.pending = null
+      run.phase = 'completed'
+      this.save(run)
+      return
+    }
+    const g = this.gen.get(run.id)
+    const res = await this.runStep(run, 'discussion', agent, buildDiscussionPrompt(run, agent), (v) => checkDiscussion(v, d.messages))
+    if (g !== this.gen.get(run.id) || run.phase !== 'meeting') return
+    if (!res.ok) { this.stepFailed(run, 'discussion', res); return }
+    d.messages.push({ id: `m${d.messages.length + 1}`, agent, ...res.value, at: this.now() })
+    d.cursor++
+    run.pending = null
+    if (d.cursor === d.order.length) {
+      if (d.summarizeEachRound) {
+        d.summaryNext = 'idle'
+        run.pending = { step: 'summary' }
+      } else run.phase = 'completed'
+    }
+    this.save(run)
+    if (run.phase === 'meeting') void this.advance(run)
+  }
+
+  /** A summary covers only its captured prefix; failed/interrupted calls never advance the checkpoint. */
+  private async stepSummary(run: CoworkRun): Promise<void> {
+    const d = run.discussion!
+    const next = d.summaryNext || 'idle'
+    const chunk = discussionSummaryChunk(run)
+    if (chunk.through > (latestDiscussionSummary(run)?.through || 0)) {
+      const agent = d.summarizer || run.chair
+      if (d.excluded.includes(agent)) {
+        this.block(run, 'step-failed', 'Choose another recorder: this participant was skipped.', 'summary')
+        return
+      }
+      const g = this.gen.get(run.id)
+      const res = await this.runStep(run, 'summary', agent, buildDiscussionSummaryPrompt(run), checkDiscussionSummary)
+      if (g !== this.gen.get(run.id) || run.phase !== 'meeting') return
+      if (!res.ok) { this.stepFailed(run, 'summary', res); return }
+      ;(d.summaries ||= []).push({ ...res.value, agent, through: chunk.through, at: this.now() })
+      // Manual/final summaries include every uncovered message, including long historical meetings.
+      if (chunk.through < d.messages.length && (next !== 'discussion' || discussionNeedsSummary(run))) {
+        run.pending = { step: 'summary' }
+        this.save(run)
+        return this.advance(run)
+      }
+    }
+    delete d.summaryNext
+    run.pending = next === 'idle' ? null : { step: next }
+    if (next === 'idle') run.phase = 'completed'
+    this.save(run)
+    if (run.phase === 'meeting') return this.advance(run)
+  }
+
+  private async stepConclusion(run: CoworkRun): Promise<void> {
+    const d = run.discussion!
+    const g = this.gen.get(run.id)
+    const res = await this.runStep(run, 'conclusion', run.chair, buildDiscussionConclusionPrompt(run), (v) => checkDiscussion(v, d.messages))
+    if (g !== this.gen.get(run.id) || run.phase !== 'meeting') return
+    if (!res.ok) { this.stepFailed(run, 'conclusion', res); return }
+    d.conclusion = { message: res.value.message, through: d.messages.length, at: this.now() }
+    run.pending = null
+    run.phase = 'completed'
+    this.save(run)
+  }
+
+  setSummarizer(runId: string, agent: CoworkAgent): void {
+    const run = this.mustGet(runId)
+    const d = run.discussion
+    if (!d || !['completed', 'blocked', 'paused'].includes(run.phase) || !run.participants.includes(agent) || d.excluded.includes(agent) || (this.inflight.get(run.id) || 0) > 0) throw new CoworkError('not-allowed')
+    d.summarizer = agent
+    this.save(run)
+  }
+
+  summarizeDiscussion(runId: string, conclude: boolean): void {
+    const run = this.mustGet(runId)
+    const d = run.discussion
+    if (run.mode !== 'discussion' || !d || run.phase !== 'completed') throw new CoworkError('not-allowed')
+    if ((this.inflight.get(run.id) || 0) > 0) throw new CoworkError('busy')
+    this.nextGen(run)
+    d.summaryNext = conclude ? 'conclusion' : 'idle'
+    run.pending = { step: 'summary' }
+    run.phase = 'meeting'
+    run.block = null
+    this.save(run)
+    void this.advance(run)
+  }
+
+  async discuss(runId: string, text: string): Promise<void> {
+    const run = this.mustGet(runId)
+    if (run.mode !== 'discussion' || !run.discussion || run.phase !== 'completed') throw new CoworkError('not-allowed')
+    if ((this.inflight.get(run.id) || 0) > 0) throw new CoworkError('busy')
+    const message = text.trim()
+    if (!message) throw new CoworkError('empty-prompt')
+    if (message.length > 12000) throw new CoworkError('prompt-too-long')
+    const d = run.discussion
+    d.order = [run.chair, ...run.participants.filter((a) => a !== run.chair)].filter((a) => !d.excluded.includes(a))
+    if (!d.order.length) throw new CoworkError('no-reviewer-left')
+    d.messages.push({ id: `m${d.messages.length + 1}`, agent: null, message, replyTo: null, at: this.now() })
+    d.cursor = 0
+    this.nextGen(run)
+    run.phase = 'meeting'
+    run.block = null
+    run.pending = { step: 'discussion' }
+    this.save(run)
+    void this.advance(run)
   }
 
   private async stepR1(run: CoworkRun): Promise<void> {
@@ -462,7 +596,7 @@ export class CoworkService {
   private stepFailed<T>(run: CoworkRun, step: CoworkStep, res: Extract<StepResult<T>, { ok: false }>): void {
     if (res.kind === 'cancelled') return
     // R2 的錯誤已在 stepR2 逐位覆核者記錄過
-    if (step !== 'r2') run.log.push({ t: 'error', step, agent: run.chair, message: res.error, at: this.now() })
+    if (step !== 'r2') run.log.push({ t: 'error', step, agent: step === 'summary' ? run.discussion?.summarizer || run.chair : step === 'discussion' ? run.discussion?.order[run.discussion.cursor] : run.chair, message: res.error, at: this.now() })
     const kind: CoworkBlockKind = res.kind === 'budget' ? 'budget' : res.kind === 'side-effects' ? 'side-effects' : 'step-failed'
     this.block(run, kind, res.error, step, res.details)
   }
@@ -484,9 +618,14 @@ export class CoworkService {
     prompt: string,
     validate: (v: unknown) => { ok: true; value: T } | { ok: false; errors: string[] }
   ): Promise<StepResult<T>> {
+    const check = (value: unknown): ReturnType<typeof validate> => {
+      const message = (value as { message?: unknown } | null)?.message
+      if (run.mode === 'project' && step !== 'r1' && (typeof message !== 'string' || !message.trim() || message.length > 12000)) return { ok: false, errors: ['message must contain a brief public response, at most 12000 characters'] }
+      return validate(value)
+    }
     const first = await this.callAgent(run, agent, step, prompt, false)
     if (!first.ok) return first
-    const v1 = validate(first.value)
+    const v1 = check(first.value)
     if (v1.ok) return v1
     // 修正呼叫也計入預算；預算不夠就直接回報驗證錯誤，不硬擠
     const repaired = await this.callAgent(run, agent, step, buildRepairPrompt(prompt, first.raw, v1.errors), true)
@@ -496,7 +635,7 @@ export class CoworkService {
       }
       return repaired
     }
-    const v2 = validate(repaired.value)
+    const v2 = check(repaired.value)
     if (v2.ok) return v2
     return { ok: false, kind: 'failed', error: `Output still invalid after one repair: ${v2.errors.slice(0, 3).join('; ')}`, details: v2.errors }
   }
@@ -552,6 +691,7 @@ export class CoworkService {
 
   /** R2 平行呼叫時兩位覆核者可能同時發現快照不在：共用同一個建立中的 promise */
   private ensureSnapshot(run: CoworkRun): Promise<void> {
+    if (run.mode === 'discussion') { fs.mkdirSync(run.snapshotDir, { recursive: true }); return Promise.resolve() }
     if (fs.existsSync(path.join(run.snapshotDir, '.git'))) return Promise.resolve()
     let p = this.snapshotBuilding.get(run.id)
     if (!p) {
@@ -574,7 +714,10 @@ export class CoworkService {
     const choice = run.models?.[agent]
     const model = choice?.model || cli.defaultModel || ''
     // agy 指定了模型時強度由模型（ID 尾碼）決定，不另補 medium
-    const effort = choice?.effort || cli.defaultEffort || (agent === 'antigravity' && !model ? AGY_DEFAULT_EFFORT : '')
+    const supported = cli.modelEfforts?.[model]
+    const automatic = run.autoEffort && supported?.length !== 0 && !(agent === 'claude' && /haiku/i.test(model)) && !(agent === 'antigravity' && model && !supported)
+    const preferred = step === 'discussion' ? 'low' : step === 'r2' || step === 'r34' || step === 'conclusion' ? 'high' : 'medium'
+    const effort = choice?.effort || (automatic ? supported && !supported.includes(preferred) ? supported[0] : preferred : cli.defaultEffort || (agent === 'antigravity' && !model ? AGY_DEFAULT_EFFORT : ''))
     const meetingDir = path.join(this.dirOf(run), 'meeting')
     fs.mkdirSync(meetingDir, { recursive: true })
     const schema = schemaFor(step, assignableAgents(run))
@@ -583,13 +726,13 @@ export class CoworkService {
     fs.writeFileSync(schemaFile, JSON.stringify(schema))
     let inv
     try {
-      inv = plannerInvocation(agent, { cwd: run.snapshotDir, schema, schemaFile, outFile, windowsSandbox: cli.windowsSandbox, model, effort })
+      inv = plannerInvocation(agent, { cwd: run.snapshotDir, schema, schemaFile, outFile, windowsSandbox: cli.windowsSandbox, model, effort, discussion: run.mode === 'discussion' })
     } catch (e) {
       return { ok: false, kind: 'failed', error: (e as Error).message }
     }
 
     // 依各家實際可用的工具補一段說明，免得模型浪費步數去試被擋的工具
-    const sent = withToolNote(prompt, agent)
+    const sent = run.mode === 'discussion' ? prompt : withToolNote(prompt, agent)
     const call: CoworkCall = {
       id: callId,
       agent,
@@ -625,7 +768,9 @@ export class CoworkService {
           env: cli.env ? { ...process.env, ...cli.env } : undefined,
           onStdoutLine: inv.guard,
           maxBytes: run.limits.maxOutputBytes,
+          onSpawn: () => { call.spawnedAt = this.now(); this.deps.emit(run) },
           onActivity: (bytes) => {
+            call.firstOutputAt ??= this.now()
             call.outputBytes = bytes
             call.lastOutputAt = this.now()
             const last = this.lastActivityEmit.get(run.id) || 0
@@ -672,7 +817,7 @@ export class CoworkService {
     // 每次呼叫後都核對快照：任何變動都代表 CLI 沒守住唯讀，這次規劃作廢並保留 diff
     let changes: string[] = []
     try {
-      changes = await snapshotChanges(run.snapshotDir, run.repo.baseCommit)
+      if (run.mode !== 'discussion') changes = await snapshotChanges(run.snapshotDir, run.repo.baseCommit)
     } catch (e) {
       changes = [`could not verify the snapshot: ${(e as Error).message}`]
     }
@@ -809,6 +954,24 @@ export class CoworkService {
   /** R2 有人失敗時，明確選擇不等他、少一位覆核者繼續（cowork.md §4.2） */
   async dropFailedReviewers(runId: string): Promise<void> {
     const run = this.mustGet(runId)
+    if (run.mode === 'discussion' && run.discussion) {
+      if (run.phase !== 'blocked' || run.block?.kind !== 'step-failed' || run.pending?.step !== 'discussion' || (this.inflight.get(run.id) || 0) > 0) throw new CoworkError('not-allowed')
+      const d = run.discussion
+      const agent = d.order[d.cursor]
+      if (!agent) throw new CoworkError('not-allowed')
+      d.excluded.push(agent)
+      d.cursor++
+      this.nextGen(run)
+      run.log.push({ t: 'drop', agents: [agent], at: this.now(), planRevision: run.planRevision })
+      const summarize = d.cursor === d.order.length && d.summarizeEachRound
+      run.phase = d.cursor < d.order.length || summarize ? 'meeting' : 'completed'
+      run.block = null
+      if (summarize) d.summaryNext = 'idle'
+      run.pending = run.phase === 'meeting' ? { step: summarize ? 'summary' : 'discussion' } : null
+      this.save(run)
+      if (run.phase === 'meeting') void this.advance(run)
+      return
+    }
     if (run.phase !== 'blocked' || run.block?.kind !== 'reviewers-failed') throw new CoworkError('not-allowed')
     const failed = reviewersOf(run).filter((a) => run.reviewers[a]?.status === 'failed')
     const ok = reviewersOf(run).filter((a) => run.reviewers[a]?.status === 'ok')
@@ -919,7 +1082,13 @@ export class CoworkService {
 
   async execStart(runId: string, o: { mode: CoworkExecMode; linkDeps: boolean; bypass: boolean }): Promise<void> {
     if (o.mode !== 'sequential' && o.mode !== 'parallel') throw new CoworkError('not-allowed')
-    await this.exec(() => this.executor.start(this.mustGet(runId), o))
+    const run = this.mustGet(runId)
+    const repoId = repoIdOf(run.repo.commonDir)
+    const starting = this.executionStarting.get(repoId)
+    if (starting) throw new CoworkError('active-run-exists', undefined, { runId: starting })
+    this.executionStarting.set(repoId, runId)
+    try { await this.exec(() => this.executor.start(run, o)) }
+    finally { this.executionStarting.delete(repoId) }
   }
 
   async execMessage(runId: string, taskId: string, text: string): Promise<void> {
@@ -1010,6 +1179,7 @@ export class CoworkService {
   }
 
   private dropSnapshot(run: CoworkRun): void {
+    if (run.mode === 'discussion') return // The isolated conversation directory is removed with the run.
     try {
       removeSnapshot(run.snapshotDir, path.join(run.repo.commonDir, 'cowork'))
     } catch (e) {
@@ -1034,6 +1204,18 @@ export function repoIdOf(commonDir: string): string {
 
 function newRunId(): string {
   return `r${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`
+}
+
+/** Discussion only needs a workspace identity, not HEAD, dirty files, instructions or a worktree. */
+async function discussionBaseline(workspace: string): Promise<Baseline> {
+  if (!workspace || !fs.existsSync(workspace) || !fs.statSync(workspace).isDirectory()) throw new Error('not-a-git-repo')
+  let root = path.resolve(workspace)
+  let commonDir = root
+  try {
+    root = (await git(root, ['rev-parse', '--show-toplevel'])).trim()
+    commonDir = path.resolve(root, (await git(root, ['rev-parse', '--git-common-dir'])).trim())
+  } catch { /* Ordinary folders can host a discussion too. */ }
+  return { root, commonDir, head: '', branch: '', dirty: [], warnings: [] }
 }
 
 /** 平行呼叫裡挑最需要使用者處理的失敗：副作用 > 預算 > 一般失敗 > 取消 */

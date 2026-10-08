@@ -223,9 +223,9 @@ export default function TerminalPanel(): JSX.Element {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [splitMode, setSplitMode] = useState<SplitMode>('single')
   // Cowork 是終端區的一個兄弟分頁：開著時蓋在終端畫面上，終端本身保持掛載
-  const [coworkOpen, setCoworkOpen] = useState(false)
-  const [coworkActive, setCoworkActive] = useState(false)
-  const [coworkPhase, setCoworkPhase] = useState<CoworkPhase | null>(null)
+  const [coworkTabs, setCoworkTabs] = useState<{ id: string; number: number; prompt: string | null; phase: CoworkPhase | null }[]>([])
+  const [activeCoworkId, setActiveCoworkId] = useState<string | null>(null)
+  const coworkTabCounter = useRef(0)
   // 最近使用順序：分割時就顯示最近用過的前 N 個，不必再另外挑面板
   const [mru, setMru] = useState<string[]>([])
 
@@ -551,7 +551,7 @@ export default function TerminalPanel(): JSX.Element {
 
   // 切到某分頁即視為使用者已看到，清掉紅點；同時把它移到 MRU 最前面
   const selectSession = useCallback((id: string): void => {
-    setCoworkActive(false)
+    setActiveCoworkId(null)
     setActiveSessionId(id)
     setMru((prev) => [id, ...prev.filter((x) => x !== id)])
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, needsApproval: false } : s)))
@@ -649,6 +649,7 @@ export default function TerminalPanel(): JSX.Element {
         }
       ])
       setMru((prev) => [sessionId, ...prev])
+      setActiveCoworkId(null)
       setActiveSessionId(sessionId)
       return sessionId
     },
@@ -849,7 +850,7 @@ export default function TerminalPanel(): JSX.Element {
     const running = sessionsRef.current.find((s) => !s.isExited && SHELL_IDS.includes(s.launcherKey))
     const fallbackKey = enabledShells[0]?.id || BUILTIN_SHELLS[0].id
     const id = running ? running.id : handleNewTerminal(fallbackKey)
-    setActiveSessionId(id)
+    selectSession(id)
     sendToSession(id, terminalDispatch.text)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalDispatch, enabledShells, enabledAgents])
@@ -882,7 +883,7 @@ export default function TerminalPanel(): JSX.Element {
     const text = readTerm(src.term)
     if (!text) return
     sendToSession(targetId, text)
-    setActiveSessionId(targetId)
+    selectSession(targetId)
   }
 
   const closeTerminal = (id: string, e?: React.MouseEvent): void => {
@@ -1121,13 +1122,28 @@ export default function TerminalPanel(): JSX.Element {
     </div>
   )
 
+  const openCowork = (): void => {
+    const id = crypto.randomUUID()
+    const number = ++coworkTabCounter.current
+    setCoworkTabs((prev) => [...prev, { id, number, prompt: null, phase: null }])
+    setActiveCoworkId(id)
+    setAddMenuOpen(false)
+  }
+
+  const closeCowork = (id: string): void => {
+    const index = coworkTabs.findIndex((tab) => tab.id === id)
+    const next = coworkTabs.filter((tab) => tab.id !== id)
+    setCoworkTabs(next)
+    setActiveCoworkId((active) => active === id ? next[Math.max(0, index - 1)]?.id || null : active)
+  }
+
   // 渲染新增終端選單（支援 PowerShell, Command Prompt 與 AI Agents）
   const renderAddMenu = (): JSX.Element => (
     <div className="term-agent-picker-wrap">
       <button
         className={`term-add-dropdown-btn ${addMenuOpen ? 'open' : ''}`}
         onClick={toggleAddMenu}
-        title="New Terminal: PowerShell, Command Prompt, or Agent"
+        title="New Terminal or Cowork"
       >
         <IconPlus size={11} />
         <IconChevronDown size={8} />
@@ -1206,6 +1222,15 @@ export default function TerminalPanel(): JSX.Element {
               </>
             )}
 
+            {(enabledShells.length > 0 || enabledAgents.length > 0) && <div className="term-popover-divider" />}
+            <button type="button" className="term-popover-item" onClick={openCowork}>
+              <IconCowork size={15} />
+              <div className="term-popover-item-details">
+                <span className="term-popover-name">{t('cowork.tab')}</span>
+                <span className="term-popover-desc">{t('cowork.buttonTitle')}</span>
+              </div>
+            </button>
+
             {launchers.length > 0 && (
               <>
                 {(enabledShells.length > 0 || enabledAgents.length > 0) && <div className="term-popover-divider" />}
@@ -1226,9 +1251,6 @@ export default function TerminalPanel(): JSX.Element {
               </>
             )}
 
-            {enabledShells.length === 0 && enabledAgents.length === 0 && launchers.length === 0 && (
-              <div className="term-popover-empty">No terminals enabled in Settings</div>
-            )}
           </div>,
           document.body
         )}
@@ -1468,18 +1490,6 @@ export default function TerminalPanel(): JSX.Element {
           <span className="term-idle-title">Terminals</span>
           {renderAddMenu()}
           {renderAgentDispatch()}
-          <button
-            type="button"
-            className={`term-btn-action ${coworkOpen && coworkActive ? 'active' : ''}`}
-            onClick={() => {
-              setCoworkOpen(true)
-              setCoworkActive(true)
-            }}
-            title={t('cowork.buttonTitle')}
-          >
-            <IconCowork size={12} />
-            <span>{t('cowork.tab')}</span>
-          </button>
         </div>
 
         {/* Action Controls: Popout, Clear, Delete, Handoff, Split */}
@@ -1566,7 +1576,7 @@ export default function TerminalPanel(): JSX.Element {
       </div>
 
       {/* Row 2: Dedicated Session Tabs Bar (Displayed when one or more sessions exist) */}
-      {(sessions.length > 0 || coworkOpen) && (
+      {(sessions.length > 0 || coworkTabs.length > 0) && (
         <div
           className="term-tabs-row"
           onDragOver={(e) => {
@@ -1582,28 +1592,28 @@ export default function TerminalPanel(): JSX.Element {
           }}
         >
           <div className="term-strip-tabs">
-            {coworkOpen && (
+            {coworkTabs.map((tab) => (
               <div
-                className={`term-unified-tab term-cowork-tab ${coworkActive ? 'active' : ''}`}
-                onClick={() => setCoworkActive(true)}
-                title={t('cowork.buttonTitle')}
+                key={tab.id}
+                className={`term-unified-tab term-cowork-tab ${activeCoworkId === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveCoworkId(tab.id)}
+                title={tab.prompt || t('cowork.buttonTitle')}
               >
                 <IconCowork size={12} />
-                <span className="term-tab-title">{t('cowork.tab')}</span>
-                {coworkPhase && <span className={`cw-tab-dot phase-${coworkPhase}`} title={t(`cowork.phase_${coworkPhase}`)} />}
+                <span className="term-tab-title">{tab.prompt || `${t('cowork.tab')} ${tab.number}`}</span>
+                {tab.phase && <span className={`cw-tab-dot phase-${tab.phase}`} title={t(`cowork.phase_${tab.phase}`)} />}
                 <button
                   className="term-tab-close"
                   onClick={(e) => {
                     e.stopPropagation()
-                    setCoworkOpen(false)
-                    setCoworkActive(false)
+                    closeCowork(tab.id)
                   }}
                   title={t('cowork.close')}
                 >
                   <IconClose size={10} />
                 </button>
               </div>
-            )}
+            ))}
             {sessions.map((s) => {
               const isHovered = hoveredTabId === s.id
               const dragged = getDraggedSession()
@@ -1613,7 +1623,7 @@ export default function TerminalPanel(): JSX.Element {
               return (
                 <div
                   key={s.id}
-                  className={`term-unified-tab ${activeSessionId === s.id ? 'active' : ''} ${
+                  className={`term-unified-tab ${!activeCoworkId && activeSessionId === s.id ? 'active' : ''} ${
                     s.isExited ? 'exited' : ''
                   } ${paneCount > 1 && visibleIds.includes(s.id) ? 'shown' : ''} ${
                     isHandoffTab ? 'drag-handoff-target' : ''
@@ -1684,9 +1694,10 @@ export default function TerminalPanel(): JSX.Element {
         onDragOver={handleStageDragOver}
         onDrop={handleStageDrop}
       >
-        {coworkOpen && (
-          <div className="cw-host" hidden={!coworkActive}>
+        {coworkTabs.map((tab) => (
+          <div key={tab.id} className="cw-host" hidden={activeCoworkId !== tab.id}>
             <CoworkPanel
+              initialRunId={null}
               sessions={sessions.map((s) => ({
                 id: s.id,
                 title: s.title,
@@ -1701,14 +1712,11 @@ export default function TerminalPanel(): JSX.Element {
                 selectSession(id)
               }}
               onOpenAgent={(agent: CoworkAgent) => handleNewTerminal(agent)}
-              onClose={() => {
-                setCoworkOpen(false)
-                setCoworkActive(false)
-              }}
-              onPhase={setCoworkPhase}
+              onClose={() => closeCowork(tab.id)}
+              onRunChange={(run) => setCoworkTabs((prev) => prev.map((item) => item.id === tab.id && (item.prompt !== (run?.prompt || null) || item.phase !== (run?.phase || null)) ? { ...item, prompt: run?.prompt || null, phase: run?.phase || null } : item))}
             />
           </div>
-        )}
+        ))}
         {dragOverInfo && (
           <div className={`term-drag-overlay mode-${dragOverInfo.mode}`}>
             <div className={`term-drag-pill mode-${dragOverInfo.mode}`}>
@@ -1867,6 +1875,18 @@ export default function TerminalPanel(): JSX.Element {
                   )
                 })()}
 
+                <button type="button" className="launchpad-card card-cowork" onClick={openCowork} title={t('cowork.buttonTitle')}>
+                  <div className="launchpad-card-icon"><IconCowork size={28} /></div>
+                  <div className="launchpad-card-name">{t('cowork.tab')}</div>
+                  <div className="launchpad-card-sub">{t('cowork.newMeeting')}</div>
+                  <div className="launchpad-card-meta" title="Claude · Codex · Antigravity">
+                    <AgentMark agent="claude" size={14} />
+                    <AgentMark agent="codex" size={14} />
+                    <AgentMark agent="antigravity" size={14} />
+                  </div>
+                  <div className="launchpad-card-action">{t('cowork.open')} →</div>
+                </button>
+
                 {!isWindows && isCliEnabled('bash') && (() => {
                   const lp = getLaunchpadDragProps('bash')
                   return (
@@ -1901,7 +1921,7 @@ export default function TerminalPanel(): JSX.Element {
             key={s.id}
             session={s}
             isVisible={visibleIds.includes(s.id)}
-            isActive={s.id === activeSessionId}
+            isActive={!activeCoworkId && s.id === activeSessionId}
             multi={paneCount > 1}
             onFocusPane={() => selectSession(s.id)}
             onContextMenu={(x, y) => setTermContextMenu({ x, y, sessionId: s.id })}

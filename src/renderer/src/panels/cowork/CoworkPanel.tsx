@@ -1,9 +1,10 @@
 // Cowork 面板：開會表單、與會者列、會議時間軸、「輪到你」卡片、任務板。
 // 會議邏輯全在 main（src/main/cowork/），這裡只顯示 run 並送出使用者的決定。
 // 呈現原則見 cowork.md §6.2–6.3：R2 並排、協議進度看得見、不鏡像終端、不做擬真會議室。
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import AgentMark from '@/components/AgentMark'
+import AppleAlertDialog from '@/components/AppleAlertDialog'
 import { IconChevronDown, IconClose, IconPlus, IconTrash } from '@/components/Icons'
 import { useWorkbench, openSettings } from '@/store'
 import ModelPicker, { choiceLabel, useModelCatalogs } from './ModelPicker'
@@ -16,6 +17,7 @@ import {
   assignableAgents,
   collectIssues,
   currentBoard,
+  discussionProjectPrompt,
   planningMsUsed,
   reviewersOf,
   sanitizeCoworkSettings,
@@ -27,6 +29,7 @@ import {
   type CoworkCapability,
   type CoworkIssue,
   type CoworkLogEntry,
+  type CoworkMode,
   type CoworkResult,
   type CoworkRun,
   type CoworkRunSummary,
@@ -49,8 +52,9 @@ interface CoworkPanelProps {
   /** 開一個新的 agent 終端，回傳 session id */
   onOpenAgent: (agent: CoworkAgent) => string
   onClose: () => void
-  /** 目前顯示的 run 狀態變了（給分頁上的狀態點用） */
-  onPhase?: (phase: CoworkRun['phase'] | null) => void
+  /** null opens a fresh meeting; undefined restores the most recent meeting. */
+  initialRunId?: string | null
+  onRunChange?: (run: Pick<CoworkRun, 'id' | 'prompt' | 'phase'> | null) => void
 }
 
 type T = (key: string, params?: Record<string, string | number>) => string
@@ -69,21 +73,28 @@ function errorText<X>(t: T, r: CoworkResult<X>): string | null {
   return msg === key ? t('cowork.err_internal', { message: r.message || r.code }) : msg
 }
 
-export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, onPhase }: CoworkPanelProps): JSX.Element {
+export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, initialRunId, onRunChange }: CoworkPanelProps): JSX.Element {
   const { t } = useTranslation()
   const { workspaceRoot } = useWorkbench()
   const [runs, setRuns] = useState<CoworkRunSummary[]>([])
   const [runId, setRunId] = useState<string | null>(null)
   const [run, setRun] = useState<CoworkRun | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [confirmation, setConfirmation] = useState<'cancel' | 'delete' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [draft, setDraft] = useState<{ prompt: string; mode: CoworkMode; source?: CoworkRun } | null>(null)
   const runIdRef = useRef<string | null>(null)
   runIdRef.current = runId
+  const onRunChangeRef = useRef(onRunChange)
+  onRunChangeRef.current = onRunChange
 
   const refreshList = useCallback(async () => {
     const r = await window.api.cowork.list()
     if (r.ok) setRuns(r.data)
     return r.ok ? r.data : []
   }, [])
+
+  useEffect(() => { if (pickerOpen) void refreshList() }, [pickerOpen, refreshList])
 
   // 換工作區：重抓清單，預設打開最新一場還沒結束的會議
   useEffect(() => {
@@ -94,12 +105,12 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
       const open =
         list.find((x) => !COWORK_TERMINAL_PHASES.includes(x.phase)) ||
         (list[0] && ['approved', 'completed'].includes(list[0].phase) ? list[0] : undefined)
-      setRunId(open ? open.id : null)
+      setRunId(initialRunId === undefined ? open?.id || null : initialRunId)
     })
     return () => {
       alive = false
     }
-  }, [workspaceRoot, refreshList])
+  }, [workspaceRoot, refreshList, initialRunId])
 
   useEffect(() => {
     if (!runId) {
@@ -126,24 +137,26 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
     []
   )
 
-  useEffect(() => onPhase?.(run?.phase ?? null), [run?.phase, onPhase])
+  useEffect(() => onRunChangeRef.current?.(run ? { id: run.id, prompt: run.prompt, phase: run.phase } : null), [run?.id, run?.prompt, run?.phase])
 
   const openRun = (id: string | null): void => {
     setRunId(id)
     setPickerOpen(false)
+    setConfirmation(null)
+    setActionError(null)
   }
 
   const deleteRun = async (): Promise<void> => {
-    if (!run || !window.confirm(t('cowork.confirmDelete'))) return
+    if (!run) return
     const r = await window.api.cowork.delete(run.id)
     if (r.ok) {
       await refreshList()
       openRun(null)
-    } else window.alert(errorText(t, r))
+    } else setActionError(errorText(t, r))
   }
 
   const stopRun = (): void => {
-    if (run && window.confirm(t('cowork.confirmCancel'))) void window.api.cowork.cancel(run.id)
+    setConfirmation('cancel')
   }
 
   return (
@@ -159,7 +172,7 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
               <>
                 <div className="cw-popover-backdrop" onClick={() => setPickerOpen(false)} />
                 <div className="cw-popover cw-picker-menu" role="menu">
-                  <button type="button" className="cw-menu-item cw-menu-new" onClick={() => openRun(null)}>
+                  <button type="button" className="cw-menu-item cw-menu-new" onClick={() => { setDraft(null); openRun(null) }}>
                     <IconPlus size={12} />
                     <span>{t('cowork.newMeeting')}</span>
                   </button>
@@ -186,7 +199,7 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
             </button>
           )}
           {run && run.phase !== 'meeting' && run.phase !== 'executing' && (
-            <button type="button" className="cw-btn icon" title={t('cowork.deleteMeeting')} onClick={deleteRun}>
+            <button type="button" className="cw-btn icon" title={t('cowork.deleteMeeting')} onClick={() => setConfirmation('delete')}>
               <IconTrash size={13} />
             </button>
           )}
@@ -196,10 +209,33 @@ export default function CoworkPanel({ sessions, onPaste, onOpenAgent, onClose, o
         </div>
       </div>
 
+      <AppleAlertDialog
+        isOpen={confirmation !== null}
+        title={t(confirmation === 'delete' ? 'cowork.deleteMeeting' : 'cowork.cancelMeeting')}
+        description={t(confirmation === 'delete' ? 'cowork.confirmDelete' : 'cowork.confirmCancel')}
+        confirmLabel={t(confirmation === 'delete' ? 'cowork.deleteMeeting' : 'cowork.cancelMeeting')}
+        cancelLabel={t(confirmation === 'delete' ? 'common.cancel' : 'cowork.keepMeeting')}
+        icon={confirmation === 'cancel' ? <IconClose size={22} /> : undefined}
+        onClose={() => setConfirmation(null)}
+        onConfirm={async () => {
+          const action = confirmation
+          setConfirmation(null)
+          setActionError(null)
+          if (action === 'delete') await deleteRun()
+          else if (run) setActionError(errorText(t, await window.api.cowork.cancel(run.id)))
+        }}
+      />
+      {actionError && <div className="cw-error" role="alert">{actionError}</div>}
+
       {run ? (
-        <RunView run={run} t={t} sessions={sessions} onPaste={onPaste} onOpenAgent={onOpenAgent} />
+        run.mode === 'discussion' ? <DiscussionView key={run.id} run={run} t={t} onConvert={() => {
+          setDraft({ mode: 'project', prompt: discussionProjectPrompt(run), source: run })
+          openRun(null)
+        }} /> : <RunView key={run.id} run={run} t={t} sessions={sessions} onPaste={onPaste} onOpenAgent={onOpenAgent} onCancel={stopRun} />
       ) : (
         <StartForm
+          key={draft?.source?.id || 'new'}
+          initial={draft}
           t={t}
           onStarted={async (r) => {
             await refreshList()
@@ -222,19 +258,25 @@ function PhasePill({ phase, t }: { phase: CoworkRun['phase']; t: T }): JSX.Eleme
 function StartForm({
   t,
   onStarted,
-  onOpenRun
+  onOpenRun,
+  initial
 }: {
   t: T
   onStarted: (run: CoworkRun) => void
   onOpenRun: (id: string) => void
+  initial: { prompt: string; mode: CoworkMode; source?: CoworkRun } | null
 }): JSX.Element {
   const { language, editorDirtyPaths, workspaceRoot, settingsTick } = useWorkbench()
   const [caps, setCaps] = useState<CoworkCapability[] | null>(null)
   const [baseline, setBaseline] = useState<CoworkBaselineInfo | null>(null)
   const [limits, setLimits] = useState({ calls: 6, minutes: 10 })
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(initial?.prompt || '')
+  const [mode, setMode] = useState<CoworkMode>(initial?.mode || 'discussion')
+  const [autoEffort, setAutoEffort] = useState(initial?.source?.autoEffort !== false)
   const [picked, setPicked] = useState<CoworkAgent[]>([])
   const [chair, setChair] = useState<CoworkAgent | null>(null)
+  const [summarizer, setSummarizer] = useState<CoworkAgent | null>(null)
+  const [summarizeEachRound, setSummarizeEachRound] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ text: string; runId?: string } | null>(null)
   const [showDirty, setShowDirty] = useState(false)
@@ -251,12 +293,16 @@ function StartForm({
       setLimits({ calls: cw.limits.maxPlanningCalls, minutes: cw.limits.maxPlanningMinutes })
       const usable = c.data.agents.filter((a) => a.enabled && a.planning).map((a) => a.agent)
       // 預設：上次選的與會者（還能用的）；不夠兩位就補上能用的
-      let p = cw.participants.filter((a) => usable.includes(a))
+      let p = (initial?.source ? initial.source.participants.filter((a) => !initial.source!.discussion?.excluded.includes(a)) : cw.participants).filter((a) => usable.includes(a))
       for (const a of usable) if (p.length < 2 && !p.includes(a)) p.push(a)
       p = p.slice(0, Math.max(2, p.length))
       setPicked(p)
-      setChair(cw.chair && p.includes(cw.chair) ? cw.chair : p[0] || null)
-      setModels(cw.models)
+      const preferredChair = initial?.source?.chair || cw.chair
+      setChair(preferredChair && p.includes(preferredChair) ? preferredChair : p[0] || null)
+      const recorder = initial?.source?.discussion?.summarizer || cw.summarizer
+      setSummarizer(recorder && p.includes(recorder) ? recorder : null)
+      setSummarizeEachRound(cw.summarizeEachRound)
+      setModels(initial?.source?.models || cw.models)
     })
     return () => {
       alive = false
@@ -270,17 +316,18 @@ function StartForm({
       const next = prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]
       if (chair && !next.includes(chair)) setChair(next[0] || null)
       if (!chair && next.length) setChair(next[0])
+      if (summarizer && !next.includes(summarizer)) setSummarizer(null)
       return next
     })
   }
-  const canStart = !!prompt.trim() && picked.length >= 2 && !!chair && picked.includes(chair) && baseline?.ok === true && !busy
+  const canStart = !!prompt.trim() && prompt.length <= 20000 && picked.length >= 2 && !!chair && picked.includes(chair) && (mode === 'discussion' || baseline?.ok === true) && !busy
 
   const start = async (): Promise<void> => {
     if (!canStart || !chair) return
     setBusy(true)
     setError(null)
     const chosen = Object.fromEntries(picked.map((a) => [a, models[a] || { model: '', effort: '' }]))
-    const r = await window.api.cowork.start({ prompt: prompt.trim(), chair, participants: picked, language, models: chosen })
+    const r = await window.api.cowork.start({ prompt: prompt.trim(), chair, participants: picked, language, models: chosen, mode, autoEffort, ...(mode === 'discussion' ? { summarizer: summarizer || chair, summarizeEachRound } : {}) })
     setBusy(false)
     if (r.ok) onStarted(r.data)
     else {
@@ -293,12 +340,16 @@ function StartForm({
     <div className="cw-start">
       <div className="cw-start-inner">
         <h2 className="cw-start-title">{t('cowork.startTitle')}</h2>
-        <p className="cw-start-desc">{t('cowork.startDesc')}</p>
+        <div className="cw-mode-switch" role="group" aria-label={t('cowork.modeLabel')}>
+          {(['discussion', 'project'] as const).map((m) => <button key={m} type="button" className={`cw-btn ${mode === m ? 'primary' : ''}`} aria-pressed={mode === m} onClick={() => setMode(m)}>{t(`cowork.mode_${m}`)}</button>)}
+        </div>
+        <p className="cw-start-desc">{t(`cowork.modeDesc_${mode}`)}</p>
 
         <textarea
           className="cw-textarea cw-start-prompt"
           placeholder={t('cowork.promptPlaceholder')}
           value={prompt}
+          maxLength={20000}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -309,6 +360,7 @@ function StartForm({
           autoFocus
         />
 
+        {prompt.length > 20000 && <div className="cw-error" role="alert">{t('cowork.err_prompt-too-long')}</div>}
         <div className="cw-section-label">{t('cowork.participants')}</div>
         <div className="cw-agent-cards">
           {COWORK_AGENTS.map((a) => {
@@ -318,13 +370,13 @@ function StartForm({
             const reason = !cap ? '' : !cap.enabled ? t('cowork.reason_disabled') : cap.reason ? t(`cowork.reason_${cap.reason}`) : ''
             return (
               <div key={a} data-agent={a} className={`cw-agent-card ${on ? 'on' : ''} ${ok ? '' : 'disabled'}`}>
-                <button type="button" className="cw-agent-card-main" onClick={() => toggle(a)} disabled={!ok} aria-pressed={on}>
+                <button type="button" className="cw-agent-card-main" onClick={() => toggle(a)} disabled={!ok} aria-pressed={on} title={ok && a === 'antigravity' ? t('cowork.eligibleSlow') : reason || undefined}>
                   <span className={`cw-check ${on ? 'on' : ''}`} aria-hidden />
                   <AgentMark agent={a} size={16} />
                   <span className="cw-agent-card-text">
                     <span className="cw-agent-card-name">{agentLabel(a)}</span>
-                    {(ok ? a === 'antigravity' : !!reason) && (
-                      <span className="cw-agent-card-sub">{ok ? t('cowork.eligibleSlow') : reason}</span>
+                    {!ok && !!reason && (
+                      <span className="cw-agent-card-sub">{reason}</span>
                     )}
                   </span>
                 </button>
@@ -345,6 +397,7 @@ function StartForm({
                     catalog={catalogs?.find((c) => c.agent === a)}
                     value={models[a] || { model: '', effort: '' }}
                     onChange={(v) => setModels((prev) => ({ ...prev, [a]: v }))}
+                    automaticLabel={autoEffort ? t(mode === 'discussion' ? 'cowork.autoLow' : chair === a ? 'cowork.autoChair' : 'cowork.autoReview') : undefined}
                   />
                 )}
               </div>
@@ -352,7 +405,18 @@ function StartForm({
           })}
         </div>
 
-        <div className={`cw-baseline ${baseline && !baseline.ok ? 'error' : ''}`}>
+        {mode === 'discussion' && <div className="cw-summary-options">
+          <label>{t('cowork.summarizer')}<select className="cw-select" value={summarizer || ''} onChange={(e) => setSummarizer((e.target.value || null) as CoworkAgent | null)}>
+            <option value="">{t('cowork.followChair')}</option>{picked.map((a) => <option key={a} value={a}>{agentLabel(a)}</option>)}
+          </select></label>
+          <label>{t('cowork.summaryTiming')}<select className="cw-select" value={summarizeEachRound ? 'round' : 'context'} onChange={(e) => setSummarizeEachRound(e.target.value === 'round')}>
+            <option value="context">{t('cowork.summaryOnDemand')}</option><option value="round">{t('cowork.summaryEachRound')}</option>
+          </select></label>
+          <span className="cw-muted small">{t('cowork.summaryBudgetHint')}</span>
+        </div>}
+        <label className="cw-effort-policy"><input type="checkbox" checked={autoEffort} onChange={(e) => setAutoEffort(e.target.checked)} />{t('cowork.autoEffort')}</label>
+        <p className="cw-muted small">{t('cowork.autoEffortHint')}</p>
+        {mode === 'project' && <div className={`cw-baseline ${baseline && !baseline.ok ? 'error' : ''}`}>
           {!baseline ? (
             <span className="cw-muted">…</span>
           ) : !baseline.ok ? (
@@ -380,7 +444,7 @@ function StartForm({
               ))}
             </>
           )}
-        </div>
+        </div>}
 
         <div className="cw-start-footer">
           {picked.length < 2 && caps ? (
@@ -391,7 +455,7 @@ function StartForm({
             </button>
           )}
           <button type="button" className="cw-btn primary" onClick={start} disabled={!canStart}>
-            {busy ? t('cowork.starting') : t('cowork.start')}
+            {busy ? t('cowork.starting') : t(`cowork.start_${mode}`)}
           </button>
         </div>
         {error && (
@@ -411,18 +475,127 @@ function StartForm({
 
 // ── 一場會議 ────────────────────────────────────────────────────────
 
+function CallProgress({ run, t, now }: { run: CoworkRun; t: T; now: number }): JSX.Element | null {
+  const active = run.calls.filter((c) => c.status === 'running')
+  const last = run.calls[run.calls.length - 1]
+  const calls = active.length ? active : last ? [last] : []
+  if (!calls.length) return run.phase === 'meeting' ? <div className="cw-call-progress" role="status">{t('cowork.preparing')}</div> : null
+  return <div className="cw-call-progress" role="status">
+    {calls.map((c) => <div key={c.id}>
+      <strong>{agentLabel(c.agent)}</strong>{' · '}{t(`cowork.step_${c.step}`)}{' · '}
+      {t(c.status === 'running' ? !c.spawnedAt ? 'cowork.callStarting' : !c.firstOutputAt ? 'cowork.callWaiting' : 'cowork.callReceiving' : `cowork.call_${c.status}`)}{' · '}
+      {mmss((c.endedAt || now) - c.startedAt)}
+      {(c.spawnedAt || c.firstOutputAt) && <span className="cw-muted">{' · '}{[
+        c.spawnedAt && t('cowork.spawnTime', { seconds: ((c.spawnedAt - c.startedAt) / 1000).toFixed(1) }),
+        c.firstOutputAt && t('cowork.firstOutputTime', { seconds: ((c.firstOutputAt - c.startedAt) / 1000).toFixed(1) })
+      ].filter(Boolean).join(' · ')}</span>}
+    </div>)}
+    {run.preparationMs !== undefined && <span className="cw-muted">{t('cowork.preparationTime', { seconds: (run.preparationMs / 1000).toFixed(1) })}</span>}
+  </div>
+}
+
+function DiscussionView({ run, t, onConvert }: { run: CoworkRun; t: T; onConvert: () => void }): JSX.Element {
+  const [text, setText] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [now, setNow] = useState(Date.now())
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const d = run.discussion!
+  const speaker = run.pending?.step === 'summary' ? d.summarizer || run.chair : run.pending?.step === 'conclusion' ? run.chair : d.order[d.cursor]
+  const hasConclusion = d.conclusion?.through === d.messages.length
+  useEffect(() => {
+    if (run.phase !== 'meeting') return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [run.phase])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 180) el.scrollTop = el.scrollHeight
+  }, [d.messages.length, run.phase])
+  const act = async (action: () => Promise<CoworkResult<unknown>>): Promise<boolean> => {
+    if (busy) return false
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await action()
+      setError(errorText(t, result))
+      return result.ok
+    } catch (e) { setError(String(e)); return false }
+    finally { setBusy(false) }
+  }
+  const send = async (): Promise<void> => {
+    if (run.phase !== 'completed' || !text.trim()) return
+    if (await act(() => window.api.cowork.discuss(run.id, text.trim()))) setText('')
+  }
+  return <div className="cw-run cw-discussion">
+    <div className="cw-main">
+      <Roster run={run} t={t} now={now} />
+      <CallProgress run={run} t={t} now={now} />
+      <div className="cw-summary-options">
+        <label>{t('cowork.summarizer')}<select className="cw-select" value={d.summarizer || run.chair} disabled={busy || !['completed', 'blocked', 'paused'].includes(run.phase)} onChange={(e) => act(() => window.api.cowork.setSummarizer(run.id, e.target.value as CoworkAgent))}>
+          {run.participants.map((a) => <option key={a} value={a} disabled={d.excluded.includes(a)}>{agentLabel(a)}</option>)}
+        </select></label>
+        <span className="cw-muted small">{t('cowork.summaryBudgetHint')}</span>
+      </div>
+      <div className="cw-timeline" ref={scrollRef}>
+        {d.messages.map((m, index) => {
+          const reply = d.messages.find((p) => p.id === m.replyTo)
+          return <Fragment key={m.id}><article id={`cw-${run.id}-${m.id}`} className={`cw-msg ${m.agent ? 'agent' : 'you'}`}>
+            <div className="cw-msg-head">
+              {m.agent ? <AgentMark agent={m.agent} size={14} /> : <span className="cw-you-dot" aria-hidden />}
+              <span className="cw-msg-who">{m.agent ? agentLabel(m.agent) : t('cowork.you')}</span>
+              {reply && <a className="cw-link cw-muted" href={`#cw-${run.id}-${reply.id}`}>{t('cowork.replyingTo', { name: reply.agent ? agentLabel(reply.agent) : t('cowork.you') })}</a>}
+            </div>
+            <p className="cw-msg-body cw-public-message">{m.message}</p>
+          </article>
+          {(d.summaries || []).filter((s) => s.through === index + 1).map((s, i) => <details key={`${s.at}-${i}`} className="cw-msg cw-summary" open={s === d.summaries?.at(-1)}>
+            <summary>{t('cowork.meetingRecord')} · {agentLabel(s.agent)} · {t('cowork.summaryThrough', { count: s.through })}</summary>
+            <p className="cw-public-message">{s.summary}</p>
+            {(['consensus', 'disagreements', 'questions'] as const).map((key) => s[key].length > 0 && <div key={key}><strong>{t(`cowork.summary_${key}`)}</strong><ul>{s[key].map((point, n) => <li key={n}>{point}</li>)}</ul></div>)}
+          </details>)}
+          </Fragment>
+        })}
+        {d.conclusion && <article className="cw-msg cw-conclusion"><div className="cw-msg-head"><AgentMark agent={run.chair} size={14} /><strong>{t('cowork.chairConclusion')}</strong>{!hasConclusion && <span className="cw-muted">{t('cowork.conclusionOutdated')}</span>}</div><p className="cw-public-message">{d.conclusion.message}</p></article>}
+        {d.excluded.length > 0 && <p className="cw-muted">{t('cowork.skippedAgents', { names: d.excluded.map(agentLabel).join(', ') })}</p>}
+        {run.phase === 'meeting' && speaker && <p className="cw-discussion-state" role="status">{t('cowork.discussionSpeaking', { name: agentLabel(speaker) })}</p>}
+        {run.phase === 'completed' && <div className="cw-discussion-actions">
+          <span className="cw-muted">{t(hasConclusion ? 'cowork.conclusionReady' : 'cowork.discussionDone')}</span>
+          <button type="button" className="cw-btn" disabled={busy || d.summaries?.at(-1)?.through === d.messages.length} onClick={() => act(() => window.api.cowork.summarize(run.id))}>{t('cowork.summarizeNow')}</button>
+          {!hasConclusion && <button type="button" className="cw-btn primary" disabled={busy} onClick={() => act(() => window.api.cowork.summarize(run.id, true))}>{t('cowork.requestConclusion')}</button>}
+          {hasConclusion && <button type="button" className="cw-btn primary" onClick={onConvert} disabled={busy}>{t('cowork.convertProject')}</button>}
+        </div>}
+        {(run.phase === 'blocked' || run.phase === 'paused') && <div className="cw-discussion-block">
+          <div className="cw-error" role="alert">{run.block?.message}</div>
+          <div className="cw-discussion-actions">
+            <button type="button" className="cw-btn primary" disabled={busy} onClick={() => act(() => window.api.cowork.retry(run.id))}>{t('common.retry')}</button>
+            {run.block?.kind === 'step-failed' && run.pending?.step === 'discussion' && speaker && <button type="button" className="cw-btn" disabled={busy} onClick={() => act(() => window.api.cowork.dropFailedReviewers(run.id))}>{t('cowork.skipSpeaker', { name: agentLabel(speaker) })}</button>}
+            {run.block?.kind === 'budget' && <button type="button" className="cw-btn" disabled={busy} onClick={() => act(() => window.api.cowork.raiseLimits(run.id, { maxPlanningCalls: Math.min(30, run.limits.maxPlanningCalls + run.participants.length), maxPlanningMinutes: Math.min(120, run.limits.maxPlanningMinutes + 10) }))}>{t('cowork.raiseDiscussionLimits')}</button>}
+          </div>
+        </div>}
+        {error && <div className="cw-error" role="alert">{error}</div>}
+      </div>
+      <div className="cw-composer">
+        <textarea className="cw-textarea" value={text} maxLength={12000} rows={1} aria-label={t('cowork.discussionFollowUp')} placeholder={t('cowork.discussionFollowUp')} disabled={run.phase !== 'completed' || busy} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send() } }} />
+        <button type="button" className="cw-btn primary" disabled={run.phase !== 'completed' || busy || !text.trim()} onClick={send}>{t('cowork.send')}</button>
+      </div>
+    </div>
+  </div>
+}
+
 function RunView({
   run,
   t,
   sessions,
   onPaste,
-  onOpenAgent
+  onOpenAgent,
+  onCancel
 }: {
   run: CoworkRun
   t: T
   sessions: CoworkSessionRef[]
   onPaste: (sessionId: string, text: string, fresh?: boolean) => void
   onOpenAgent: (agent: CoworkAgent) => string
+  onCancel: () => void
 }): JSX.Element {
   const [now, setNow] = useState(Date.now())
   const [highlight, setHighlight] = useState<Highlight>(null)
@@ -475,6 +648,7 @@ function RunView({
     <div className={`cw-run ${boardOpen ? '' : 'board-closed'}`}>
       <div className="cw-main">
         <Roster run={run} t={t} now={now} />
+        <CallProgress run={run} t={t} now={now} />
         <div className="cw-timeline" ref={timelineRef}>
           <Timeline
             run={run}
@@ -495,6 +669,7 @@ function RunView({
             run={run}
             t={t}
             act={act}
+            onCancel={onCancel}
             onEdit={() => {
               setBoardOpen(true)
               setEditing(true)
@@ -568,7 +743,7 @@ function Roster({ run, t, now }: { run: CoworkRun; t: T; now: number }): JSX.Ele
   const running = run.calls.filter((c) => c.status === 'running')
   const ex = run.execution
   const yourTurn =
-    run.phase === 'awaiting-approval' || run.phase === 'blocked' || run.phase === 'paused' || run.phase === 'review' || !!ex?.paused
+    run.phase === 'awaiting-approval' || run.phase === 'blocked' || run.phase === 'paused' || run.phase === 'review' || (run.mode === 'discussion' && run.phase === 'completed') || !!ex?.paused
   const execMin = ex ? Math.floor((ex.msUsed + (ex.activeSince ? now - ex.activeSince : 0)) / 60000) : 0
   const execCost = ex ? Object.values(ex.tasks).reduce((n, x) => n + (x.usage?.costUsd || 0), 0) : 0
   const usedMin = Math.floor(planningMsUsed(run, now) / 60000)
@@ -594,6 +769,13 @@ function Roster({ run, t, now }: { run: CoworkRun; t: T; now: number }): JSX.Ele
         text: t('cowork.status_thinking', { elapsed: mmss(now - call.startedAt), limit: mmss(call.timeoutMs) }),
         cls: 'thinking'
       }
+    }
+    if (run.discussion) {
+      if (run.discussion.excluded.includes(a)) return { text: t('cowork.status_dropped'), cls: 'muted' }
+      const index = run.discussion.order.indexOf(a)
+      if (index >= 0 && index < run.discussion.cursor) return { text: t('cowork.status_spoke'), cls: 'done' }
+      if (index === run.discussion.cursor && run.phase === 'blocked') return { text: t('cowork.status_failed'), cls: 'failed' }
+      return { text: t('cowork.status_waiting'), cls: '' }
     }
     if (a === run.chair) return run.r1 ? { text: t('cowork.status_spoke'), cls: 'done' } : { text: t('cowork.status_waiting'), cls: '' }
     const r = run.reviewers[a]
@@ -949,6 +1131,7 @@ function ReviewGrid({ run, t, highlight, onHighlight }: { run: CoworkRun; t: T; 
               <div className="cw-review-wait">{t('cowork.status_dropped')}</div>
             ) : out ? (
               <div className="cw-review-body">
+                {out.message && <p className="cw-public-message">{out.message}</p>}
                 {out.agree.length > 0 && (
                   <div className="cw-row-line">
                     <span className="cw-kind agree">{t('cowork.agree')}</span>
@@ -1051,6 +1234,7 @@ function Decisions({
         <span className="cw-role chair">★ {t('cowork.role_chair')}</span>
       </div>
       <div className="cw-msg-body">
+        {board.message && <p className="cw-public-message">{board.message}</p>}
         <ul className="cw-decisions">
           {decisions.map((d) => {
             const issue = issueById.get(d.issueId)
@@ -1095,12 +1279,14 @@ function TurnCard({
   run,
   t,
   act,
+  onCancel,
   onEdit,
   onFeedback
 }: {
   run: CoworkRun
   t: T
   act: (p: Promise<CoworkResult<unknown>>) => Promise<boolean>
+  onCancel: () => void
   onEdit: () => void
   onFeedback: () => void
 }): JSX.Element | null {
@@ -1111,11 +1297,8 @@ function TurnCard({
     if (needsYou) ref.current?.focus()
   }, [needsYou, run.phase, run.block?.kind, run.planRevision])
 
-  const cancel = (): void => {
-    if (window.confirm(t('cowork.confirmCancel'))) void act(window.api.cowork.cancel(run.id))
-  }
   const cancelBtn = (
-    <button type="button" className="cw-btn danger" onClick={cancel}>
+    <button type="button" className="cw-btn danger" onClick={onCancel}>
       {t('cowork.cancelMeeting')}
     </button>
   )

@@ -107,7 +107,16 @@ const tasks = () => [
 ]
 
 let out
-if (step === 'R1') {
+if (step === 'Discussion') {
+  const messages = prompt.split('\n').flatMap((line) => { try { const m = JSON.parse(line); return m.id && m.speaker ? [m] : [] } catch { return [] } })
+  const last = messages[messages.length - 1]
+  out = { message: `${me} replies to ${last?.speaker}: ${last?.message}`, replyTo: last?.id || null }
+} else if (step === 'Summary') {
+  const messages = prompt.split('\n').flatMap((line) => { try { const m = JSON.parse(line); return m.id && m.speaker ? [m] : [] } catch { return [] } })
+  out = { summary: `Recorded ${messages.map((m) => m.id).join(', ')}; preserve EARLY_REQUIREMENT.`, consensus: ['Use the agreed approach'], disagreements: ['Claude prefers option B'], questions: ['User must approve execution'] }
+} else if (step === 'Conclusion') {
+  out = { message: 'Chair recommends the recorded approach. EARLY_REQUIREMENT remains required; user approval is needed before execution.', replyTo: null }
+} else if (step === 'R1') {
   out =
     cfg.invalidOnce && !repair
       ? { summary: 's', framing: 'f', tasks: [], questions: [], risks: [] }
@@ -140,11 +149,12 @@ if (step === 'R1') {
   process.stderr.write(`unknown step ${step}\n`)
   process.exit(2)
 }
+if (['R2', 'R3/R4', 'Revise'].includes(step)) out.message = `${me}: I reviewed the earlier proposal and addressed the concrete points.`
 
 if (isAgy) {
   const ev = (e) => process.stdout.write(JSON.stringify(e) + '\n')
   ev({ event: 'init', conversation_id: 'fake', init: { cwd: process.cwd(), tools: ['view_file', 'run_command', 'schedule'] } })
-  const tool = cfg.agyBadTool || 'view_file'
+  const tool = cfg.agyBadTool || (step === 'Discussion' ? 'finish' : 'view_file')
   ev({ event: 'step_update', step_update: { step_index: 1, state: 'ACTIVE', step_type: 'tool', tool_name: tool, tool_info: { name: tool, parameters: {} } } })
   if (cfg.agyBadTool) {
     // 違規工具：照理會被 orchestrator 立刻終止；等著，證明是被殺掉而不是自己結束
@@ -164,7 +174,7 @@ if (isAgy) {
   const ev = (e) => process.stdout.write(JSON.stringify(e) + '\n')
   ev({ type: 'thread.started', thread_id: 'fake' })
   ev({ type: 'turn.started' })
-  ev({ type: 'item.completed', item: { id: 'i0', type: 'command_execution', command: 'ls', aggregated_output: 'a.ts', exit_code: 0, status: 'completed' } })
+  if (step !== 'Discussion') ev({ type: 'item.completed', item: { id: 'i0', type: 'command_execution', command: 'ls', aggregated_output: 'a.ts', exit_code: 0, status: 'completed' } })
   ev({ type: 'item.completed', item: { id: 'i1', type: 'agent_message', text: JSON.stringify(out) } })
   ev({ type: 'turn.completed', usage: { input_tokens: 1000, cached_input_tokens: 400, output_tokens: 50, reasoning_output_tokens: 5 } })
 } else {

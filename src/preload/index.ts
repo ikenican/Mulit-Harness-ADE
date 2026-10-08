@@ -232,6 +232,10 @@ const api = {
     list: (): Promise<CoworkResult<CoworkRunSummary[]>> => ipcRenderer.invoke('cowork:list'),
     get: (runId: string): Promise<CoworkResult<CoworkRun | null>> => ipcRenderer.invoke('cowork:get', runId),
     start: (req: {
+      mode?: 'discussion' | 'project'
+      autoEffort?: boolean
+      summarizer?: CoworkAgent
+      summarizeEachRound?: boolean
       prompt: string
       chair: CoworkAgent
       participants: CoworkAgent[]
@@ -239,6 +243,9 @@ const api = {
       models?: Partial<Record<CoworkAgent, AgentModelChoice>>
     }): Promise<CoworkResult<CoworkRun>> => ipcRenderer.invoke('cowork:start', req),
     cancel: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:cancel', runId),
+    discuss: (runId: string, text: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:discuss', runId, text),
+    setSummarizer: (runId: string, agent: CoworkAgent): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:summarizer', runId, agent),
+    summarize: (runId: string, conclude?: boolean): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:summarize', runId, conclude),
     retry: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:retry', runId),
     dropFailedReviewers: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:drop', runId),
     addNote: (runId: string, text: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:note', runId, text),

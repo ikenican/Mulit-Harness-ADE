@@ -47,6 +47,9 @@ const cleanup: string[] = [tmp]
   assert.match(String(errs([t({ scope: ['../x'] })])), /not allowed/)
   assert.match(String(errs([t({}), t({ id: 't2' }), t({ id: 't3' }), t({ id: 't4' })])), /too many tasks/)
   assert.match(String(errs([])), /must not be empty/)
+  assert.match(String(errs([t({ scope: ['src/'] }), t({ id: 't2', scope: ['src/a.ts'] })])), /overlapping scopes/)
+  assert.equal(shared.checkTasks([t({ scope: ['src/'] }), t({ id: 't2', scope: ['src/a.ts'], dependsOn: ['t1'] })], { ...ctx, assignable: [...ctx.assignable] }).ok, true)
+  assert.equal(shared.checkTasks([t({ scope: ['src/'] }), t({ id: 't2', scope: ['src2/a.ts'] })], { ...ctx, assignable: [...ctx.assignable] }).ok, true)
 
   const res = shared.checkResolution(
     { tasks: [t({})], decisions: [{ issueId: 'codex.o1', verdict: 'accept', reason: 'ok' }], unresolved: [] },
@@ -162,6 +165,21 @@ const cleanup: string[] = [tmp]
   })
   // claude 回報實際用的模型
   assert.equal(shared.parseClaudeOutput(env({ modelUsage: { 'claude-opus-5-5': {} } })).model, 'claude-opus-5-5')
+  const catalogResponse = JSON.stringify({ type: 'control_response', response: { request_id: 'cowork-models', response: { models: [
+    { value: 'default', resolvedModel: 'claude-opus-5-5' },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus', description: 'Opus 5.5 · Best for everyday tasks', supportedEffortLevels: ['low', 'high', 'bad"value'] },
+    { value: 'haiku', resolvedModel: 'claude-haiku-4-5', description: 'Haiku 4.5 · Fast', supportsEffort: false },
+    { value: 'bad"value' }
+  ] } } })
+  const catalog = shared.parseClaudeModelCatalog('not json\n' + catalogResponse, 'opus')
+  assert.equal(catalog.fallback.model, 'opus')
+  assert.equal(catalog.fallback.source, 'user-config')
+  assert.deepEqual(catalog.options, [
+    { id: 'opus', resolvedModel: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['low', 'high'] },
+    { id: 'haiku', resolvedModel: 'claude-haiku-4-5', label: 'Haiku 4.5', efforts: [] }
+  ])
+  assert.equal(shared.parseClaudeModelCatalog(catalogResponse, '').fallback.model, 'claude-opus-5-5')
+  assert.throws(() => shared.parseClaudeModelCatalog('{}', ''), /model list/)
 
   // 工具說明插在步驟標記之後，假 CLI 與真 CLI 都還認得步驟
   const tn = shared.withToolNote('Cowork step: R1 (chair opening)\nrest', 'antigravity')
@@ -217,6 +235,27 @@ const cleanup: string[] = [tmp]
     assert.ok('error' in launchPlan('C:/x/codex.cmd', ['say "hi"']))
     const plan = launchPlan('C:/Program Files/x/codex.cmd', ['-C', 'C:/Users/Kyle Zhang/snap'])
     assert.ok(!('error' in plan) && plan.verbatim && plan.args[3] === '""C:/Program Files/x/codex.cmd" "-C" "C:/Users/Kyle Zhang/snap""')
+
+    const shimDir = path.join(tmp, 'npm shim with spaces')
+    const binDir = path.join(shimDir, 'node_modules', 'fake', 'bin')
+    fs.mkdirSync(binDir, { recursive: true })
+    const entry = path.join(binDir, 'cli.cjs')
+    fs.writeFileSync(entry, 'console.log(JSON.stringify(process.argv.slice(2)))')
+    const shim = path.join(shimDir, 'fake.cmd')
+    fs.writeFileSync(shim, '@ECHO off\r\n"%_prog%" "%dp0%\\node_modules\\fake\\bin\\cli.cjs" %*\r\n')
+    const schemaArgs = ['--json-schema', '{"type":"object","description":"100%"}', 'line1\nline2', 'x & echo unsafe']
+    const checkShim = async (args: string[]): Promise<void> => {
+      const r = await runProcess({ command: shim, args, cwd: tmp, stdin: '', timeoutMs: 5000, maxBytes: 10000 })
+      assert.equal(r.code, 0, r.spawnError || r.stderr)
+      assert.deepEqual(JSON.parse(r.stdout), schemaArgs, 'npm shim forwards JSON and metacharacters literally')
+    }
+    await checkShim(schemaArgs)
+    const exe = path.join(binDir, 'cli.exe')
+    fs.copyFileSync(process.execPath, exe)
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\fake\\bin\\cli.exe"   %*\r\n')
+    await checkShim([entry, ...schemaArgs])
+    fs.unlinkSync(exe)
+    assert.ok('error' in launchPlan(shim, schemaArgs), 'missing npm target retains the cmd.exe safety guard')
   }
   console.log('cowork runner ok')
 }
@@ -323,10 +362,10 @@ const base = {
   limits: { maxPlanningCalls: 6, maxPlanningMinutes: 10, maxExecutionMinutes: 60 }
 }
 
-async function waitFor(id: string, cond: (r: any) => boolean, ms = 30000): Promise<any> {
+async function waitFor(id: string, cond: (r: any) => boolean, ms = 30000, service = svc): Promise<any> {
   const t0 = Date.now()
   for (;;) {
-    const r = svc.get(id)
+    const r = service.get(id)
     if (r && cond(r)) return r
     if (Date.now() - t0 > ms) throw new Error(`timeout waiting; phase=${r?.phase} block=${JSON.stringify(r?.block)}`)
     await new Promise((res) => setTimeout(res, 50))
@@ -347,10 +386,13 @@ const code = async (p: Promise<unknown> | (() => unknown), c: string): Promise<v
 // 1. 正常流程：主席 claude、覆核 codex，有反對與補充 → 全部處置 → 待核准 → 核准
 {
   behave({ r2Objection: true })
-  const run0 = await svc.start(base)
+  const run0 = await svc.start({ ...base, mode: 'project', autoEffort: true })
   assert.equal(run0.phase, 'meeting')
-  await code(svc.start(base), 'active-run-exists')
   const r = await waitFor(run0.id, settled)
+  assert.equal(r.calls.find((c: any) => c.step === 'r1')?.effort, 'medium')
+  assert.equal(r.calls.find((c: any) => c.step === 'r2')?.effort, 'high')
+  assert.equal(r.calls.find((c: any) => c.step === 'r34')?.effort, 'high')
+  assert.ok(r.reviewers.codex.output.message && shared.currentBoard(r)!.message, 'public review and chair response survive validation')
   assert.equal(r.phase, 'awaiting-approval', JSON.stringify(r.block))
   const board = shared.currentBoard(r)!
   assert.deepEqual(board.decisions.map((d: any) => d.issueId).sort(), ['claude.q1', 'codex.m1', 'codex.o1'])
@@ -816,6 +858,230 @@ const three = { ...base, participants: ['claude', 'codex', 'antigravity'] as any
   assert.equal(x.execution.tasks.t2.status, 'done')
   await svc5.execCleanup(s.id)
   console.log('e2e exec pause/restart ok')
+
+  // Independent tasks still serialize an explicitly shared resource across agent worktrees.
+  behave({ execSlowMs: 800 })
+  const resourceRun = await svc5.start({ ...three, workspace: erepo })
+  const ready = await wait5(resourceRun.id, (y) => y.phase === 'awaiting-approval')
+  const independent = shared.currentBoard(ready)!.tasks.map((t) => ({ ...t, dependsOn: [], resources: ['port:5173'] }))
+  svc5.editBoard(ready.id, ready.planRevision, independent)
+  svc5.approve(ready.id, ready.planRevision)
+  const starting = svc5.execStart(ready.id, { mode: 'parallel', linkDeps: false, bypass: false })
+  await code(svc5.execStart(ready.id, { mode: 'parallel', linkDeps: false, bypass: false }), 'active-run-exists')
+  await starting
+  const first = await wait5(ready.id, (y) => y.execution.tasks.t1.status === 'running')
+  assert.equal(first.execution.tasks.t2.status, 'pending', 'shared port is not used concurrently')
+  const finished = await wait5(ready.id, (y) => y.phase === 'review')
+  assert.ok(finished.execution.tasks.t2.startedAt >= finished.execution.tasks.t1.endedAt)
+  // Planning another meeting is allowed; starting another execution before cleanup is not.
+  behave({})
+  const secondProject = await meeting()
+  await code(svc5.execStart(secondProject.id, { mode: 'sequential', linkDeps: false, bypass: false }), 'active-run-exists')
+  await svc5.execCleanup(ready.id)
+  console.log('e2e exclusive resources serialize independent tasks ok')
+}
+
+// Discussion: real sequential context, no snapshot or project instructions, retry/skip, next round and budget.
+{
+  const discussionDeps = { ...deps, dataDir: path.join(tmp, "discussion-data") }
+  const discussionSvc = new CoworkService(discussionDeps)
+  discussionSvc.init()
+  const wait = (id: string, cond: (r: any) => boolean) => waitFor(id, cond, 30000, discussionSvc)
+  behave({})
+  const plain = path.join(tmp, 'discussion-folder')
+  fs.mkdirSync(plain)
+  const before = await gitm.git(repo, ['worktree', 'list', '--porcelain'])
+  const opts = { ...base, workspace: plain, mode: 'discussion' as const, participants: ['codex', 'claude', 'antigravity'] as any, chair: 'codex' as const, autoEffort: true, skills: [{ key: 'secret', name: 'Secret', content: 'PROJECT_ONLY' }] }
+  const run0 = await discussionSvc.start(opts)
+  const r = await wait(run0.id, settled)
+  assert.equal(r.phase, 'completed', JSON.stringify(r.block))
+  assert.equal(r.context, undefined)
+  assert.equal(r.repo.baseCommit, '')
+  assert.ok(!fs.existsSync(path.join(r.snapshotDir, '.git')))
+  assert.equal(await gitm.git(repo, ['worktree', 'list', '--porcelain']), before)
+  assert.deepEqual(r.discussion.messages.map((m: any) => m.agent), [null, 'codex', 'claude', 'antigravity'])
+  assert.deepEqual(r.discussion.messages.slice(1).map((m: any) => m.replyTo), ['m1', 'm2', 'm3'])
+  assert.match(r.discussion.messages[2].message, /codex replies/)
+  assert.equal(r.calls.length, 3)
+  assert.ok(r.calls.every((c: any) => c.effort === 'low' && c.spawnedAt >= c.startedAt && c.firstOutputAt >= c.spawnedAt && c.endedAt >= c.firstOutputAt))
+  assert.ok((await discussionSvc.list(plain)).some((s) => s.id === r.id))
+  const prompt = shared.buildDiscussionPrompt(r, 'codex')
+  assert.ok(!prompt.includes('PROJECT_ONLY') && !prompt.includes('CLAUDE.md'))
+  assert.equal(shared.checkDiscussion({ message: 'hi', replyTo: 'fake' }, r.discussion.messages).ok, false)
+  await discussionSvc.discuss(r.id, 'Now respond to the previous speaker')
+  const round2 = await wait(r.id, settled)
+  assert.equal(round2.discussion.messages.length, 8)
+  assert.equal(round2.calls.length, 6)
+  await discussionSvc.discuss(r.id, 'Third round')
+  const blocked = await wait(r.id, settled)
+  assert.equal(blocked.block.kind, 'budget')
+  discussionSvc.raiseLimits(r.id, { maxPlanningCalls: 9 })
+  await discussionSvc.retry(r.id)
+  assert.equal((await wait(r.id, settled)).phase, 'completed')
+  const restored = new CoworkService(discussionDeps)
+  restored.init()
+  assert.equal(restored.get(r.id)?.discussion?.messages.length, 12)
+  restored.shutdown()
+  discussionSvc.delete(r.id)
+
+  behave({ failAgent: 'claude', failStep: 'Discussion' })
+  const fail = await discussionSvc.start(opts)
+  const f = await wait(fail.id, settled)
+  assert.equal(f.phase, 'blocked')
+  assert.equal(f.discussion.messages.length, 2, 'successful chair reply survives a later failure')
+  behave({})
+  await discussionSvc.retry(f.id)
+  const retried = await wait(f.id, settled)
+  assert.equal(retried.phase, 'completed')
+  assert.equal(retried.calls.filter((c: any) => c.agent === 'codex').length, 1, 'retry does not repeat earlier speakers')
+  discussionSvc.delete(f.id)
+
+  behave({ failAgent: 'codex', failStep: 'Discussion' })
+  const skip = await discussionSvc.start(opts)
+  await wait(skip.id, settled)
+  await discussionSvc.dropFailedReviewers(skip.id)
+  const skipped = await wait(skip.id, settled)
+  assert.equal(skipped.phase, 'completed')
+  assert.deepEqual(skipped.discussion.excluded, ['codex'])
+  assert.deepEqual(skipped.discussion.messages.map((m: any) => m.agent), [null, 'claude', 'antigravity'])
+  behave({})
+  await discussionSvc.discuss(skip.id, 'Keep going')
+  assert.deepEqual((await wait(skip.id, settled)).discussion.order, ['claude', 'antigravity'])
+  discussionSvc.delete(skip.id)
+  console.log('discussion context, isolated workspace, timings, rounds, recovery, retry, skip and budget ok')
+
+  // Recorder checkpoint -> chair recommendation, with no implicit project approval/execution.
+  behave({})
+  const recorded = await discussionSvc.start({ ...opts, summarizer: 'claude', summarizeEachRound: true })
+  const rec = await wait(recorded.id, settled)
+  assert.equal(rec.calls.length, 4)
+  assert.equal(rec.calls.at(-1).agent, 'claude')
+  assert.equal(rec.calls.at(-1).step, 'summary')
+  assert.equal(rec.calls.at(-1).effort, 'medium')
+  assert.equal(rec.discussion.summaries[0].through, 4)
+  assert.deepEqual(rec.discussion.summaries[0].questions, ['User must approve execution'])
+  const memory = shared.buildDiscussionPrompt(rec, 'codex')
+  assert.match(memory, /EARLY_REQUIREMENT/)
+  assert.ok(!memory.includes('"speaker":'), 'summarized messages are replaced by the record, not repeated')
+  discussionSvc.summarizeDiscussion(rec.id, true)
+  const concluded = await wait(rec.id, settled)
+  assert.equal(concluded.calls.length, 5, 'a fresh summary is reused for the chair call')
+  assert.equal(concluded.calls.at(-1).agent, 'codex')
+  assert.equal(concluded.calls.at(-1).effort, 'high')
+  assert.match(concluded.discussion.conclusion.message, /approval/)
+  assert.equal(concluded.approvedPlanRevision, null)
+  assert.equal(concluded.execution, undefined)
+  assert.match(shared.discussionProjectPrompt(concluded), /EARLY_REQUIREMENT/)
+  const saved = new CoworkService(discussionDeps)
+  saved.init()
+  assert.deepEqual(saved.get(rec.id)?.discussion?.summaries, rec.discussion.summaries)
+  assert.equal(saved.get(rec.id)?.discussion?.conclusion?.through, 4)
+  saved.shutdown()
+  await discussionSvc.discuss(rec.id, 'New direction after conclusion')
+  const capped = await wait(rec.id, settled)
+  assert.equal(capped.block.kind, 'budget')
+  assert.ok(capped.discussion.conclusion.through < capped.discussion.messages.length, 'new discussion makes the old conclusion stale')
+  assert.equal(capped.discussion.summaries.length, 1, 'budget failure cannot advance summary coverage')
+  discussionSvc.delete(rec.id)
+
+  behave({})
+  const failure = await discussionSvc.start({ ...opts, summarizer: 'claude' })
+  await wait(failure.id, settled)
+  behave({ failAgent: 'claude', failStep: 'Summary' })
+  discussionSvc.summarizeDiscussion(failure.id, true)
+  const badSummary = await wait(failure.id, settled)
+  assert.equal(badSummary.pending.step, 'summary')
+  assert.equal(badSummary.discussion.summaries.length, 0)
+  assert.equal(badSummary.discussion.conclusion, undefined)
+  await code(discussionSvc.dropFailedReviewers(failure.id), 'not-allowed')
+  discussionSvc.setSummarizer(failure.id, 'antigravity')
+  behave({})
+  await discussionSvc.retry(failure.id)
+  const fixed = await wait(failure.id, settled)
+  assert.equal(fixed.phase, 'completed')
+  assert.equal(fixed.discussion.summaries[0].agent, 'antigravity')
+  assert.equal(fixed.calls.filter((c: any) => c.step === 'discussion').length, 3, 'retry does not repeat the discussion')
+  discussionSvc.delete(failure.id)
+
+  // Restart/retry resumes the chair call, keeping the already completed recorder call.
+  const finalFailure = await discussionSvc.start({ ...opts, summarizer: 'claude', limits: { ...opts.limits, maxPlanningCalls: 12 } })
+  await wait(finalFailure.id, settled)
+  behave({ failAgent: 'codex', failStep: 'Conclusion' })
+  discussionSvc.summarizeDiscussion(finalFailure.id, true)
+  const noConclusion = await wait(finalFailure.id, settled)
+  assert.equal(noConclusion.pending.step, 'conclusion')
+  assert.equal(noConclusion.discussion.summaries.length, 1)
+  assert.equal(noConclusion.discussion.conclusion, undefined)
+  const recover = new CoworkService(discussionDeps)
+  recover.init()
+  behave({})
+  await recover.retry(finalFailure.id)
+  const recovered = await waitFor(finalFailure.id, settled, 30000, recover)
+  assert.equal(recovered.discussion.summaries.length, 1)
+  assert.equal(recovered.calls.filter((c: any) => c.step === 'summary').length, 1)
+  assert.equal(recovered.discussion.conclusion.through, 4)
+  recover.shutdown()
+  discussionSvc.delete(finalFailure.id)
+
+  const interrupted = await discussionSvc.start({ ...opts, summarizer: 'claude' })
+  await wait(interrupted.id, settled)
+  behave({ slowMs: 5000 })
+  discussionSvc.summarizeDiscussion(interrupted.id, true)
+  await wait(interrupted.id, (r) => r.calls.some((c: any) => c.step === 'summary' && c.status === 'running'))
+  await discussionSvc.cancel(interrupted.id)
+  const cancelledSummary = discussionSvc.get(interrupted.id)!
+  assert.equal(cancelledSummary.phase, 'cancelled')
+  assert.equal(cancelledSummary.discussion!.summaries!.length, 0)
+  assert.equal(cancelledSummary.discussion!.conclusion, undefined)
+  discussionSvc.delete(interrupted.id)
+  behave({})
+
+  // Long historical records are consumed oldest-first without dropping a prefix.
+  const long = await discussionSvc.start({ ...opts, limits: { ...opts.limits, maxPlanningCalls: 30 } })
+  const history = await wait(long.id, settled)
+  for (let i = 0; i < 29; i++) history.discussion.messages.push({ id: `m${history.discussion.messages.length + 1}`, agent: null, message: `Historical requirement ${i}`, replyTo: null, at: Date.now() })
+  assert.equal(shared.discussionNeedsSummary(history), true)
+  await discussionSvc.discuss(long.id, 'Keep all earlier requirements')
+  const compressed = await wait(long.id, settled)
+  assert.equal(compressed.phase, 'completed')
+  assert.equal(compressed.discussion.summaries[0].through, 20)
+  assert.match(compressed.discussion.summaries[0].summary, /m1, m2/)
+  const speakerPrompt = shared.buildDiscussionPrompt(compressed, 'claude')
+  assert.match(speakerPrompt, /EARLY_REQUIREMENT/)
+  assert.match(speakerPrompt, /Historical requirement 28/)
+  discussionSvc.summarizeDiscussion(long.id, true)
+  const fullyRecorded = await wait(long.id, settled)
+  assert.equal(fullyRecorded.discussion.summaries.at(-1).through, fullyRecorded.discussion.messages.length)
+  assert.equal(fullyRecorded.discussion.messages.length, 37, 'original messages are retained')
+  assert.equal(shared.checkDiscussionSummary({ summary: 'x', consensus: [], disagreements: [null], questions: [] }).ok, false)
+  assert.equal(shared.checkDiscussionSummary({ summary: 'x'.repeat(6001), consensus: [], disagreements: [], questions: [] }).ok, false)
+  assert.ok(shared.discussionProjectPrompt({ ...fullyRecorded, prompt: 'x'.repeat(20000) }).length > 20000, 'conversion preserves the record for explicit editing instead of silently truncating it')
+  assert.equal(shared.sanitizeCoworkSettings({ summarizer: 'evil', summarizeEachRound: 'yes', limits: { maxPlanningCalls: 999 } }).summarizer, null)
+  discussionSvc.delete(long.id)
+  console.log('recorder selection, rolling context, original history, summary retries/budget, chair conclusion and approval boundary ok')
+
+  behave({ slowMs: 150 })
+  const [a, b] = await Promise.all([
+    discussionSvc.start({ ...opts, prompt: 'Meeting A' }),
+    discussionSvc.start({ ...opts, prompt: 'Meeting B' })
+  ])
+  assert.notEqual(a.id, b.id)
+  assert.notEqual(a.snapshotDir, b.snapshotDir)
+  await wait(a.id, (r) => r.calls.some((c: any) => c.status === 'running'))
+  await discussionSvc.cancel(a.id)
+  assert.equal((await wait(b.id, settled)).phase, 'completed', 'cancelling A does not stop B')
+  assert.ok(b.discussion!.messages.every((m) => !m.message.includes('Meeting A')), 'meeting context stays isolated')
+  const c = await discussionSvc.start({ ...opts, prompt: 'Meeting C' })
+  await discussionSvc.discuss(b.id, 'Continue Meeting B')
+  assert.equal((await wait(c.id, settled)).phase, 'completed')
+  assert.equal((await wait(b.id, settled)).phase, 'completed', 'follow-up allowed while another meeting runs')
+  const projectOpts = { ...base, mode: 'project' as const }
+  const [p1, p2] = await Promise.all([discussionSvc.start(projectOpts), discussionSvc.start(projectOpts)])
+  assert.notEqual(p1.snapshotDir, p2.snapshotDir)
+  assert.equal((await wait(p1.id, settled)).phase, 'awaiting-approval')
+  assert.equal((await wait(p2.id, settled)).phase, 'awaiting-approval')
+  for (const r of [a, b, c, p1, p2]) discussionSvc.delete(r.id)
+  console.log('concurrent discussions/project planning, isolated context and cancellation ok')
 }
 
 for (const d of cleanup) {

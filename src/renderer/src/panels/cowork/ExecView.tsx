@@ -2,6 +2,7 @@
 // 執行在 main（src/main/cowork/executor.ts），這裡只顯示 run.execution 並送出使用者的操作。
 import { useEffect, useRef, useState } from 'react'
 import AgentMark from '@/components/AgentMark'
+import AppleAlertDialog from '@/components/AppleAlertDialog'
 import {
   agentLabel,
   currentBoard,
@@ -232,6 +233,7 @@ export function ExecTurnCard({ run, t, act }: { run: CoworkRun; t: T; act: Act }
   const ex = run.execution
   const ref = useRef<HTMLDivElement>(null)
   const [busy, setBusy] = useState(false)
+  const [confirmCleanup, setConfirmCleanup] = useState(false)
   useEffect(() => {
     if (run.phase === 'review') ref.current?.focus()
   }, [run.phase])
@@ -246,14 +248,28 @@ export function ExecTurnCard({ run, t, act }: { run: CoworkRun; t: T; act: Act }
     setBusy(false)
   }
   const cleanupBtn = !ex.cleaned && (
+    <>
     <button
       type="button"
       className="cw-btn danger"
       disabled={busy || running}
-      onClick={() => window.confirm(t('cowork.execConfirmCleanup')) && run1(window.api.cowork.execCleanup(run.id))}
+      onClick={() => setConfirmCleanup(true)}
     >
       {t('cowork.execCleanup')}
     </button>
+    <AppleAlertDialog
+      isOpen={confirmCleanup}
+      title={t('cowork.execCleanup')}
+      description={t('cowork.execConfirmCleanup')}
+      confirmLabel={t('cowork.execCleanup')}
+      cancelLabel={t('common.cancel')}
+      onClose={() => setConfirmCleanup(false)}
+      onConfirm={async () => {
+        setConfirmCleanup(false)
+        await run1(window.api.cowork.execCleanup(run.id))
+      }}
+    />
+    </>
   )
 
   if (run.phase === 'executing') {

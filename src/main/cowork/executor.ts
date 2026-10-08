@@ -43,7 +43,7 @@ export interface ExecHost {
   save(run: CoworkRun): void
   emit(run: CoworkRun): void
   resolveExecCli(agent: CoworkAgent): ExecCli | { error: string }
-  /** 同一個 repo 裡其他還沒結束的 run（每個 repo 同時只能一場在跑） */
+  /** Same-repo execution stays exclusive until its worktrees are merged or cleaned; planning may run concurrently. */
   otherActiveRun(run: CoworkRun): CoworkRun | undefined
   now(): number
 }
@@ -144,6 +144,7 @@ export class CoworkExecutor {
         if (!te || !task || te.status !== 'pending') continue
         if (!task.dependsOn.every((d) => ex.tasks[d]?.status === 'done')) continue
         if (Object.values(ex.tasks).some((x) => x.status === 'running' && x.worktree === te.worktree)) continue
+        if (board.tasks.some((other) => ex.tasks[other.id]?.status === 'running' && task.resources.some((r) => other.resources.includes(r)))) continue
         if (this.budgetLeft(run) <= 0) {
           this.pause(run, 'budget')
           return

@@ -5,13 +5,10 @@ import { useTranslation } from '@/i18n'
 import {
   COWORK_EFFORTS,
   agentLabel,
-  sanitizeModelChoice,
   type AgentModelChoice,
   type CoworkAgent,
   type CoworkModelCatalog
 } from '../../../../shared/cowork'
-
-const CUSTOM = '__custom__'
 
 // 所有元件共用一份：main 端第一次要跑 CLI 讀清單（agy 要連網），不必每個畫面各讀一次
 let catalogs: Promise<CoworkModelCatalog[]> | null = null
@@ -39,8 +36,9 @@ export function useModelCatalogs(): { catalogs: CoworkModelCatalog[] | null; ref
 /** 「預設」那一項的說明文字 */
 export function fallbackLabel(t: (k: string, p?: Record<string, string | number>) => string, cat: CoworkModelCatalog | undefined, agent: CoworkAgent): string {
   const cli = agentLabel(agent)
-  if (cat?.fallback.source === 'user-config' && cat.fallback.model) {
-    return t('cowork.modelDefaultUser', { cli, model: cat.fallback.model })
+  if (cat?.fallback.model) {
+    const model = cat.options.find((o) => o.id === cat.fallback.model || o.resolvedModel === cat.fallback.model)?.label || cat.fallback.model
+    return t('cowork.modelDefaultUser', { cli, model })
   }
   return t('cowork.modelDefaultCli', { cli })
 }
@@ -56,21 +54,19 @@ export default function ModelPicker({
   catalog,
   value,
   onChange,
+  automaticLabel,
   className = 'cw-select'
 }: {
   agent: CoworkAgent
   catalog: CoworkModelCatalog | undefined
   value: AgentModelChoice
   onChange: (v: AgentModelChoice) => void
+  automaticLabel?: string
   className?: string
 }): JSX.Element {
   const { t } = useTranslation()
   const options = catalog?.options || []
   const known = !value.model || options.some((o) => o.id === value.model)
-  const [custom, setCustom] = useState(!known)
-  useEffect(() => {
-    if (!known) setCustom(true)
-  }, [known])
 
   // 強度選項：codex 依所選（或預設）模型而定；其他家用固定清單
   const modelForEfforts = value.model || catalog?.fallback.model || ''
@@ -78,9 +74,7 @@ export default function ModelPicker({
   // 清單有給就照清單（空陣列 = 這個模型不支援強度）；agy 自訂的完整 ID 已含強度，不再給選項
   const efforts = opt?.efforts ?? (agent === 'antigravity' && value.model ? [] : COWORK_EFFORTS[agent])
   // agy 選了有強度變體的模型時沒有「預設」可選（見上方 onChange）
-  const mustPickEffort = agent === 'antigravity' && !!value.model && !!opt?.efforts?.length
-  // 不合法的名稱後端會清成預設：先在這裡標出來，不要默默換掉
-  const invalid = !!value.model && sanitizeModelChoice({ model: value.model, effort: '' }).model !== value.model
+  const mustPickEffort = !automaticLabel && agent === 'antigravity' && !!value.model && !!opt?.efforts?.length
   const fallbackEffort = catalog?.fallback.effort || options.find((o) => o.id === modelForEfforts)?.defaultEffort || ''
 
   return (
@@ -88,58 +82,44 @@ export default function ModelPicker({
       <select
         className={className}
         aria-label={t('cowork.modelLabel')}
-        value={custom ? CUSTOM : value.model}
+        title={options.find((o) => o.id === value.model)?.label || value.model || fallbackLabel(t, catalog, agent)}
+        value={value.model}
         onChange={(e) => {
-          if (e.target.value === CUSTOM) {
-            setCustom(true)
-            return
-          }
-          setCustom(false)
           // 換模型時，原本的強度若新模型不支援就清掉
           const next = options.find((o) => o.id === e.target.value)
           const keepEffort = !value.effort || !next?.efforts || next.efforts.includes(value.effort)
           let effort = keepEffort ? value.effort : ''
           // agy 的 ID 帶強度：選了有強度變體的模型就一定要有強度，送出去的 <模型>-<強度> 才會是清單裡存在的 ID
-          if (agent === 'antigravity' && next?.efforts?.length && !next.efforts.includes(effort)) {
+          if (!automaticLabel && agent === 'antigravity' && next?.efforts?.length && !next.efforts.includes(effort)) {
             effort = next.efforts.includes('medium') ? 'medium' : next.efforts[0]
           }
           onChange({ model: e.target.value, effort })
         }}
       >
         <option value="">{fallbackLabel(t, catalog, agent)}</option>
+        {/* Keep an existing choice visible while catalogs load or a model is removed; no free-text entry. */}
+        {!known && <option value={value.model} disabled>{value.model}</option>}
         {options.map((o) => (
           <option key={o.id} value={o.id}>
-            {o.label === o.id ? o.id : `${o.label} (${o.id})`}
+            {o.label}
           </option>
         ))}
-        <option value={CUSTOM}>{t('cowork.modelCustom')}</option>
       </select>
-      {custom && (
-        <input
-          className={`${className} cw-model-custom ${invalid ? 'invalid' : ''}`}
-          aria-invalid={invalid}
-          title={invalid ? t('cowork.modelInvalid') : undefined}
-          value={value.model}
-          placeholder={t('cowork.modelCustomPlaceholder')}
-          aria-label={t('cowork.modelCustomPlaceholder')}
-          onChange={(e) => onChange({ model: e.target.value.trim(), effort: value.effort })}
-        />
-      )}
       <select
         className={className}
         aria-label={t('cowork.effortLabel')}
         value={efforts.length ? value.effort : ''}
         disabled={efforts.length === 0}
-        title={efforts.length === 0 ? t('cowork.effortInModel') : undefined}
+        title={efforts.length === 0 ? t('cowork.effortInModel') : value.effort || automaticLabel || (fallbackEffort ? t('cowork.effortDefaultValue', { effort: fallbackEffort }) : t('cowork.effortDefault'))}
         onChange={(e) => onChange({ model: value.model, effort: e.target.value })}
       >
         {!mustPickEffort && (
         <option value="">
           {efforts.length === 0
             ? t('cowork.effortInModel')
-            : fallbackEffort
+            : automaticLabel || (fallbackEffort
               ? t('cowork.effortDefaultValue', { effort: fallbackEffort })
-              : t('cowork.effortDefault')}
+              : t('cowork.effortDefault'))}
         </option>
         )}
         {efforts.map((e) => (

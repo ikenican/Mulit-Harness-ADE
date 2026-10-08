@@ -7,7 +7,7 @@ import * as path from 'path'
 import { spawnSync, execFile } from 'child_process'
 import { CoworkService, CoworkError, type ResolvedCli } from '../cowork/orchestrator'
 import { readBaseline } from '../cowork/git'
-import { launchPlan } from '../cowork/runner'
+import { launchPlan, runProcess } from '../cowork/runner'
 import { findAgentCli } from '../ext/paths'
 import { loadSettings, saveSettings, isCliBypassPermissions } from './settings'
 import { buildInventory } from '../ext/inventory'
@@ -21,8 +21,8 @@ import {
   sanitizeModelChoices,
   AGY_DEFAULT_EFFORT,
   groupAgyModels,
+  parseClaudeModelCatalog,
   type CoworkModelCatalog,
-  type CoworkModelOption,
   type CoworkAgent,
   type CoworkCapability,
   type CoworkBaselineInfo,
@@ -119,13 +119,6 @@ export function readCodexUserModel(): { model: string; effort: string } {
 
 // ── 模型清單：給設定頁與開會表單選 ─────────────────────────────────
 
-const CLAUDE_ALIASES: CoworkModelOption[] = [
-  { id: 'fable', label: 'Fable' },
-  { id: 'opus', label: 'Opus' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' }
-]
-
 /** 跑一個列清單的 CLI 子命令；.cmd 一樣經 launchPlan 安全處理 */
 function runList(cmd: string, args: string[], env?: Record<string, string>): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -161,10 +154,20 @@ async function loadCatalog(agent: CoworkAgent): Promise<CoworkModelCatalog> {
   const cap = capabilities().find((c) => c.agent === agent)
   if (agent === 'claude') {
     const user = readClaudeUserModel()
-    return {
-      agent,
-      options: CLAUDE_ALIASES,
-      fallback: { model: user, effort: '', source: user ? 'user-config' : 'cli-default' }
+    const fallback = { model: user, effort: '', source: user ? ('user-config' as const) : ('cli-default' as const) }
+    if (!cap?.path) return { agent, options: [], fallback, error: 'not-installed' }
+    try {
+      const result = await runProcess({
+        command: cap.path,
+        args: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence', '--safe-mode', '--strict-mcp-config'],
+        cwd: os.homedir(),
+        stdin: JSON.stringify({ type: 'control_request', request_id: 'cowork-models', request: { subtype: 'initialize' } }) + '\n',
+        timeoutMs: 20000, maxBytes: 1024 * 1024
+      })
+      if (result.spawnError || result.timedOut || result.code !== 0) throw new Error(result.spawnError || 'Could not read Claude models')
+      return parseClaudeModelCatalog(result.stdout, user)
+    } catch (e) {
+      return { agent, options: [], fallback, error: (e as Error).message.slice(0, 200) }
     }
   }
   if (agent === 'codex') {
@@ -208,6 +211,7 @@ async function loadCatalog(agent: CoworkAgent): Promise<CoworkModelCatalog> {
 }
 
 const catalogCache = new Map<CoworkAgent, { at: number; value: Promise<CoworkModelCatalog> }>()
+const knownCatalogs = new Map<CoworkAgent, CoworkModelCatalog>()
 const CATALOG_TTL_MS = 10 * 60 * 1000
 
 function modelCatalog(agent: CoworkAgent, force: boolean): Promise<CoworkModelCatalog> {
@@ -216,7 +220,7 @@ function modelCatalog(agent: CoworkAgent, force: boolean): Promise<CoworkModelCa
   const value = loadCatalog(agent)
   catalogCache.set(agent, { at: Date.now(), value })
   // 失敗的結果不要快取太久
-  value.then((c) => c.error && catalogCache.delete(agent)).catch(() => catalogCache.delete(agent))
+  value.then((c) => { knownCatalogs.set(agent, c); if (c.error) catalogCache.delete(agent) }).catch(() => catalogCache.delete(agent))
   return value
 }
 
@@ -245,9 +249,10 @@ function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
   if (!cap) return { error: 'unknown agent' }
   if (!cap.enabled) return { error: 'disabled in Settings' }
   if (!cap.planning || !cap.path) return { error: cap.reason || 'not available' }
+  const modelEfforts = Object.fromEntries((knownCatalogs.get(agent)?.options || []).filter((o) => o.efforts !== undefined).flatMap((o) => [o.id, o.resolvedModel].filter(Boolean).map((id) => [id!, o.efforts!])))
   if (agent === 'antigravity') {
     try {
-      return { command: cap.path, env: prepareAgyHome() }
+      return { command: cap.path, env: prepareAgyHome(), modelEfforts }
     } catch (e) {
       return { error: `could not prepare the isolated Antigravity home: ${(e as Error).message}` }
     }
@@ -259,10 +264,11 @@ function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
       command: cap.path,
       windowsSandbox: process.platform === 'win32' ? readCodexWindowsSandbox() : null,
       defaultModel: user.model,
-      defaultEffort: user.effort
+      defaultEffort: user.effort,
+      modelEfforts
     }
   }
-  return { command: cap.path }
+  return { command: cap.path, modelEfforts, defaultModel: readClaudeUserModel() || knownCatalogs.get(agent)?.fallback.model || '' }
 }
 
 /** 背景執行：使用者平常的 CLI 與完整設定（MCP／skill／外掛／hook 照常載入），不用規劃時的隔離家目錄 */
@@ -398,7 +404,7 @@ export function registerCoworkHandlers(): void {
     'cowork:start',
     async (
       event,
-      req: { prompt: string; chair: CoworkAgent; participants: CoworkAgent[]; language: 'en' | 'zh-TW'; models?: unknown }
+      req: { prompt: string; chair: CoworkAgent; participants: CoworkAgent[]; language: 'en' | 'zh-TW'; models?: unknown; mode?: 'discussion' | 'project'; autoEffort?: boolean; summarizer?: CoworkAgent; summarizeEachRound?: boolean }
     ) =>
       wrap(async () => {
         const settings = loadSettings()
@@ -406,8 +412,12 @@ export function registerCoworkHandlers(): void {
         const participants = Array.isArray(req?.participants) ? req.participants.filter((a) => COWORK_AGENTS.includes(a)) : []
         const workspace = getWorkspaceForEvent(event)
         const run = await svc().start({
+          mode: req?.mode === 'discussion' ? 'discussion' : 'project',
+          autoEffort: req?.autoEffort !== false,
+          summarizer: req?.summarizer || (cw.summarizer && participants.includes(cw.summarizer) ? cw.summarizer : undefined),
+          summarizeEachRound: req?.summarizeEachRound ?? cw.summarizeEachRound,
           workspace,
-          skills: readSelectedSkills(workspace, cw.skills),
+          skills: req?.mode === 'discussion' ? [] : readSelectedSkills(workspace, cw.skills),
           projectInstructions: cw.projectInstructions,
           prompt: req?.prompt,
           chair: req?.chair,
@@ -427,14 +437,18 @@ export function registerCoworkHandlers(): void {
         if (
           cw.chair !== run.chair ||
           cw.participants.join() !== run.participants.join() ||
-          JSON.stringify(cw.models) !== JSON.stringify(models)
+          JSON.stringify(cw.models) !== JSON.stringify(models) ||
+          (run.discussion && (cw.summarizer !== run.discussion.summarizer || cw.summarizeEachRound !== run.discussion.summarizeEachRound))
         ) {
-          saveSettings({ ...loadSettings(), cowork: { ...cw, chair: run.chair, participants: run.participants, models } })
+          saveSettings({ ...loadSettings(), cowork: { ...cw, chair: run.chair, participants: run.participants, models, ...(run.discussion ? { summarizer: run.discussion.summarizer || null, summarizeEachRound: run.discussion.summarizeEachRound === true } : {}) } })
         }
         return run
       })
   )
   ipcMain.handle('cowork:cancel', async (_e, runId: string) => wrap(() => svc().cancel(String(runId))))
+  ipcMain.handle('cowork:discuss', async (_e, runId: string, text: string) => wrap(() => svc().discuss(String(runId), String(text ?? ''))))
+  ipcMain.handle('cowork:summarizer', async (_e, runId: string, agent: CoworkAgent) => wrap(() => svc().setSummarizer(String(runId), agent)))
+  ipcMain.handle('cowork:summarize', async (_e, runId: string, conclude?: boolean) => wrap(() => svc().summarizeDiscussion(String(runId), conclude === true)))
   ipcMain.handle('cowork:retry', async (_e, runId: string) => wrap(() => svc().retry(String(runId))))
   ipcMain.handle('cowork:drop', async (_e, runId: string) => wrap(() => svc().dropFailedReviewers(String(runId))))
   ipcMain.handle('cowork:note', async (_e, runId: string, text: string) => wrap(() => svc().addNote(String(runId), String(text ?? ''))))
