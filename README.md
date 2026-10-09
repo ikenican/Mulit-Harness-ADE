@@ -170,6 +170,10 @@ What you can do from the phone:
 - **Approval cards.** When an agent stops to ask, the question and its options become
   buttons, and *Running / Waiting / Idle* is decided by the computer, not by the phone's
   clock.
+- **Cowork.** Each workspace has a *Cowork* tile: list meetings, start one (mode,
+  participants, chair; models come from the desktop settings), follow the discussion and
+  task board live, and answer, approve, retry, run, pause, merge or clean up from the phone.
+  Editing the board and picking models stay on the desktop.
 - **Up to three computers, one at a time.** The phone remembers up to three computers. The
   title on the home screen is a dropdown that switches between them **without reloading** —
   the app just points its WebSocket at the computer you picked. Add one by its LAN address
@@ -399,6 +403,7 @@ docs/cowork-architecture.md  Cowork 功能流程與模組邊界
 - **以工作區為單位**：電腦上每個專案視窗在手機上就是一個區塊，各自有自己的終端、交接筆記（**該工作區**的 `.project-memory/handoff.md`）與 Git 狀態。最近用過但目前沒有視窗的工作區列在**其他工作區**，點一下讓電腦開起來並直接跳到「新增終端」。
 - **閱讀／終端／預覽**：「閱讀」把終端輸出整理成手機讀得懂的樣子（接回軟換行、去掉 TUI 框線）；「終端」是真正可以打字的 xterm，預設自動配合手機寬度，不需要左右拖（在 ⋯ 選單關掉就回到電腦的寬度）；「預覽」在終端印出本機 dev server 網址時出現，把那個網站以 HTTPS 代理過來顯示。
 - **審批卡片**：agent 停下來問你時，問題與選項會變成按鈕；「執行中／等你回覆／閒置」由電腦判定，不是用手機的時鐘去猜。
+- **Cowork**：每個工作區有 Cowork 入口，可看會議列表、開新會議（模式、與會者、主席；模型沿用桌面設定），即時跟著討論與任務板，並在手機上追問、核准、重試、執行、暫停、合併或清理。任務板編輯與模型選擇仍在桌面。
 - **最多三台電腦、一次連一台**：手機會記住最多三台電腦，主畫面的標題就是切換用的下拉選單，**切換不會重新載入**——App 只是把 WebSocket 指向你選的那台。用區網位址新增（設定 →「電腦」→ 新增電腦，或在配對畫面直接加），各配對一次，同一份清單也能改名與移除。兩件要知道的事：每台電腦的憑證要在手機上各裝一次（連不到時配對畫面會直接給你那台的憑證安裝頁連結）；通知只會來自送來這個 App 的那台電腦，因為 Web Push 訂閱綁在單一網址上。
 
 安全設計：
