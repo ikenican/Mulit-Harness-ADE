@@ -9,6 +9,7 @@ electron.vite.config.*.mjs
 
 # 連線憑證（OS 加密，仍不得進版控）
 .workbench/credentials.enc
+.workbench-linux/
 release/
 
 # 每台機器各自的 runtime state，不進版控（extensions.yaml 是共用範本，保留）
