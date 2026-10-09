@@ -15,6 +15,7 @@ import { pairOverWs, RemoteConnection, type ConnState } from './conn'
 import { disablePush, enablePush, isStandalone, pushState, pushSupported, registerServiceWorker } from './api'
 import TerminalView from './TerminalView'
 import { FilePane, StatusPane } from './WorkspacePanes'
+import CoworkView from './CoworkView'
 import { ago, getLangPref, onLangChange, setLangPref, t, type LangPref } from './i18n'
 import { getThemePref, setThemePref, type ThemePref } from './theme'
 import { questionPreview } from './prompt'
@@ -27,6 +28,7 @@ import {
   IDesktop,
   IDoc,
   IGear,
+  IHand,
   IPhone,
   IPlus,
   IShare,
@@ -59,6 +61,7 @@ type View =
   | { kind: 'git'; windowId: number }
   | { kind: 'status'; windowId: number }
   | { kind: 'file'; windowId: number; path?: string }
+  | { kind: 'cowork'; windowId: number }
 
 function sessionFromHash(): string | null {
   return /[#&]s=([\w-]+)/.exec(location.hash)?.[1] ?? null
@@ -478,6 +481,9 @@ function Main({
   } else if (view.kind === 'handoff' || view.kind === 'git') {
     const w = windows.find((x) => x.id === view.windowId)
     screen = <DetailView conn={conn} view={view} workspace={w?.workspaceName || ''} hostName={hostName} onBack={goHome} />
+  } else if (view.kind === 'cowork') {
+    const w = windows.find((x) => x.id === view.windowId)
+    screen = <CoworkView key={view.windowId} conn={conn} windowId={view.windowId} workspace={w?.workspaceName || ''} hostName={hostName} onBack={goHome} />
   } else if (view.kind === 'status' || view.kind === 'file') {
     const w = windows.find(x => x.id === view.windowId)
     const windowId = view.windowId
@@ -778,6 +784,12 @@ function Home({
                     <IBranch size={20} />
                   </IconMark>
                   {t('git')}
+                </button>
+                <button className="bubble tile press" onClick={() => onOpen({ kind: 'cowork', windowId: w.id })}>
+                  <IconMark tone="accent">
+                    <IHand size={20} />
+                  </IconMark>
+                  {t('cowork')}
                 </button>
               </div>
             </details>

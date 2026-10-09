@@ -1,4 +1,5 @@
 import type { ClientMessage, ServerMessage } from '../../shared/remoteProtocol'
+import type { CoworkResult } from '../../shared/cowork'
 
 // 與桌面 Remote Bridge 的 WebSocket 連線。iOS 把 App 切到背景時連線一定會斷，
 // 所以這裡的重點是「回到前景立刻重連、重新 attach 目前的終端」。
@@ -100,6 +101,26 @@ export class RemoteConnection {
 
   send(msg: ClientMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg))
+  }
+
+  private reqId = 0
+
+  /** Cowork 操作（與桌面 window.api.cowork 同名同參數）；斷線或逾時回 ok:false，不丟例外 */
+  cowork<T = unknown>(windowId: number, op: string, ...args: unknown[]): Promise<CoworkResult<T>> {
+    if (this.ws?.readyState !== WebSocket.OPEN) return Promise.resolve({ ok: false, code: 'offline' })
+    const reqId = ++this.reqId
+    return new Promise((resolve) => {
+      const done = (r: CoworkResult<T>): void => {
+        window.clearTimeout(timer)
+        off()
+        resolve(r)
+      }
+      const timer = window.setTimeout(() => done({ ok: false, code: 'timeout' }), 60_000)
+      const off = this.onMessage((m) => {
+        if (m.t === 'cowork' && m.reqId === reqId) done(m.result as CoworkResult<T>)
+      })
+      this.send({ t: 'cowork', reqId, windowId, op, args })
+    })
   }
 
   private setState(s: ConnState): void {

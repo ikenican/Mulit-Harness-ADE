@@ -1355,6 +1355,68 @@ p {
 .composer textarea::placeholder {
   color: var(--label-3);
 }
+
+/* ── Cowork ── */
+.cw-card {
+  display: block;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+.cw-card.cw-user {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.cw-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cw-head .t-foot {
+  margin-left: auto;
+}
+details.cw-card > summary {
+  list-style: none;
+}
+.markdown.cw-md {
+  padding: 4px 0 0;
+}
+.cw-prompt {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+}
+.cw-pre {
+  font: 0.75rem var(--mono);
+  overflow-x: auto;
+}
+.cw-input {
+  border: 0;
+  outline: 0;
+  background: none;
+  resize: vertical;
+  font-size: max(1rem, 16px);
+}
+.cw-agent {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+}
+.cw-agent:disabled {
+  opacity: 0.45;
+}
+.cw-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cw-actions .btn {
+  flex: 1 1 40%;
+  width: auto;
+  min-height: 44px;
+}
 .send {
   display: grid;
   place-items: center;

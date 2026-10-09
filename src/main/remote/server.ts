@@ -51,6 +51,8 @@ import { generateVapidKeys, sendPush, type PushSubscriptionJSON, type VapidKeys 
 import { PreviewProxy } from './preview'
 import { RemoteFiles, listWorkspaceFiles, readWorkspaceText } from './files'
 import { scanBgTasks } from '../ipc/dashboard'
+import { coworkEvents, invokeCowork } from '../ipc/cowork'
+import type { CoworkRun } from '../../shared/cowork'
 
 // Remote Bridge：讓同一個區網的 iPhone 遠端操作桌面上的 CLI 終端。
 //
@@ -289,6 +291,7 @@ export class RemoteBridge {
       ptyEvents.on('approval', this.onApproval)
       ptyEvents.on('exit', this.onExit)
       ptyEvents.on('activity', this.onActivity)
+      coworkEvents.on('update', this.onCowork)
       audit('bridge.start', { port, addresses: this.addresses })
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : String(e)
@@ -305,6 +308,7 @@ export class RemoteBridge {
     ptyEvents.off('approval', this.onApproval)
     ptyEvents.off('exit', this.onExit)
     ptyEvents.off('activity', this.onActivity)
+    coworkEvents.off('update', this.onCowork)
     for (const c of this.clients) this.dropClient(c, 1001)
     this.clients.clear()
     this.wss?.close()
@@ -716,6 +720,11 @@ export class RemoteBridge {
         return this.send(c, { t: 'status', windowId: msg.windowId, status: status && status.workspace === entry?.workspaceRoot ? status : null,
           bgTasks: entry ? scanBgTasks(entry.workspaceRoot) : [], error: entry ? undefined : 'no workspace' })
       }
+      case 'cowork': {
+        const ws = this.workspaceOf(msg.windowId)
+        const result = ws ? await invokeCowork(String(msg.op), ws, msg.args) : { ok: false as const, code: 'no-workspace' }
+        return this.send(c, { t: 'cowork', reqId: msg.reqId, result })
+      }
       case 'files': {
         const ws = this.workspaceOf(msg.windowId)
         try {
@@ -839,6 +848,11 @@ export class RemoteBridge {
   // 執行中／閒置只在翻轉時廣播，不必為了狀態更新整包 state（buildState 會讀設定檔與 agents/*.yaml）
   private onActivity = (id: string, busy: boolean): void => {
     this.broadcast({ t: 'activity', id, busy })
+  }
+
+  // Cowork 的 run 有變化就轉給手機；context 是 skill／專案指示全文，手機用不到，不必每次都送
+  private onCowork = (run: CoworkRun): void => {
+    this.broadcast({ t: 'coworkRun', run: { ...run, context: undefined } }, (c) => c.visible)
   }
 
   private onApproval = (id: string): void => {

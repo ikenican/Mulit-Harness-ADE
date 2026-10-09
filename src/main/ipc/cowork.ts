@@ -5,6 +5,7 @@ import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { spawnSync, execFile } from 'child_process'
+import { EventEmitter } from 'events'
 import { CoworkService, CoworkError, type ResolvedCli } from '../cowork/orchestrator'
 import { readBaseline } from '../cowork/git'
 import { launchPlan, runProcess } from '../cowork/runner'
@@ -354,7 +355,11 @@ async function baselineInfo(workspace: string): Promise<CoworkBaselineInfo> {
 
 let service: CoworkService | null = null
 
+/** run 有變化就發 'update'（Remote Bridge 轉給手機） */
+export const coworkEvents = new EventEmitter()
+
 function broadcast(run: CoworkRun): void {
+  coworkEvents.emit('update', run)
   for (const w of BrowserWindow.getAllWindows()) {
     try {
       if (!w.isDestroyed()) w.webContents.send('cowork:update', run)
@@ -384,6 +389,101 @@ export function shutdownCowork(): void {
   service?.shutdown()
 }
 
+type StartRequest = { prompt: string; chair: CoworkAgent; participants: CoworkAgent[]; language: 'en' | 'zh-TW'; models?: unknown; mode?: 'discussion' | 'project'; autoEffort?: boolean; summarizer?: CoworkAgent; summarizeEachRound?: boolean }
+
+async function startRun(workspace: string, req: StartRequest): Promise<CoworkRun> {
+  const settings = loadSettings()
+  const cw = sanitizeCoworkSettings(settings.cowork)
+  const participants = Array.isArray(req?.participants) ? req.participants.filter((a) => COWORK_AGENTS.includes(a)) : []
+  const run = await svc().start({
+    mode: req?.mode === 'discussion' ? 'discussion' : 'project',
+    autoEffort: req?.autoEffort !== false,
+    summarizer: req?.summarizer || (cw.summarizer && participants.includes(cw.summarizer) ? cw.summarizer : undefined),
+    summarizeEachRound: req?.summarizeEachRound ?? cw.summarizeEachRound,
+    workspace,
+    skills: req?.mode === 'discussion' ? [] : readSelectedSkills(workspace, cw.skills),
+    projectInstructions: cw.projectInstructions,
+    prompt: req?.prompt,
+    chair: req?.chair,
+    participants,
+    chairExecutes: cw.chairExecutes,
+    language: req?.language === 'zh-TW' ? 'zh-TW' : 'en',
+    limits: cw.limits,
+    // 手機不帶模型：沿用設定裡記住的，免得下面「記住選擇」把它清掉
+    models: sanitizeModelChoices(req?.models ?? cw.models)
+  })
+  // 主席、與會者與各家模型：開會時的選擇記住，下次預設帶出來（cowork.md §8）
+  // 這場與會者的選擇覆蓋舊值；選回「預設」就把舊值清掉
+  const models = { ...cw.models }
+  for (const a of run.participants) {
+    if (run.models[a]) models[a] = run.models[a]
+    else delete models[a]
+  }
+  if (
+    cw.chair !== run.chair ||
+    cw.participants.join() !== run.participants.join() ||
+    JSON.stringify(cw.models) !== JSON.stringify(models) ||
+    (run.discussion && (cw.summarizer !== run.discussion.summarizer || cw.summarizeEachRound !== run.discussion.summarizeEachRound))
+  ) {
+    saveSettings({ ...loadSettings(), cowork: { ...cw, chair: run.chair, participants: run.participants, models, ...(run.discussion ? { summarizer: run.discussion.summarizer || null, summarizeEachRound: run.discussion.summarizeEachRound === true } : {}) } })
+  }
+  return run
+}
+
+/**
+ * 每個 Cowork 操作：第一個參數是呼叫端的工作區，其餘照 preload 傳的順序。
+ * 桌面走 ipcMain（cowork:<key>），手機走 Remote Bridge（invokeCowork）；兩邊同一份。
+ */
+const ops: Record<string, (workspace: string, ...args: any[]) => unknown> = {
+  capabilities: async (workspace, force?: boolean) => {
+    const cw = sanitizeCoworkSettings(loadSettings().cowork)
+    return { agents: capabilities(!!force), baseline: await baselineInfo(workspace), defaults: { chair: cw.chair, participants: cw.participants } }
+  },
+  models: (_w, force?: boolean) => Promise.all(COWORK_AGENTS.map((a) => modelCatalog(a, !!force))),
+  list: (workspace) => svc().list(workspace),
+  get: (_w, runId: string) => svc().get(String(runId)),
+  start: (workspace, req: StartRequest) => startRun(workspace, req),
+  cancel: (_w, runId: string) => svc().cancel(String(runId)),
+  discuss: (_w, runId: string, text: string) => svc().discuss(String(runId), String(text ?? '')),
+  summarizer: (_w, runId: string, agent: CoworkAgent) => svc().setSummarizer(String(runId), agent),
+  summarize: (_w, runId: string, conclude?: boolean) => svc().summarizeDiscussion(String(runId), conclude === true),
+  retry: (_w, runId: string) => svc().retry(String(runId)),
+  drop: (_w, runId: string) => svc().dropFailedReviewers(String(runId)),
+  note: (_w, runId: string, text: string) => svc().addNote(String(runId), String(text ?? '')),
+  feedback: (_w, runId: string, text: string) => svc().feedback(String(runId), String(text ?? '')),
+  editBoard: (_w, runId: string, basePlanRevision: number, tasks: unknown) => svc().editBoard(String(runId), Number(basePlanRevision), tasks),
+  dismiss: (_w, runId: string) => svc().dismissUnresolved(String(runId)),
+  approve: (_w, runId: string, planRevision: number) => svc().approve(String(runId), Number(planRevision)),
+  raiseLimits: (_w, runId: string, limits: { maxPlanningCalls?: number; maxPlanningMinutes?: number }) =>
+    svc().raiseLimits(String(runId), {
+      maxPlanningCalls: Number(limits?.maxPlanningCalls) || 0,
+      maxPlanningMinutes: Number(limits?.maxPlanningMinutes) || 0
+    }),
+  logDispatch: (_w, runId: string, taskId: string, target: string) => svc().logDispatch(String(runId), String(taskId), String(target ?? '')),
+  delete: (_w, runId: string) => svc().delete(String(runId)),
+  // 背景執行：權限照使用者目前的 Bypass 設定（開始時記下來，整場沿用）
+  execStart: (_w, runId: string, opts: { mode?: string; linkDeps?: boolean }) =>
+    svc().execStart(String(runId), {
+      mode: opts?.mode === 'parallel' ? 'parallel' : 'sequential',
+      linkDeps: opts?.linkDeps !== false,
+      bypass: isCliBypassPermissions()
+    }),
+  execMessage: (_w, runId: string, taskId: string, text: string) => svc().execMessage(String(runId), String(taskId), String(text ?? '')),
+  execRetry: (_w, runId: string, taskId: string) => svc().execRetry(String(runId), String(taskId)),
+  execPause: (_w, runId: string) => svc().execPause(String(runId)),
+  execResume: (_w, runId: string) => svc().execResume(String(runId)),
+  execMerge: (_w, runId: string) => svc().execMerge(String(runId)),
+  execCleanup: (_w, runId: string) => svc().execCleanup(String(runId)),
+  bypass: () => isCliBypassPermissions()
+}
+
+/** 手機（Remote Bridge）呼叫 Cowork：workspace 由桌面依視窗決定，不信任手機傳路徑 */
+export function invokeCowork(op: string, workspace: string, args: unknown[]): Promise<CoworkResult<unknown>> {
+  const fn = Object.hasOwn(ops, op) ? ops[op] : null
+  if (!fn || !Array.isArray(args)) return Promise.resolve({ ok: false, code: 'unknown-op' })
+  return wrap(() => fn(workspace, ...args))
+}
+
 export function registerCoworkHandlers(): void {
   service = new CoworkService({ dataDir: path.join(app.getPath('userData'), 'cowork'), resolveCli, resolveExecCli, emit: broadcast })
   try {
@@ -391,106 +491,7 @@ export function registerCoworkHandlers(): void {
   } catch (e) {
     console.error('[cowork] failed to load runs', e)
   }
-
-  ipcMain.handle('cowork:capabilities', async (event, force?: boolean) =>
-    wrap(async () => ({ agents: capabilities(!!force), baseline: await baselineInfo(getWorkspaceForEvent(event)) }))
-  )
-  ipcMain.handle('cowork:models', async (_e, force?: boolean) =>
-    wrap(() => Promise.all(COWORK_AGENTS.map((a) => modelCatalog(a, !!force))))
-  )
-  ipcMain.handle('cowork:list', async (event) => wrap(() => svc().list(getWorkspaceForEvent(event))))
-  ipcMain.handle('cowork:get', async (_e, runId: string) => wrap(() => svc().get(String(runId))))
-  ipcMain.handle(
-    'cowork:start',
-    async (
-      event,
-      req: { prompt: string; chair: CoworkAgent; participants: CoworkAgent[]; language: 'en' | 'zh-TW'; models?: unknown; mode?: 'discussion' | 'project'; autoEffort?: boolean; summarizer?: CoworkAgent; summarizeEachRound?: boolean }
-    ) =>
-      wrap(async () => {
-        const settings = loadSettings()
-        const cw = sanitizeCoworkSettings(settings.cowork)
-        const participants = Array.isArray(req?.participants) ? req.participants.filter((a) => COWORK_AGENTS.includes(a)) : []
-        const workspace = getWorkspaceForEvent(event)
-        const run = await svc().start({
-          mode: req?.mode === 'discussion' ? 'discussion' : 'project',
-          autoEffort: req?.autoEffort !== false,
-          summarizer: req?.summarizer || (cw.summarizer && participants.includes(cw.summarizer) ? cw.summarizer : undefined),
-          summarizeEachRound: req?.summarizeEachRound ?? cw.summarizeEachRound,
-          workspace,
-          skills: req?.mode === 'discussion' ? [] : readSelectedSkills(workspace, cw.skills),
-          projectInstructions: cw.projectInstructions,
-          prompt: req?.prompt,
-          chair: req?.chair,
-          participants,
-          chairExecutes: cw.chairExecutes,
-          language: req?.language === 'zh-TW' ? 'zh-TW' : 'en',
-          limits: cw.limits,
-          models: sanitizeModelChoices(req?.models)
-        })
-        // 主席、與會者與各家模型：開會時的選擇記住，下次預設帶出來（cowork.md §8）
-        // 這場與會者的選擇覆蓋舊值；選回「預設」就把舊值清掉
-        const models = { ...cw.models }
-        for (const a of run.participants) {
-          if (run.models[a]) models[a] = run.models[a]
-          else delete models[a]
-        }
-        if (
-          cw.chair !== run.chair ||
-          cw.participants.join() !== run.participants.join() ||
-          JSON.stringify(cw.models) !== JSON.stringify(models) ||
-          (run.discussion && (cw.summarizer !== run.discussion.summarizer || cw.summarizeEachRound !== run.discussion.summarizeEachRound))
-        ) {
-          saveSettings({ ...loadSettings(), cowork: { ...cw, chair: run.chair, participants: run.participants, models, ...(run.discussion ? { summarizer: run.discussion.summarizer || null, summarizeEachRound: run.discussion.summarizeEachRound === true } : {}) } })
-        }
-        return run
-      })
-  )
-  ipcMain.handle('cowork:cancel', async (_e, runId: string) => wrap(() => svc().cancel(String(runId))))
-  ipcMain.handle('cowork:discuss', async (_e, runId: string, text: string) => wrap(() => svc().discuss(String(runId), String(text ?? ''))))
-  ipcMain.handle('cowork:summarizer', async (_e, runId: string, agent: CoworkAgent) => wrap(() => svc().setSummarizer(String(runId), agent)))
-  ipcMain.handle('cowork:summarize', async (_e, runId: string, conclude?: boolean) => wrap(() => svc().summarizeDiscussion(String(runId), conclude === true)))
-  ipcMain.handle('cowork:retry', async (_e, runId: string) => wrap(() => svc().retry(String(runId))))
-  ipcMain.handle('cowork:drop', async (_e, runId: string) => wrap(() => svc().dropFailedReviewers(String(runId))))
-  ipcMain.handle('cowork:note', async (_e, runId: string, text: string) => wrap(() => svc().addNote(String(runId), String(text ?? ''))))
-  ipcMain.handle('cowork:feedback', async (_e, runId: string, text: string) =>
-    wrap(() => svc().feedback(String(runId), String(text ?? '')))
-  )
-  ipcMain.handle('cowork:editBoard', async (_e, runId: string, basePlanRevision: number, tasks: unknown) =>
-    wrap(() => svc().editBoard(String(runId), Number(basePlanRevision), tasks))
-  )
-  ipcMain.handle('cowork:dismiss', async (_e, runId: string) => wrap(() => svc().dismissUnresolved(String(runId))))
-  ipcMain.handle('cowork:approve', async (_e, runId: string, planRevision: number) =>
-    wrap(() => svc().approve(String(runId), Number(planRevision)))
-  )
-  ipcMain.handle('cowork:raiseLimits', async (_e, runId: string, limits: { maxPlanningCalls?: number; maxPlanningMinutes?: number }) =>
-    wrap(() =>
-      svc().raiseLimits(String(runId), {
-        maxPlanningCalls: Number(limits?.maxPlanningCalls) || 0,
-        maxPlanningMinutes: Number(limits?.maxPlanningMinutes) || 0
-      })
-    )
-  )
-  ipcMain.handle('cowork:logDispatch', async (_e, runId: string, taskId: string, target: string) =>
-    wrap(() => svc().logDispatch(String(runId), String(taskId), String(target ?? '')))
-  )
-  ipcMain.handle('cowork:delete', async (_e, runId: string) => wrap(() => svc().delete(String(runId))))
-  // 背景執行：權限照使用者目前的 Bypass 設定（開始時記下來，整場沿用）
-  ipcMain.handle('cowork:execStart', async (_e, runId: string, opts: { mode?: string; linkDeps?: boolean }) =>
-    wrap(() =>
-      svc().execStart(String(runId), {
-        mode: opts?.mode === 'parallel' ? 'parallel' : 'sequential',
-        linkDeps: opts?.linkDeps !== false,
-        bypass: isCliBypassPermissions()
-      })
-    )
-  )
-  ipcMain.handle('cowork:execMessage', async (_e, runId: string, taskId: string, text: string) =>
-    wrap(() => svc().execMessage(String(runId), String(taskId), String(text ?? '')))
-  )
-  ipcMain.handle('cowork:execRetry', async (_e, runId: string, taskId: string) => wrap(() => svc().execRetry(String(runId), String(taskId))))
-  ipcMain.handle('cowork:execPause', async (_e, runId: string) => wrap(() => svc().execPause(String(runId))))
-  ipcMain.handle('cowork:execResume', async (_e, runId: string) => wrap(() => svc().execResume(String(runId))))
-  ipcMain.handle('cowork:execMerge', async (_e, runId: string) => wrap(() => svc().execMerge(String(runId))))
-  ipcMain.handle('cowork:execCleanup', async (_e, runId: string) => wrap(() => svc().execCleanup(String(runId))))
-  ipcMain.handle('cowork:bypass', async () => wrap(() => isCliBypassPermissions()))
+  for (const [op, fn] of Object.entries(ops)) {
+    ipcMain.handle(`cowork:${op}`, async (event, ...args) => wrap(() => fn(getWorkspaceForEvent(event), ...args)))
+  }
 }
