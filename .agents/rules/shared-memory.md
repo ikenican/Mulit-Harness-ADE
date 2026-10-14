@@ -60,6 +60,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 - Bug fix: the phone `call()` treated ops that return nothing (raiseLimits, delete…) as failures, so "Raise Limits and Retry" never retried. Now success returns null.
 - `capabilities` op (`src/main/ipc/cowork.ts`) `defaults` also carries models, summarizer, summarizeEachRound and limits.
 - Model/effort rules extracted to `modelPickerState` / `pickModel` in `src/shared/cowork.ts`; the desktop `ModelPicker.tsx` uses them too (same behaviour).
+- Desktop and phone Claude model names: in Claude Code 2.1.296, `displayName` holds the name ("Opus 5.5") and `description` holds only the blurb, so `parseClaudeModelCatalog` showed the blurb as the name. It now takes the name from `description` only when it contains " · " (old format), otherwise from `displayName`. A test for the new format was added to check-cowork.mts and verified against real CLI output.
 - `scripts/check-remote-cowork.cjs`: opens Cowork through the New Terminal sheet, asserts no tile, checks the new options and start args, skip speaker, raise→retry, and delete. The fake desktop now omits `data` for void ops like the real one.
 
 ## Validation
