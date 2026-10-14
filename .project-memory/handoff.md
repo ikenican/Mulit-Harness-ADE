@@ -2,10 +2,10 @@
 
 - Agent: Claude Code
 - Updated: 2026-10-14 Asia/Taipei
-- Branch: master (da12ebf), source changes UNCOMMITTED in the main workspace. Not released.
+- Branch: feat/phone-cowork-parity (source commit 0ad67ea), pushed; PR #44 open against master (https://github.com/zkylek1212-k/Mulit-Harness-ADE/pull/44). Not merged, not released. User authorised commit/push/PR on 2026-10-14.
 - Task: the user asked that phone Cowork offer the same options as desktop, and that Cowork open from the terminal's "new" menu instead of being a separate tile.
 
-## Done this session (uncommitted)
+## Done this session (in PR #44)
 - Phone entry point: removed the per-workspace Cowork tile (`src/renderer/remote/App.tsx`); the "New Terminal" sheet now has a Cowork section (`onCowork` → existing `cowork` view), same as the desktop terminal "+" popover.
 - Phone new-meeting form (`src/renderer/remote/CoworkView.tsx`) now matches desktop StartForm: mode description, per-agent unavailable reason + agy slow hint, Make Chair, per-agent model + effort selects (via the `models` op), recorder + summary timing (discussion), auto-effort switch, project baseline (branch@commit, dirty files, warnings), limits line, per-mode start label, "Open It" for `active-run-exists`. Start now sends models/autoEffort/summarizer/summarizeEachRound like desktop.
 - Phone run screen: recorder select in discussions, "Skip {name}" on a failed speaker, "Turn into Project Plan" after a conclusion (uses `discussionProjectPrompt`), Delete Meeting for finished runs.
@@ -21,7 +21,7 @@
 - Not tested on a real iPhone.
 
 ## Next / limits
-- The user has not yet decided to commit, push or release this.
+- Next: review/merge PR #44 (needs user OK), then a release if wanted. Local master still has the two memory commits 1c8c677/e5b32f2 unpushed; they are also on the PR branch, so merging the PR brings them in.
 - Running Cowork meetings no longer have a home-screen entry; reach them via New Terminal → Cowork (list). Could list active meetings in the workspace group if wanted.
 - Board editing remains desktop-only. Not ported to apps/linux (DEC-011 manual port).
 - Long effort labels truncate in the narrow selects ("Automatic (l…").
