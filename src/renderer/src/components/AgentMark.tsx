@@ -1,7 +1,7 @@
 import type { AgentId } from '../../../preload/index'
 
 interface AgentMarkProps {
-  agent: AgentId | 'shell' | 'powershell' | 'cmd' | 'bash'
+  agent: AgentId | 'custom-agent' | 'shell' | 'powershell' | 'cmd' | 'bash'
   size?: number
   className?: string
 }

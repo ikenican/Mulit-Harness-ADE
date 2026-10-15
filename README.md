@@ -33,6 +33,14 @@ React + Vite.
 - **iPhone Remote Control (LAN)** — watch and answer your CLI agents from an iPhone on the same Wi-Fi: a Home Screen web app lists every terminal, mirrors its output, shows an approval card with one-tap answers, lets you type or start new agents, and sends a notification when an agent needs you. It can also open one of your recent workspaces on the computer and start an agent inside it, fits the terminal to the phone's width automatically, previews the dev server a terminal printed, and remembers up to three computers to switch between. See [iPhone remote control](#iphone-remote-control).
 - **Architecture overview** — how the desktop app, the phone app and the remote bridge fit together: [`docs/architecture.html`](docs/architecture.html) (open it in a browser).
 
+## Customize Agent
+
+In **Settings → CLI & Agents → Customize Agent**, enable the option and save a display name, executable (a path or a command on PATH), and arguments (one per line, without shell quotes). The harness then appears in the terminal launchpad, **+** menu, prompt dispatcher, and phone's New Terminal sheet. Disabling it hides these launch options and its extension editor, preserves the saved configuration and files, and leaves existing terminals running.
+
+Optionally set absolute paths for a **Skills directory**, **MCP configuration file**, **Plugins directory**, and **Hooks configuration file**. In **Settings → Extensions → Custom Agent extensions**, choose a kind and open or create native UTF-8 files. For Skills, a typical file is `my-skill/SKILL.md`; for Plugins, use the files your harness expects. MCP and Hooks edit the exact configured file. Paths must match where the harness actually loads extensions; the workbench does not change its discovery rules or translate extension formats. Existing files get a `.workbench-backup` on save; invalid JSON and files changed since opening are rejected. Directory browsing is limited to six levels and 500 files; editing is limited to 1 MB per file.
+
+The executable, arguments, paths, and enable switch are local user settings, never taken from a repository. Custom harnesses use their own authentication and permissions; built-in bypass/default flags are not injected. Cowork, provider session history and token telemetry continue to support the three built-in CLIs. The separate Linux app is unchanged.
+
 ## Cowork
 
 1. Open **Terminals → + → Cowork**, or choose the Cowork card in **New Terminal**. Each opening creates an independent tab.
@@ -289,6 +297,14 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 - **CLI 啟動權限與略過模式**——全域開關支援切換 AI 代理（Claude Code、Codex、Antigravity）略過互動式審批確認模式，提升自動化執行流暢度。
 - **iPhone 遠端控制（區網）**——在同一個 Wi-Fi 下用 iPhone 查看並回覆 CLI agent：加入主畫面的 App 會列出所有終端、同步顯示輸出、用審批卡片一鍵回覆、可以輸入或開新的 agent，agent 等你回覆時會推播通知。也可以請電腦開啟最近用過的工作區並在裡面開 agent、終端會自動配合手機寬度、預覽終端印出的 dev server，並記住最多三台電腦切換。詳見下方〈iPhone 遠端控制〉。
 - **架構總覽**——桌面程式、手機程式與遠端橋接怎麼接在一起：[`docs/architecture.html`](docs/architecture.html)（用瀏覽器開啟）。
+
+## 自訂 Agent
+
+在 **設定 → CLI 與 Agent → Customize Agent（自訂 Agent）** 啟用開關，設定顯示名稱、執行檔（路徑或 PATH 上的指令）與參數（每行一個、不需 shell 引號），再儲存設定。終端啟動畫面、**+** 選單、提示詞派送與手機的新增終端選單就會出現此 harness。關閉後隱藏啟動與擴充編輯入口，保留設定及檔案，已開啟的終端繼續執行。
+
+可選填 **Skills 資料夾、MCP 設定檔、Plugins 資料夾、Hooks 設定檔** 的絕對路徑，再到 **設定 → 擴充 → 自訂 Agent 擴充** 新增或編輯 UTF-8 原生檔案。Skill 常用 `my-skill/SKILL.md`；Plugin 請使用該 harness 要求的檔案。MCP 與 Hooks 直接編輯指定的完整檔案。路徑必須是 harness 實際讀取的位置；工作台不會改寫它的載入規則或轉換擴充格式。儲存既有檔案會保留 `.workbench-backup`；無效 JSON 或開啟後已被其他程式修改的檔案會拒絕儲存。資料夾清單最多六層、500 個檔案，單檔編輯上限 1 MB。
+
+指令、參數、路徑與開關只使用本機全域設定，repo 無法覆寫。自訂 harness 使用自身的登入與權限規則，不會自動注入內建 Agent 的 bypass 或預設旗標。Cowork、供應商歷史紀錄與 token 統計仍支援原本三家 CLI；獨立的 Linux app 未變更。
 
 ## Cowork 使用方式
 

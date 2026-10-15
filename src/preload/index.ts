@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { RemoteVibeStatus } from '../shared/remoteProtocol'
+import type { CustomAgentConfig, CustomResourceKind } from '../shared/customAgent'
+export type { CustomAgentConfig, CustomResourceKind } from '../shared/customAgent'
 import type {
   AgentModelChoice,
   CoworkAgent,
@@ -56,6 +58,10 @@ const api = {
   },
   // 擴充管理（Skill / MCP / Plugin 跨 agent）—— main/ipc/ext.ts
   ext: {
+    customList: (kind: CustomResourceKind): Promise<string[]> => ipcRenderer.invoke('ext:customList', kind),
+    customRead: (kind: CustomResourceKind, file: string): Promise<string | null> => ipcRenderer.invoke('ext:customRead', kind, file),
+    customWrite: (kind: CustomResourceKind, file: string, content: string, before: string | null): Promise<void> =>
+      ipcRenderer.invoke('ext:customWrite', kind, file, content, before),
     agents: (): Promise<AgentStatus[]> => ipcRenderer.invoke('ext:agents'),
     inventory: (): Promise<ExtItem[]> => ipcRenderer.invoke('ext:inventory'),
     manifest: (): Promise<ExtManifest> => ipcRenderer.invoke('ext:manifest'),
@@ -376,6 +382,7 @@ export interface CliTestRecord {
 }
 
 export interface WorkbenchSettings {
+  customAgent?: CustomAgentConfig
   cliPaths: {
     claude?: string
     antigravity?: string
@@ -523,7 +530,7 @@ export interface DashboardData {
 export interface CliLauncher {
   id: string
   name: string
-  /** 已在 main（pty.ts 的 KNOWN_CLI）驗證過的 CLI 名稱：agent 三家或內建 shell */
+  /** 已驗證的內建 CLI 名稱，或全域設定已啟用的 custom-agent */
   cli: string
   command: string
   args: string[]

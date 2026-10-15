@@ -311,8 +311,9 @@ function hardKill(p: pty.IPty): void {
   }
 }
 
-import { getCustomCliPath, isCliBypassPermissions } from './settings'
-import { findAgentCli } from '../ext/paths'
+import { getCustomCliPath, isCliBypassPermissions, loadSettings } from './settings'
+import { CUSTOM_AGENT_ID, sanitizeCustomAgent } from '../../shared/customAgent'
+import { findAgentCli, findCli } from '../ext/paths'
 import type { AgentId } from '../../preload/index'
 
 /**
@@ -375,6 +376,19 @@ export function applyAgentDefaultArgs(commandOrAgent: string, currentArgs: strin
  * 優先讀取 settings 中的自訂路徑，Windows 腳本自動帶起正確的解譯器。
  */
 function resolveCommand(name: string): { cmd: string; extraArgs: string[] } {
+  if (name === CUSTOM_AGENT_ID) {
+    const c = sanitizeCustomAgent(loadSettings().customAgent)
+    if (!c.enabled || !c.command) throw new Error('Custom Agent is disabled or has no executable')
+    // Resolve the user's command without interpreting it as a built-in agent ID.
+    const target = fs.existsSync(c.command) ? c.command : findCli(c.command) || c.command
+    if (isWin && target.toLowerCase().endsWith('.ps1')) {
+      return { cmd: 'powershell.exe', extraArgs: ['-ExecutionPolicy', 'Bypass', '-File', target, ...c.args] }
+    }
+    if (isWin && /\.(cmd|bat)$/i.test(target)) {
+      return { cmd: 'cmd.exe', extraArgs: ['/c', target, ...c.args] }
+    }
+    return { cmd: target, extraArgs: c.args }
+  }
   const isAgent = name === 'claude' || name === 'antigravity' || name === 'codex'
   let custom = getCustomCliPath(name)
   let target = custom || name
@@ -473,7 +487,7 @@ function readLauncherDefs(ws: string): Array<{ id: string; name: string; cli: st
         const content = fs.readFileSync(path.join(agentsDir, file), 'utf8')
         const parsed = yaml.load(content) as any
         const l = parsed?.launcher
-        if (!l || typeof l.id !== 'string' || !l.id) continue
+        if (!l || typeof l.id !== 'string' || !l.id || l.id === CUSTOM_AGENT_ID) continue
         if (typeof l.cli !== 'string' || !KNOWN_CLI.has(l.cli)) {
           console.warn(`[pty] launcher ${l.id} skipped: cli "${l.cli}" is not one of ${[...KNOWN_CLI].join(', ')}`)
           continue
@@ -494,7 +508,7 @@ function readLauncherDefs(ws: string): Array<{ id: string; name: string; cli: st
 }
 
 export function listLaunchers(ws: string): CliLauncher[] {
-  return readLauncherDefs(ws).map((l) => {
+  const launchers = readLauncherDefs(ws).map((l) => {
     const r = resolveCommand(l.cli)
     let launcherArgs = [...r.extraArgs, ...(l.args || [])]
     if (isCliBypassPermissions()) {
@@ -512,6 +526,12 @@ export function listLaunchers(ws: string): CliLauncher[] {
       hasExtras: (l.args || []).length > 0 || Object.keys(l.env || {}).length > 0
     }
   })
+  const c = sanitizeCustomAgent(loadSettings().customAgent)
+  if (c.enabled && c.command) {
+    const r = resolveCommand(CUSTOM_AGENT_ID)
+    launchers.push({ id: CUSTOM_AGENT_ID, name: c.name, cli: CUSTOM_AGENT_ID, command: r.cmd, args: r.extraArgs, env: {}, hasExtras: true })
+  }
+  return launchers
 }
 
 /**
@@ -522,7 +542,9 @@ export function spawnPty(
   opts: PtySpawnOptions,
   ctx: { workspace: string; owner: WebContents; subscribeOwner: boolean }
 ): string {
-  let resolved = opts.command ? resolveCommand(opts.command) : { cmd: isWin ? 'cmd.exe' : 'bash', extraArgs: [] }
+  const isCustomAgent = opts.command === CUSTOM_AGENT_ID || opts.launcherId === CUSTOM_AGENT_ID
+  const requestedCommand = isCustomAgent ? CUSTOM_AGENT_ID : opts.command
+  const resolved = requestedCommand ? resolveCommand(requestedCommand) : { cmd: isWin ? 'cmd.exe' : 'bash', extraArgs: [] }
   let command = resolved.cmd
   let args = [...resolved.extraArgs, ...(opts.args || [])]
   let env = { ...process.env }
@@ -533,7 +555,9 @@ export function spawnPty(
     targetAgent = opts.command as AgentId
   }
 
-  if (opts.launcherId) {
+  if (isCustomAgent) {
+    if (!opts.title) title = sanitizeCustomAgent(loadSettings().customAgent).name
+  } else if (opts.launcherId) {
     const l = readLauncherDefs(ctx.workspace).find((x) => x.id === opts.launcherId)
     if (l) {
       const r = resolveCommand(l.cli)
@@ -550,7 +574,7 @@ export function spawnPty(
   }
 
   // 若啟用 CLI 略過權限模式 (Bypass Permissions Mode)，依據 Agent 類別自動注入 bypass 參數
-  if (isCliBypassPermissions()) {
+  if (!isCustomAgent && isCliBypassPermissions()) {
     if (targetAgent) {
       args = applyAgentBypassArgs(targetAgent, args)
     } else {
@@ -566,10 +590,10 @@ export function spawnPty(
   }
 
   // Agent 通用預設參數注入（例如 Codex 自動注入 --no-alt-screen 保留 scrollback 歷史）
-  args = applyAgentDefaultArgs(opts.command || command, args, targetAgent)
+  if (!isCustomAgent) args = applyAgentDefaultArgs(opts.command || command, args, targetAgent)
   // Claude Code 的 fullscreen TUI（settings "tui": "fullscreen"）走備用螢幕＋滑鼠模式：沒有 scrollback、游標停在畫面中段，
   // 手機只看得到一頁且審批選項解析不到。等同 Codex 的 --no-alt-screen；launcher 自己有設就尊重。
-  const isClaude = targetAgent === 'claude' || (opts.command || command).toLowerCase().includes('claude')
+  const isClaude = !isCustomAgent && (targetAgent === 'claude' || (opts.command || command).toLowerCase().includes('claude'))
   if (isClaude) {
     env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN ??= '1'
   }
@@ -582,7 +606,7 @@ export function spawnPty(
   // 檢查該 session 是否在 CLI 本地資料庫 (~/.gemini/antigravity-cli/conversations/) 中。
   // 若為 IDE 專屬 session 或不存在的 CLI 紀錄，過濾掉 --conversation 避免 agy 印出 'warning: conversation "<id>" not found'
   const cmdLower = command.toLowerCase()
-  const isAntigravity = targetAgent === 'antigravity' || cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity'
+  const isAntigravity = !isCustomAgent && (targetAgent === 'antigravity' || cmdLower.includes('agy') || opts.command === 'antigravity' || opts.launcherId === 'antigravity')
   if (isAntigravity) {
     const convIdx = args.indexOf('--conversation')
     if (convIdx !== -1 && args[convIdx + 1]) {

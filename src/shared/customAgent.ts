@@ -1,0 +1,26 @@
+export const CUSTOM_AGENT_ID = 'custom-agent'
+export const CUSTOM_RESOURCE_KINDS = ['skill', 'mcp', 'plugin', 'hook'] as const
+export type CustomResourceKind = typeof CUSTOM_RESOURCE_KINDS[number]
+
+export interface CustomAgentConfig {
+  enabled: boolean
+  name: string
+  command: string
+  args: string[]
+  resources: Record<CustomResourceKind, string>
+}
+
+export function sanitizeCustomAgent(raw: unknown): CustomAgentConfig {
+  const c = (raw && typeof raw === 'object' ? raw : {}) as Partial<CustomAgentConfig>
+  const text = (v: unknown): string => typeof v === 'string' ? v.trim() : ''
+  return {
+    enabled: c.enabled === true,
+    name: text(c.name) || 'Custom Agent',
+    command: text(c.command),
+    args: Array.isArray(c.args) ? c.args.filter((a): a is string => typeof a === 'string' && a.length > 0) : [],
+    resources: {
+      skill: text(c.resources?.skill), mcp: text(c.resources?.mcp),
+      plugin: text(c.resources?.plugin), hook: text(c.resources?.hook)
+    }
+  }
+}

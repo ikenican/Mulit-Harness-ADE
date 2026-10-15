@@ -5,6 +5,23 @@
   gap: 14px;
 }
 
+.custom-agent-extensions { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.custom-agent-extensions h3, .custom-agent-extensions p { margin: 0; }
+.custom-agent-file-label { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 180px; }
+.custom-agent-editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  padding: 12px;
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: 12px/1.6 var(--mono);
+  tab-size: 2;
+}
+
 .cz-toolbar {
   display: flex;
   align-items: center;
