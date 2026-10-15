@@ -22,7 +22,7 @@ import {
   listLaunchers,
   type PtySessionInfo
 } from '../ipc/pty'
-import { getRecentWorkspaces, isCliBypassPermissions, isCliEnabled, setCliBypassPermissions } from '../ipc/settings'
+import { getRecentWorkspaces, isCliBypassPermissions, isCliEnabled, setCliBypassPermissions, settingsEvents } from '../ipc/settings'
 import {
   BUILTIN_LAUNCHERS,
   type ClientMessage,
@@ -288,6 +288,7 @@ export class RemoteBridge {
       this.setupServer = setup
       this.wss = wss
       ptyEvents.on('changed', this.scheduleState)
+      settingsEvents.on('changed', this.scheduleState)
       ptyEvents.on('approval', this.onApproval)
       ptyEvents.on('exit', this.onExit)
       ptyEvents.on('activity', this.onActivity)
@@ -305,6 +306,7 @@ export class RemoteBridge {
 
   async stop(): Promise<void> {
     ptyEvents.off('changed', this.scheduleState)
+    settingsEvents.off('changed', this.scheduleState)
     ptyEvents.off('approval', this.onApproval)
     ptyEvents.off('exit', this.onExit)
     ptyEvents.off('activity', this.onActivity)
@@ -783,11 +785,9 @@ export class RemoteBridge {
     const builtin = BUILTIN_LAUNCHERS.filter((l) => isCliEnabled(l.key))
     // 只是把內建 CLI 換個名字、沒加任何 args／env 的 launcher 不重複列出：
     // 否則 agents/*.yaml 裡一個 `cli: claude` 的別名，在手機上會變成第二個「Claude Code」。
-    const custom: RemoteLauncher[] = ws
-      ? listLaunchers(ws)
-          .filter((l) => l.hasExtras || !DIRECT_KEYS.has(l.cli) || !isCliEnabled(l.cli))
-          .map((l) => ({ key: l.id, title: l.name, kind: 'custom' as const }))
-      : []
+    const custom: RemoteLauncher[] = listLaunchers(ws)
+      .filter((l) => l.hasExtras || !DIRECT_KEYS.has(l.cli) || !isCliEnabled(l.cli))
+      .map((l) => ({ key: l.id, title: l.name, kind: 'custom' as const }))
     return [...builtin, ...custom]
   }
 
