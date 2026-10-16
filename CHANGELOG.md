@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.41] - 2026-10-16
+
+### Added / 新增
+- **Customize Agent**：預設關閉，可指定自己的 harness 名稱、執行指令與參數；啟用後才顯示桌面／手機啟動入口及 Skills／MCP／Plugins／Hooks 原生檔案新增與編輯。設定僅存本機，檔案編輯包含備份、外部變更檢查與路徑保護。（PR #45）
+- **Custom harness support**: opt-in terminal launch and native Skills/MCP/Plugins/Hooks editing, with local-only configuration, backups and file conflict/path checks. Supports one custom harness; extension formats and discovery paths follow that harness.
+
+### Changed / 變更
+- 手機 Cowork 改從「新增終端 → Cowork」開啟，並補齊桌面的模式、主席、模型／推理強度、摘要 Agent、摘要時機、專案基線與預算選項；支援略過失敗發言人、將結論轉成專案提案及刪除已結束會議。（PR #44）
+- Phone Cowork now opens through New Terminal and matches desktop meeting options, including models/effort, chair, recorder and limits, plus failed-speaker recovery and conclusion-to-project conversion.
+
+### Fixed / 修復
+- 修復手機提高 Cowork 預算後未重試，以及無回傳資料的成功操作被誤判為失敗。（PR #44）
+- 修復新版 Claude Code 模型名稱顯示成說明文字；正確顯示模型版本。（PR #44）
+
+### Notes / 備註
+- 自訂 harness 不會自動套用內建 Agent 的 bypass 或預設旗標；Cowork、供應商歷史及用量統計仍支援原本三家 CLI。Linux 維持獨立的 v0.1.0。
+
 ## [0.1.40] - 2026-10-09
 
 ### Added / 新增
