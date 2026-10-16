@@ -4,25 +4,36 @@ import remarkGfm from 'remark-gfm'
 import {
   agentLabel,
   currentBoard,
+  discussionProjectPrompt,
+  modelPickerState,
+  pickModel,
   reviewersOf,
+  type AgentModelChoice,
   type CoworkAgent,
   type CoworkCapability,
   type CoworkBaselineInfo,
+  type CoworkModelCatalog,
   type CoworkMode,
   type CoworkPhase,
   type CoworkRun,
-  type CoworkRunSummary
+  type CoworkRunSummary,
+  type CoworkSettings
 } from '../../shared/cowork'
 import type { RemoteConnection } from './conn'
-import { AgentMark, IArrowUp, IPlus, IWarning } from './icons'
+import { AgentMark, IArrowUp, ICheck, IPlus, IWarning } from './icons'
 import { ago, coworkLanguage, t, type Key } from './i18n'
-import { ConfirmSheet, NavBar } from './ui'
+import { ConfirmSheet, NavBar, Switch } from './ui'
 
 // 手機版 Cowork：清單、開新會議、看會議進度、在每個階段做桌面上同樣的決定。
 // 所有操作都經 conn.cowork 打到桌面同一份 ops（main/ipc/cowork.ts），手機不自己判斷能不能做，
-// 桌面拒絕就把錯誤碼顯示出來。編輯任務板與選模型仍只在桌面（cwDesktopOnly）。
+// 桌面拒絕就把錯誤碼顯示出來。只有編輯任務板仍只在桌面（cwDesktopOnly）。
 
-type Caps = { agents: CoworkCapability[]; baseline: CoworkBaselineInfo; defaults?: { chair: CoworkAgent | null; participants: CoworkAgent[] } }
+type Caps = {
+  agents: CoworkCapability[]
+  baseline: CoworkBaselineInfo
+  defaults?: Pick<CoworkSettings, 'chair' | 'participants' | 'models' | 'summarizer' | 'summarizeEachRound'> & { limits?: CoworkSettings['limits'] }
+}
+type Draft = { prompt: string; mode: CoworkMode; source?: CoworkRun }
 
 const phaseText = (p: CoworkPhase): string => t(`cwPhase_${p}` as Key)
 const phaseTone = (p: CoworkPhase): string =>
@@ -59,7 +70,8 @@ export default function CoworkView({
   const [runs, setRuns] = useState<CoworkRunSummary[] | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   const [run, setRun] = useState<CoworkRun | null>(null)
-  const [creating, setCreating] = useState(false)
+  // null＝不在開會表單；{}＝空白表單；有 source＝由討論轉成專案計畫
+  const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const runIdRef = useRef(runId)
   runIdRef.current = runId
@@ -67,14 +79,19 @@ export default function CoworkView({
   const call = async <T,>(op: string, ...args: unknown[]): Promise<T | undefined> => {
     setError(null)
     const r = await conn.cowork<T>(windowId, op, ...args)
-    if (r.ok) return r.data
+    // 沒回傳值的操作（raiseLimits、delete…）成功時 data 是 undefined；改成 null，undefined 只代表失敗
+    if (r.ok) return (r.data ?? null) as T
     setError(r.message || r.code)
     return undefined
   }
 
+  const loadList = (): void => {
+    void conn.cowork<CoworkRunSummary[]>(windowId, 'list').then((r) => r.ok && setRuns(r.data))
+  }
+
   useEffect(() => {
     const load = (): void => {
-      void conn.cowork<CoworkRunSummary[]>(windowId, 'list').then((r) => r.ok && setRuns(r.data))
+      loadList()
       const id = runIdRef.current
       if (id) void conn.cowork<CoworkRun | null>(windowId, 'get', id).then((r) => r.ok && runIdRef.current === id && setRun(r.data))
     }
@@ -92,21 +109,25 @@ export default function CoworkView({
   }, [conn, windowId])
 
   const open = (id: string | null): void => {
+    setDraft(null)
     setRun(null)
     setRunId(id)
     setError(null)
     if (id) void call<CoworkRun | null>('get', id).then((r) => r !== undefined && runIdRef.current === id && setRun(r))
   }
 
-  if (creating) {
+  if (draft) {
     return (
       <NewMeeting
+        key={draft.source?.id || 'new'}
         conn={conn}
         windowId={windowId}
         workspace={workspace}
-        onBack={() => setCreating(false)}
+        initial={draft}
+        onBack={() => setDraft(null)}
+        onOpenRun={open}
         onStarted={(r) => {
-          setCreating(false)
+          setDraft(null)
           setRuns((prev) => [{ id: r.id, prompt: r.prompt, phase: r.phase, createdAt: r.createdAt, updatedAt: r.updatedAt, planRevision: r.planRevision, chair: r.chair, participants: r.participants }, ...(prev || [])])
           setRunId(r.id)
           setRun(r)
@@ -119,7 +140,20 @@ export default function CoworkView({
     return (
       <div className="session">
         <NavBar title={t('cowork')} subtitle={workspace} backLabel={t('cowork')} onBack={() => open(null)} />
-        {run ? <RunScreen run={run} call={call} error={error} /> : <p className="empty">{t('loading')}</p>}
+        {run ? (
+          <RunScreen
+            run={run}
+            call={call}
+            error={error}
+            onConvert={() => setDraft({ mode: 'project', prompt: discussionProjectPrompt(run), source: run })}
+            onDeleted={() => {
+              open(null)
+              loadList()
+            }}
+          />
+        ) : (
+          <p className="empty">{t('loading')}</p>
+        )}
       </div>
     )
   }
@@ -129,7 +163,7 @@ export default function CoworkView({
       <NavBar title={t('cowork')} subtitle={workspace} backLabel={hostName} onBack={onBack} />
       <main className="workspace-pane">
         <div className="stack">
-          <button className="add-card press" onClick={() => setCreating(true)}>
+          <button className="add-card press" onClick={() => setDraft({ prompt: '', mode: 'discussion' })}>
             <IPlus size={20} />
             {t('cwNew')}
           </button>
@@ -156,58 +190,134 @@ export default function CoworkView({
   )
 }
 
+/** 一家 agent 的模型＋強度（規則與桌面 ModelPicker 相同，見 shared modelPickerState） */
+function ModelSelects({
+  agent,
+  catalog,
+  value,
+  automaticLabel,
+  onChange
+}: {
+  agent: CoworkAgent
+  catalog: CoworkModelCatalog | undefined
+  value: AgentModelChoice
+  automaticLabel?: string
+  onChange: (v: AgentModelChoice) => void
+}): JSX.Element {
+  const { options, efforts, mustPickEffort, fallbackEffort } = modelPickerState(agent, catalog, value, !!automaticLabel)
+  const known = !value.model || options.some((o) => o.id === value.model)
+  const fallbackModel = catalog?.fallback.model
+  const fallback = fallbackModel
+    ? t('cwModelDefaultUser', { model: options.find((o) => o.id === fallbackModel || o.resolvedModel === fallbackModel)?.label || fallbackModel })
+    : t('cwModelDefaultCli', { cli: agentLabel(agent) })
+  return (
+    <div className="cw-models">
+      <select className="cw-select" aria-label={t('cwModel')} value={value.model} onChange={(e) => onChange(pickModel(agent, catalog, value, e.target.value, !!automaticLabel))}>
+        <option value="">{fallback}</option>
+        {!known && <option value={value.model} disabled>{value.model}</option>}
+        {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <select className="cw-select" aria-label={t('cwEffort')} value={efforts.length ? value.effort : ''} disabled={efforts.length === 0} onChange={(e) => onChange({ model: value.model, effort: e.target.value })}>
+        {!mustPickEffort && (
+          <option value="">
+            {efforts.length === 0 ? t('cwEffortInModel') : automaticLabel || (fallbackEffort ? t('cwEffortDefaultValue', { effort: fallbackEffort }) : t('cwEffortDefault'))}
+          </option>
+        )}
+        {efforts.map((e) => <option key={e} value={e}>{e}</option>)}
+      </select>
+    </div>
+  )
+}
+
+// 開會表單：選項與桌面 StartForm 一一對應（模式說明、與會者與不能用的原因、主席、各家模型與強度、
+// 摘要 agent 與時機、依階段調強度、專案基線、上限）。預設值同樣來自桌面設定。
 function NewMeeting({
   conn,
   windowId,
   workspace,
+  initial,
   onBack,
-  onStarted
+  onStarted,
+  onOpenRun
 }: {
   conn: RemoteConnection
   windowId: number
   workspace: string
+  initial: Draft
   onBack: () => void
   onStarted: (r: CoworkRun) => void
+  onOpenRun: (id: string) => void
 }): JSX.Element {
+  const source = initial.source
   const [caps, setCaps] = useState<Caps | null>(null)
-  const [prompt, setPrompt] = useState('')
-  const [mode, setMode] = useState<CoworkMode>('discussion')
+  const [catalogs, setCatalogs] = useState<CoworkModelCatalog[]>([])
+  const [prompt, setPrompt] = useState(initial.prompt)
+  const [mode, setMode] = useState<CoworkMode>(initial.mode)
+  const [autoEffort, setAutoEffort] = useState(source?.autoEffort !== false)
   const [picked, setPicked] = useState<CoworkAgent[]>([])
   const [chair, setChair] = useState<CoworkAgent | null>(null)
+  const [summarizer, setSummarizer] = useState<CoworkAgent | null>(null)
+  const [summarizeEachRound, setSummarizeEachRound] = useState(false)
+  const [models, setModels] = useState<Partial<Record<CoworkAgent, AgentModelChoice>>>({})
+  const [showDirty, setShowDirty] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<{ text: string; runId?: string } | null>(null)
 
   useEffect(() => {
     void conn.cowork<Caps>(windowId, 'capabilities').then((r) => {
-      if (!r.ok) return setError(r.message || r.code)
+      if (!r.ok) return setError({ text: r.message || r.code })
+      const d = r.data.defaults
       setCaps(r.data)
       const usable = r.data.agents.filter((a) => a.enabled && a.planning).map((a) => a.agent)
-      // 預設：桌面記住的與會者（還能用的），不夠兩位就補
-      const p = (r.data.defaults?.participants || []).filter((a) => usable.includes(a))
+      // 預設：上次選的與會者（還能用的）；不夠兩位就補上能用的
+      const p = (source ? source.participants.filter((a) => !source.discussion?.excluded.includes(a)) : d?.participants || []).filter((a) => usable.includes(a))
       for (const a of usable) if (p.length < 2 && !p.includes(a)) p.push(a)
       setPicked(p)
-      const c = r.data.defaults?.chair
+      const c = source?.chair || d?.chair
       setChair(c && p.includes(c) ? c : p[0] || null)
+      const rec = source?.discussion?.summarizer || d?.summarizer
+      setSummarizer(rec && p.includes(rec) ? rec : null)
+      setSummarizeEachRound(d?.summarizeEachRound === true)
+      setModels(source?.models || d?.models || {})
     })
+    // 模型清單另外讀：agy 要連網，慢的話選單先只有「預設」
+    void conn.cowork<CoworkModelCatalog[]>(windowId, 'models').then((r) => r.ok && setCatalogs(r.data))
   }, [conn, windowId])
 
+  const usable = (a: CoworkAgent): boolean => !!caps?.agents.find((c) => c.agent === a && c.enabled && c.planning)
   const toggle = (a: CoworkAgent): void => {
+    if (!usable(a)) return
     const next = picked.includes(a) ? picked.filter((x) => x !== a) : [...picked, a]
     setPicked(next)
     if (!chair || !next.includes(chair)) setChair(next[0] || null)
+    if (summarizer && !next.includes(summarizer)) setSummarizer(null)
   }
-  const repoOk = caps?.baseline.ok === true
-  const canStart = !!prompt.trim() && prompt.length <= 20000 && picked.length >= 2 && !!chair && (mode === 'discussion' || repoOk) && !busy
+  const baseline = caps?.baseline
+  const canStart = !!prompt.trim() && prompt.length <= 20000 && picked.length >= 2 && !!chair && picked.includes(chair) && (mode === 'discussion' || baseline?.ok === true) && !busy
 
   const start = async (): Promise<void> => {
     if (!canStart) return
     setBusy(true)
     setError(null)
-    const r = await conn.cowork<CoworkRun>(windowId, 'start', { prompt: prompt.trim(), chair, participants: picked, language: coworkLanguage(), mode })
+    const chosen = Object.fromEntries(picked.map((a) => [a, models[a] || { model: '', effort: '' }]))
+    const r = await conn.cowork<CoworkRun>(windowId, 'start', {
+      prompt: prompt.trim(),
+      chair,
+      participants: picked,
+      language: coworkLanguage(),
+      models: chosen,
+      mode,
+      autoEffort,
+      ...(mode === 'discussion' ? { summarizer: summarizer || chair, summarizeEachRound } : {})
+    })
     setBusy(false)
     if (r.ok) onStarted(r.data)
-    else setError(r.message || r.code)
+    else setError({ text: r.message || r.code, runId: r.code === 'active-run-exists' ? (r.data as { runId?: string } | undefined)?.runId : undefined })
   }
+
+  const autoLabel = (a: CoworkAgent): string | undefined =>
+    autoEffort ? t(mode === 'discussion' ? 'cwAutoLow' : chair === a ? 'cwAutoChair' : 'cwAutoReview') : undefined
+  const limits = caps?.defaults?.limits
 
   return (
     <div className="session">
@@ -217,47 +327,133 @@ function NewMeeting({
           <button aria-pressed={mode === 'discussion'} onClick={() => setMode('discussion')}>{t('cwModeDiscussion')}</button>
           <button aria-pressed={mode === 'project'} onClick={() => setMode('project')}>{t('cwModeProject')}</button>
         </div>
+        <p className="footnote cw-mode-desc">{t(`cwModeDesc_${mode}`)}</p>
         <div className="bubble form-card">
           <div className="field">
             <textarea className="cw-input" rows={5} maxLength={20000} value={prompt} placeholder={t('cwPrompt')} aria-label={t('cwPrompt')} onChange={(e) => setPrompt(e.target.value)} />
           </div>
         </div>
+
         <div className="section-head"><h2>{t('cwParticipants')}</h2></div>
         <div className="stack">
           {(caps?.agents || []).map((c) => {
-            const usable = c.enabled && c.planning
+            const ok = c.enabled && c.planning
+            const on = picked.includes(c.agent)
+            const reason = !c.enabled ? t('cwReason_disabled') : c.reason ? t(`cwReason_${c.reason}`) : ok ? '' : t('cwUnavailable')
+            const sub = reason || (c.agent === 'antigravity' ? t('cwEligibleSlow') : '')
             return (
-              <div key={c.agent} className="bubble session-card">
-                <button className="cw-agent press" disabled={!usable} aria-pressed={picked.includes(c.agent)} onClick={() => toggle(c.agent)}>
-                  <AgentMark launcherKey={c.agent} />
-                  <span className="card-main">
-                    <span className="card-title">{agentLabel(c.agent)}</span>
-                    <span className="card-sub">{usable ? (picked.includes(c.agent) ? '✓' : '') : t('cwUnavailable')}</span>
-                  </span>
-                </button>
-                {picked.includes(c.agent) && (
-                  <button className={`pill ${chair === c.agent ? 'run' : 'idle'} press`} aria-pressed={chair === c.agent} onClick={() => setChair(c.agent)}>
-                    {t('cwChair')}
+              <div key={c.agent} className={`bubble cw-agent-card ${on ? 'on' : ''}`}>
+                <div className="cw-agent-row">
+                  <button className="cw-agent press" disabled={!ok} aria-pressed={on} onClick={() => toggle(c.agent)}>
+                    <span className={`cw-check ${on ? 'on' : ''}`} aria-hidden="true">{on && <ICheck size={14} />}</span>
+                    <AgentMark launcherKey={c.agent} size={36} />
+                    <span className="card-main">
+                      <span className="card-title">{agentLabel(c.agent)}</span>
+                      {sub && <span className="card-sub">{sub}</span>}
+                    </span>
                   </button>
+                  {on && (chair === c.agent
+                    ? <span className="pill run">★ {t('cwChair')}</span>
+                    : <button className="pill idle press" onClick={() => setChair(c.agent)}>{t('cwMakeChair')}</button>)}
+                </div>
+                {on && (
+                  <ModelSelects
+                    agent={c.agent}
+                    catalog={catalogs.find((x) => x.agent === c.agent)}
+                    value={models[c.agent] || { model: '', effort: '' }}
+                    automaticLabel={autoLabel(c.agent)}
+                    onChange={(v) => setModels((prev) => ({ ...prev, [c.agent]: v }))}
+                  />
                 )}
               </div>
             )
           })}
         </div>
-        {mode === 'project' && caps && !repoOk && <p className="form-error" role="alert"><IWarning size={18} />{t('cwNeedRepo')}</p>}
-        {error && <p className="form-error" role="alert"><IWarning size={18} />{error}</p>}
+
+        <ul className="bubble list cw-options">
+          {mode === 'discussion' && (
+            <>
+              <li className="row">
+                <span className="row-main">{t('cwSummarizer')}</span>
+                <select className="cw-select cw-select-inline" value={summarizer || ''} onChange={(e) => setSummarizer((e.target.value || null) as CoworkAgent | null)}>
+                  <option value="">{t('cwFollowChair')}</option>
+                  {picked.map((a) => <option key={a} value={a}>{agentLabel(a)}</option>)}
+                </select>
+              </li>
+              <li className="row">
+                <span className="row-main">{t('cwSummaryTiming')}</span>
+                <select className="cw-select cw-select-inline" value={summarizeEachRound ? 'round' : 'context'} onChange={(e) => setSummarizeEachRound(e.target.value === 'round')}>
+                  <option value="context">{t('cwSummaryOnDemand')}</option>
+                  <option value="round">{t('cwSummaryEachRound')}</option>
+                </select>
+              </li>
+            </>
+          )}
+          <li className="row">
+            <span className="row-main">{t('cwAutoEffort')}</span>
+            <Switch label={t('cwAutoEffort')} checked={autoEffort} onChange={setAutoEffort} />
+          </li>
+        </ul>
+        <p className="footnote">
+          {mode === 'discussion' && `${t('cwSummaryBudgetHint')} `}
+          {t('cwAutoEffortHint')}
+        </p>
+
+        {mode === 'project' && baseline && (
+          <div className={`bubble cw-card cw-baseline ${baseline.ok ? '' : 'error'}`}>
+            {!baseline.ok ? (
+              <span>{BASELINE_ERRORS.has(baseline.code) ? t(`cwBaselineError_${baseline.code}` as Key) : t('cwNeedRepo')}</span>
+            ) : (
+              <>
+                <div>{t('cwBaseline', { branch: baseline.branch, commit: baseline.head.slice(0, 7) })}</div>
+                {baseline.dirtyCount > 0 && (
+                  <button className="text-btn press" onClick={() => setShowDirty((v) => !v)}>⚠ {t('cwDirtyExcluded', { count: baseline.dirtyCount })}</button>
+                )}
+                {showDirty && <ul className="cw-file-list">{baseline.dirty.map((f) => <li key={f}>{f}</li>)}</ul>}
+                {baseline.warnings.map((w) => <div key={w} className="cw-warn">⚠ {WARNINGS.has(w) ? t(`cwWarn_${w}` as Key) : w}</div>)}
+              </>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <p className="form-error" role="alert">
+            <IWarning size={18} />
+            {error.text}
+            {error.runId && <button className="text-btn strong press" onClick={() => onOpenRun(error.runId!)}>{t('cwOpenActive')}</button>}
+          </p>
+        )}
+        <p className="footnote">
+          {caps && picked.length < 2 ? t('cwNeedTwo') : limits ? t('cwLimits', { calls: limits.maxPlanningCalls, minutes: limits.maxPlanningMinutes }) : ''}
+        </p>
         <p className="footnote">{t('cwDesktopOnly')}</p>
-        <button className="btn prominent press" disabled={!canStart} onClick={start}>{t('cwStart')}</button>
+        <button className="btn prominent press" disabled={!canStart} onClick={start}>{busy ? t('cwStarting') : t(`cwStart_${mode}`)}</button>
       </main>
     </div>
   )
 }
 
+// 有翻譯的基線錯誤與警告；新的代碼直接顯示原字
+const BASELINE_ERRORS = new Set(['not-a-git-repo', 'no-commits'])
+const WARNINGS = new Set(['merge-in-progress', 'rebase-in-progress', 'cherry-pick-in-progress', 'codex-repo-in-profile'])
+
 type Call = <T>(op: string, ...args: unknown[]) => Promise<T | undefined>
 
-function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: string | null }): JSX.Element {
+function RunScreen({
+  run,
+  call,
+  error,
+  onConvert,
+  onDeleted
+}: {
+  run: CoworkRun
+  call: Call
+  error: string | null
+  onConvert: () => void
+  onDeleted: () => void
+}): JSX.Element {
   const [text, setText] = useState('')
-  const [confirmCancel, setConfirmCancel] = useState(false)
+  const [confirm, setConfirm] = useState<'cancel' | 'delete' | null>(null)
   const [busy, setBusy] = useState(false)
   const d = run.discussion
   const board = currentBoard(run)
@@ -290,6 +486,8 @@ function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: st
   const speaker = d && (run.pending?.step === 'summary' ? d.summarizer || run.chair : run.pending?.step === 'conclusion' ? run.chair : d.order[d.cursor])
   const kind = run.block?.kind || 'step-failed'
   const canCancel = ['meeting', 'awaiting-approval', 'blocked', 'paused'].includes(run.phase)
+  const canDelete = run.phase !== 'meeting' && run.phase !== 'executing'
+  const hasConclusion = !!d && d.conclusion?.through === d.messages.length
 
   const actions: JSX.Element[] = []
   const btn = (label: string, onClick: () => void, prominent = false): void => {
@@ -297,7 +495,8 @@ function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: st
   }
   if (d && run.phase === 'completed') {
     if (d.summaries?.at(-1)?.through !== d.messages.length) btn(t('cwSummarize'), () => act('summarize'))
-    if (d.conclusion?.through !== d.messages.length) btn(t('cwConclude'), () => act('summarize', true), true)
+    if (!hasConclusion) btn(t('cwConclude'), () => act('summarize', true), true)
+    else btn(t('cwConvertProject'), onConvert, true)
   }
   if (run.phase === 'awaiting-approval') btn(t('cwApprove', { rev: run.planRevision }), () => act('approve', run.planRevision), true)
   if (run.phase === 'blocked' || run.phase === 'paused') {
@@ -309,6 +508,8 @@ function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: st
       }, true)
     else btn(t('cwRetry'), () => act('retry'), true)
     if (kind === 'reviewers-failed' && reviewersOf(run).some((a) => run.reviewers[a]?.status === 'ok')) btn(t('cwContinueWithout'), () => act('drop'))
+    // 討論中某位發言失敗：跟桌面一樣可以略過他繼續
+    if (d && kind === 'step-failed' && run.pending?.step === 'discussion' && speaker) btn(t('cwSkipSpeaker', { name: agentLabel(speaker) }), () => act('drop'))
   }
   if (run.phase === 'approved' && !ex) {
     btn(t('cwExecSeq'), () => act('execStart', { mode: 'sequential' }), true)
@@ -317,7 +518,8 @@ function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: st
   if (run.phase === 'executing' && ex) btn(ex.paused ? t('cwResume') : t('cwPause'), () => act(ex.paused ? 'execResume' : 'execPause'), ex.paused)
   if (run.phase === 'review' && ex?.integration?.status === 'ok') btn(t('cwMerge', { branch: run.repo.sourceBranch }), () => act('execMerge'), true)
   if ((run.phase === 'review' || run.phase === 'completed') && ex && !ex.cleaned) btn(t('cwCleanup'), () => act('execCleanup'))
-  if (canCancel) actions.push(<button key="cancel" className="text-btn press" disabled={busy} onClick={() => setConfirmCancel(true)}>{t('cwCancel')}</button>)
+  if (canCancel) actions.push(<button key="cancel" className="text-btn press" disabled={busy} onClick={() => setConfirm('cancel')}>{t('cwCancel')}</button>)
+  else if (canDelete) actions.push(<button key="delete" className="text-btn press" disabled={busy} onClick={() => setConfirm('delete')}>{t('cwDelete')}</button>)
 
   return (
     <>
@@ -329,6 +531,22 @@ function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: st
           </div>
           <p className="cw-prompt">{run.prompt}</p>
         </section>
+
+        {d && (
+          <ul className="bubble list cw-options">
+            <li className="row">
+              <span className="row-main">{t('cwSummarizer')}</span>
+              <select
+                className="cw-select cw-select-inline"
+                value={d.summarizer || run.chair}
+                disabled={busy || !['completed', 'blocked', 'paused'].includes(run.phase)}
+                onChange={(e) => void act('summarizer', e.target.value)}
+              >
+                {run.participants.map((a) => <option key={a} value={a} disabled={d.excluded.includes(a)}>{agentLabel(a)}</option>)}
+              </select>
+            </li>
+          </ul>
+        )}
 
         {d?.messages.map((m) => (
           <article key={m.id} className={`bubble cw-card ${m.agent ? '' : 'cw-user'}`}>
@@ -412,15 +630,17 @@ function RunScreen({ run, call, error }: { run: CoworkRun; call: Call; error: st
         </div>
       )}
 
-      {confirmCancel && (
+      {confirm && (
         <ConfirmSheet
-          title={t('cwCancel')}
-          message={t('cwCancelBody')}
-          action={t('cwCancel')}
-          onCancel={() => setConfirmCancel(false)}
-          onConfirm={() => {
-            setConfirmCancel(false)
-            void act('cancel')
+          title={t(confirm === 'delete' ? 'cwDelete' : 'cwCancel')}
+          message={t(confirm === 'delete' ? 'cwDeleteBody' : 'cwCancelBody')}
+          action={t(confirm === 'delete' ? 'cwDelete' : 'cwCancel')}
+          onCancel={() => setConfirm(null)}
+          onConfirm={async () => {
+            const which = confirm
+            setConfirm(null)
+            if (which === 'cancel') void act('cancel')
+            else if (await act('delete')) onDeleted()
           }}
         />
       )}
