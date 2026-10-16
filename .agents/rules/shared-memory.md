@@ -49,26 +49,31 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 # Latest Handoff
 
 - Agent: Claude Code
-- Updated: 2026-10-09 Asia/Taipei
-- v0.1.40 released (Windows). User authorised push, merge of PR #41/#42 and the release in one request.
-- Architecture: DEC-011, two independent apps in one repo; no shared runtime imports or npm workspace. Windows users take priority.
+- Updated: 2026-10-14 Asia/Taipei
+- Branch: feat/phone-cowork-parity (source commit 0ad67ea), pushed; PR #44 open against master (https://github.com/zkylek1212-k/Mulit-Harness-ADE/pull/44). Not merged, not released. User authorised commit/push/PR on 2026-10-14.
+- Task: the user asked that phone Cowork offer the same options as desktop, and that Cowork open from the terminal's "new" menu instead of being a separate tile.
 
-## Done this session
-- Linux PR #41 CI fixed by 3469c9e (Electron SUID sandbox step in .github/workflows/linux-app.yml); runs 37816334970 and 37870095383 (on 9cb042d) green. Merged as 349774e; Issue #40 closed.
-- Phone Cowork PR #42 merged as 0885cda: Cowork tile per workspace (list, new meeting, timeline, per-phase actions); `invokeCowork` + `coworkEvents` in main/ipc/cowork.ts serve the Remote Bridge.
-- Release PR #43 (release/v0.1.40: package.json/lock 0.1.40, CHANGELOG, README phone Cowork bullet en/zh) merged as 851b185.
-- Tag v0.1.40 → 851b185, release marked Latest with setup.exe, blockmap, portable.zip, latest.yml (version 0.1.40). Built via `npm run release` from master.
-- Validation on merged master before release: typecheck, check-cowork.mts, check-remote.mts, build, `electron scripts/check-remote-cowork.cjs` all passed; release.ps1 typecheck + electron-builder passed.
+## Done this session (in PR #44)
+- Phone entry point: removed the per-workspace Cowork tile (`src/renderer/remote/App.tsx`); the "New Terminal" sheet now has a Cowork section (`onCowork` → existing `cowork` view), same as the desktop terminal "+" popover.
+- Phone new-meeting form (`src/renderer/remote/CoworkView.tsx`) now matches desktop StartForm: mode description, per-agent unavailable reason + agy slow hint, Make Chair, per-agent model + effort selects (via the `models` op), recorder + summary timing (discussion), auto-effort switch, project baseline (branch@commit, dirty files, warnings), limits line, per-mode start label, "Open It" for `active-run-exists`. Start now sends models/autoEffort/summarizer/summarizeEachRound like desktop.
+- Phone run screen: recorder select in discussions, "Skip {name}" on a failed speaker, "Turn into Project Plan" after a conclusion (uses `discussionProjectPrompt`), Delete Meeting for finished runs.
+- Bug fix: the phone `call()` treated ops that return nothing (raiseLimits, delete…) as failures, so "Raise Limits and Retry" never retried. Now success returns null.
+- `capabilities` op (`src/main/ipc/cowork.ts`) `defaults` also carries models, summarizer, summarizeEachRound and limits.
+- Model/effort rules extracted to `modelPickerState` / `pickModel` in `src/shared/cowork.ts`; the desktop `ModelPicker.tsx` uses them too (same behaviour).
+- Desktop and phone Claude model names: in Claude Code 2.1.296, `displayName` holds the name ("Opus 5.5") and `description` holds only the blurb, so `parseClaudeModelCatalog` showed the blurb as the name. It now takes the name from `description` only when it contains " · " (old format), otherwise from `displayName`. A test for the new format was added to check-cowork.mts and verified against real CLI output.
+- `scripts/check-remote-cowork.cjs`: opens Cowork through the New Terminal sheet, asserts no tile, checks the new options and start args, skip speaker, raise→retry, and delete. The fake desktop now omits `data` for void ops like the real one.
+
+## Validation
+- `npm run typecheck`, `npm run build`, `electron scripts/check-remote-cowork.cjs`, `check-cowork.mts`, `check-remote.mts` all pass.
+- Screenshots: `check-remote-cowork.cjs` runs with `show: false`, so its screenshots are stale frames. A copy with `show: true` gave correct shots of the sheet and form.
+- Not tested on a real iPhone.
 
 ## Next / limits
-- Linux linux-v0.1.0 PUBLISHED (user-authorised): tag created via GitHub API on master b98dc0d (local git was hung); CI run 37874886216 build+publish green; prerelease with AppImage/deb/tar.gz x64; releases/latest still v0.1.40. Next Linux release: bump apps/linux/package.json, then tag linux-vX.Y.Z (must match).
-- Main workspace git: .git/index went OneDrive cloud-only and hung (~160 unkillable git status). Needs full OneDrive quit or reboot, then `git reset -q` to rebuild the index. Commits this session were made with a temporary GIT_INDEX_FILE outside OneDrive. `.git` has conflict copies from machine GG5275-NB — OneDrive syncs .git across machines; consider moving the repo out of OneDrive.
-- Phone Cowork: no real iPhone ↔ desktop E2E yet; a meeting started on desktop shows in the phone list only after reload/reconnect; not ported to apps/linux (DEC-011 manual port).
-- Cleanup done (user-authorised): 5 merged worktrees removed (cowork-ui, ime-fix, mobile-cowork, release-v0.1.35, release-v0.1.39; junctions removed first), 31 merged local branches deleted, all 33 remote branches deleted (all ahead_by=0 vs master; GitHub now has only master).
-- Kept (not merged): local backup/master-memory-2026-10-01, chore/release-v0.1.27/30/31, test/pr-35-36-37 + its worktree C:/Users/milan.chang/AppData/Local/Temp/agent-workbench-test-pr35-37 (5 uncommitted source edits).
-- Other Linux distributions, ARM64, real deb install and complete agent-provider/phone remote E2E remain unverified. Linux updater checks the newest 100 releases.
-- WSL verification cache: /home/milanchang/.cache/agent-workbench-linux-verification.
-- Temp/ and three phone screenshots remain untracked and untouched in the main workspace.
-- History: archive/handoff-2026-10-09-pr41-pr42-before-merge.md, archive/handoff-2026-10-08-linux-local-verification-before-pr.md.
+- Next: review/merge PR #44 (needs user OK), then a release if wanted. Local master still has the two memory commits 1c8c677/e5b32f2 unpushed; they are also on the PR branch, so merging the PR brings them in.
+- Running Cowork meetings no longer have a home-screen entry; reach them via New Terminal → Cowork (list). Could list active meetings in the workspace group if wanted.
+- Board editing remains desktop-only. Not ported to apps/linux (DEC-011 manual port).
+- Long effort labels truncate in the narrow selects ("Automatic (l…").
+- Carry-over from 2026-10-09 (still valid): temp worktree `C:/Users/milan.chang/AppData/Local/Temp/agent-workbench-test-pr35-37` has 19 modified + 1 untracked files (not 5); `.git` has OneDrive conflict copies (`index-GG5275-NB`, `FETCH_HEAD-GG5275-NB*`); `.project-memory/handoff-GG5275-NB.md` is a stale 2026-09-17 conflict copy. Git status works normally again on this machine.
+- History: archive/handoff-2026-10-14-before-phone-cowork-parity.md.
 
 <!-- END AUTO-MEMORY -->

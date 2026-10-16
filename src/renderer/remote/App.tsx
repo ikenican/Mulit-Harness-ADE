@@ -530,6 +530,10 @@ function Main({
           bypass={bypass}
           onClose={() => setSheet(null)}
           onPick={(key) => conn.send({ t: 'spawn', windowId: sheet.windowId, launcherKey: key })}
+          onCowork={() => {
+            setSheet(null)
+            setView({ kind: 'cowork', windowId: sheet.windowId })
+          }}
         />
       )}
       {sheet?.kind === 'settings' && (
@@ -785,12 +789,6 @@ function Home({
                   </IconMark>
                   {t('git')}
                 </button>
-                <button className="bubble tile press" onClick={() => onOpen({ kind: 'cowork', windowId: w.id })}>
-                  <IconMark tone="accent">
-                    <IHand size={20} />
-                  </IconMark>
-                  {t('cowork')}
-                </button>
               </div>
             </details>
           )
@@ -823,12 +821,14 @@ function NewTerminalSheet({
   launchers,
   bypass,
   onClose,
-  onPick
+  onPick,
+  onCowork
 }: {
   launchers: RemoteLauncher[]
   bypass: boolean
   onClose: () => void
   onPick: (key: string) => void
+  onCowork: () => void
 }): JSX.Element {
   const agents = launchers.filter((l) => l.kind !== 'shell')
   const shells = launchers.filter((l) => l.kind === 'shell')
@@ -873,6 +873,19 @@ function NewTerminalSheet({
           {grid(shells)}
         </>
       )}
+      {/* 跟桌面終端的「＋」一樣：Cowork 和終端放在同一個新增選單 */}
+      <h3 className="sheet-label">{t('cowork')}</h3>
+      <div className="launcher-grid">
+        <button className="bubble launcher press" onClick={onCowork}>
+          <IconMark tone="accent" size={44}>
+            <IHand size={22} />
+          </IconMark>
+          <span>
+            {t('cowork')}
+            <span className="card-sub launcher-sub">{t('cwNewHint')}</span>
+          </span>
+        </button>
+      </div>
     </Sheet>
   )
 }
