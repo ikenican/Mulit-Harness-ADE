@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
 import { useWorkbench } from '@/store'
 import AgentMark from '@/components/AgentMark'
+import CustomAgentExtensions from './CustomAgentExtensions'
 import { IconPuzzle, IconZap, IconServer } from '@/components/Icons'
 import './customized.css'
 import type {
@@ -273,6 +274,8 @@ export default function CustomizedPanel(): JSX.Element {
           </div>
         ))}
       </div>
+
+      <CustomAgentExtensions />
 
       {/* 擴充清單：三家狀態一覽 */}
       {(['skill', 'mcp', 'plugin'] as ExtKind[]).map((kind) => (

@@ -4,6 +4,7 @@ import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import RemoteSettings from './RemoteSettings'
 import CoworkSettings from './CoworkSettings'
+import CustomAgentSettings from './CustomAgentSettings'
 import {
   IconSun,
   IconMoon,
@@ -1367,6 +1368,7 @@ export default function SettingsModal({
                     })}
                   </div>
                 </div>
+                <CustomAgentSettings value={settings.customAgent} onChange={(customAgent) => setSettings((prev) => ({ ...prev, customAgent }))} />
               </div>
             </>
           )}

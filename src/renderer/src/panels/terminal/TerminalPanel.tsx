@@ -19,6 +19,7 @@ import { focusTerm, isComposing, isImeKey, trackComposition } from './imeGuard'
 import AgentMark from '@/components/AgentMark'
 import CoworkPanel from '@panels/cowork/CoworkPanel'
 import type { CoworkAgent, CoworkPhase } from '../../../../shared/cowork'
+import { CUSTOM_AGENT_ID } from '../../../../shared/customAgent'
 import {
   IconPlus,
   IconChevronDown,
@@ -150,7 +151,7 @@ export const BUILTIN_SHELLS: ShellDefinition[] = isWindows
       }
     ]
 
-const AGENT_IDS = BUILTIN_AGENTS.map((a) => a.id)
+const AGENT_IDS = [...BUILTIN_AGENTS.map((a) => a.id), CUSTOM_AGENT_ID]
 const SHELL_IDS = BUILTIN_SHELLS.map((s) => s.id)
 /** 直接以指令啟動（非 launcher yaml）的項目 */
 const DIRECT_IDS: string[] = [...AGENT_IDS, ...SHELL_IDS]
@@ -202,6 +203,7 @@ export default function TerminalPanel(): JSX.Element {
 
   const isCliEnabled = useCallback(
     (id: string): boolean => {
+      if (id === CUSTOM_AGENT_ID) return !!settings.customAgent?.enabled && !!settings.customAgent.command
       return settings.cliEnabled?.[id] !== false
     },
     [settings]
@@ -210,7 +212,12 @@ export default function TerminalPanel(): JSX.Element {
   const isBypassActive = !!settings.cliBypassPermissions
 
   const enabledAgents = useMemo(() => {
-    return BUILTIN_AGENTS.filter((a) => isCliEnabled(a.id))
+    const agents = BUILTIN_AGENTS.filter((a) => isCliEnabled(a.id))
+    const c = settings.customAgent
+    if (c && isCliEnabled(CUSTOM_AGENT_ID)) agents.push({
+      id: CUSTOM_AGENT_ID, name: c.name, at: c.name, sub: c.command, desc: c.command, badge: 'Custom'
+    })
+    return agents
   }, [isCliEnabled])
 
   const enabledShells = useMemo(() => {
@@ -273,7 +280,7 @@ export default function TerminalPanel(): JSX.Element {
   const openAgentDispatch = (e: React.MouseEvent<HTMLElement>): void => {
     e.stopPropagation()
     const active = sessions.find((s) => s.id === activeSessionId)
-    if (active && BUILTIN_AGENTS.some((a) => a.id === active.launcherKey && isCliEnabled(a.id))) {
+    if (active && enabledAgents.some((a) => a.id === active.launcherKey)) {
       setDispatchAgent(active.launcherKey)
     } else {
       setDispatchAgent(enabledAgents[0]?.id || 'claude')
@@ -543,7 +550,7 @@ export default function TerminalPanel(): JSX.Element {
 
   useEffect(() => {
     window.api.pty.launchers().then((list) => {
-      setLaunchers(list)
+      setLaunchers(list.filter((l) => l.id !== CUSTOM_AGENT_ID))
       const firstEnabled = enabledAgents[0]?.id || enabledShells[0]?.id || list[0]?.id || BUILTIN_SHELLS[0].id
       setSelectedLauncher(list.length > 0 ? list[0].id : firstEnabled)
     })
@@ -624,7 +631,7 @@ export default function TerminalPanel(): JSX.Element {
         return true
       })
 
-      const agentDef = BUILTIN_AGENTS.find((a) => a.id === key)
+      const agentDef = enabledAgents.find((a) => a.id === key)
       const shellDef = BUILTIN_SHELLS.find((s) => s.id === key)
       const title =
         titleOverride ||
@@ -1210,7 +1217,7 @@ export default function TerminalPanel(): JSX.Element {
                         <div className="term-popover-item-top">
                           <span className="term-popover-name">{agent.at}</span>
                           <span className="term-popover-badge">{agent.badge}</span>
-                          {isBypassActive && (
+                          {isBypassActive && agent.id !== CUSTOM_AGENT_ID && (
                             <span className="term-popover-bypass-pill">Bypass</span>
                           )}
                         </div>
@@ -1836,6 +1843,15 @@ export default function TerminalPanel(): JSX.Element {
                     </div>
                   )
                 })()}
+
+                {isCliEnabled(CUSTOM_AGENT_ID) && <button type="button" className="launchpad-card card-shell"
+                  onClick={() => handleNewTerminal(CUSTOM_AGENT_ID)}>
+                  <div className="launchpad-card-icon"><AgentMark agent="custom-agent" size={28} /></div>
+                  <div className="launchpad-card-name">{settings.customAgent?.name}</div>
+                  <div className="launchpad-card-sub">{t('customAgent.title')}</div>
+                  <div className="launchpad-card-meta"><code>{settings.customAgent?.command}</code></div>
+                  <div className="launchpad-card-action">{t('customAgent.launch')}</div>
+                </button>}
 
                 {isCliEnabled('powershell') && (() => {
                   const lp = getLaunchpadDragProps('powershell')

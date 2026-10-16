@@ -1731,6 +1731,17 @@
   color: var(--fg);
   user-select: all;
 }
+.custom-agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--fg);
+  font-size: 12px;
+}
+.custom-agent-field textarea { resize: vertical; }
+.custom-agent-settings .macos-row-info { min-width: 0; }
+.custom-agent-settings .macos-row-sub { white-space: normal; }
+
 .remote-reset {
   margin-top: 10px;
 }
