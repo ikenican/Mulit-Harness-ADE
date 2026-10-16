@@ -36,8 +36,10 @@ class FakeSocket {
     window.__ops.push({ windowId: m.windowId, op: m.op, args: m.args })
     const data = m.op === 'capabilities'
       ? { agents: [{ agent: 'claude', enabled: true, planning: true, path: 'c' }, { agent: 'codex', enabled: true, planning: true, path: 'x' }, { agent: 'antigravity', enabled: true, planning: false, path: null, reason: 'not-installed' }],
-          baseline: { ok: true }, defaults: { chair: 'codex', participants: ['claude', 'codex'] } }
-      : m.op === 'list' ? [] : m.op === 'start' || m.op === 'get' ? RUN : null
+          baseline: { ok: true }, defaults: { chair: 'codex', participants: ['claude', 'codex'], models: { claude: { model: 'opus', effort: 'high' } }, summarizer: null, summarizeEachRound: true, limits: { maxPlanningCalls: 6, maxPlanningMinutes: 10, maxExecutionMinutes: 30 } } }
+      : m.op === 'models' ? [{ agent: 'claude', options: [{ id: 'opus', label: 'Opus' }], fallback: { model: '', effort: '', source: 'cli-default' } }]
+      // 沒回傳值的操作跟真的桌面一樣不帶 data（JSON 會丟掉 undefined）
+      : m.op === 'list' ? [] : m.op === 'start' || m.op === 'get' ? RUN : undefined
     this.emit({ t: 'cowork', reqId: m.reqId, result: { ok: true, data } })
   }
 }
@@ -78,19 +80,30 @@ app.whenReady().then(async () => {
     await win.loadURL(origin)
     await js(`localStorage.setItem('aw.remote.lang', 'en'); localStorage.setItem('aw.remote.tokens', JSON.stringify({ 'https://${new URL(origin).host}/': 'tok' })); location.reload()`)
     await waitFor(`!!document.querySelector('.tile')`, 'home tiles')
-    assert.ok(await click('.tile', 'Cowork'), 'Cowork tile')
+    // Cowork 跟桌面一樣放在新增終端的選單裡，不再是工作區的獨立方塊
+    assert.equal(await click('.tile', 'Cowork'), false, 'no Cowork tile')
+    assert.ok(await click('.add-card', 'New Terminal'), 'new terminal')
+    await waitFor(`!!document.querySelector('.sheet-layer .launcher')`, 'new terminal sheet')
+    await shot('new-sheet')
+    assert.ok(await click('.launcher', 'Cowork'), 'Cowork in new terminal sheet')
     await waitFor(hasText('No Cowork meetings'), 'empty list')
     assert.deepEqual(await lastOp(), { windowId: 7, op: 'list', args: [] })
 
     // 開新會議：預設帶出桌面記住的與會者與主席，不可用的 agent 不能選
     await click('button', 'New Meeting')
-    await waitFor(hasText('Unavailable'), 'capabilities')
+    await waitFor(hasText('Not installed'), 'capabilities')
+    // 桌面表單有的選項手機都有：模式說明、模型與強度、摘要 agent 與時機、依階段調強度、上限
+    await waitFor(`[...document.querySelectorAll('.cw-models select')].some(s => [...s.options].some(o => o.value === 'opus'))`, 'model catalog')
+    for (const s of ['Take turns speaking', 'Recorder', 'After every round', 'Adapt Effort to the Stage', 'Limits: 6 model calls', 'Make Chair'])
+      assert.ok(await js(hasText(s)), s)
+    assert.equal(await js(`document.querySelector('.cw-models select').value`), 'opus', 'remembered model')
     await type('.cw-input', 'Plan the release')
     await shot('new-meeting')
-    await click('button.btn', 'Start')
+    await click('button.btn', 'Start Discussion')
     await waitFor(hasText('Codex is speaking'), 'run screen')
     const start = (await js('window.__ops')).find((o) => o.op === 'start')
-    assert.deepEqual(start.args, [{ prompt: 'Plan the release', chair: 'codex', participants: ['claude', 'codex'], language: 'en', mode: 'discussion' }])
+    assert.deepEqual(start.args, [{ prompt: 'Plan the release', chair: 'codex', participants: ['claude', 'codex'], language: 'en', mode: 'discussion',
+      models: { claude: { model: 'opus', effort: 'high' }, codex: { model: '', effort: '' } }, autoEffort: true, summarizer: 'codex', summarizeEachRound: true }])
     assert.equal(await js(`!!document.querySelector('.composer')`), false, 'no composer while agents speak')
 
     // 討論一輪結束：顯示發言、可以接著討論與請主席下結論
@@ -102,6 +115,16 @@ app.whenReady().then(async () => {
     await waitFor(`window.__ops.at(-1).op === 'discuss'`, 'discuss op')
     assert.deepEqual((await lastOp()).args, ['r1', 'What about QA?'])
     await shot('discussion')
+
+    // 討論中有人發言失敗：可以略過他繼續；超出預算：提高上限後真的會重試
+    await js(`__push({ phase: 'blocked', block: { kind: 'step-failed', message: 'codex failed' }, pending: { step: 'discussion' } })`)
+    await waitFor(hasText('Skip Codex and Continue'), 'skip speaker')
+    await click('button.btn', 'Skip Codex and Continue')
+    await waitFor(`window.__ops.at(-1).op === 'drop'`, 'drop op')
+    await js(`__push({ phase: 'blocked', block: { kind: 'budget', message: 'Out of budget' }, pending: null })`)
+    await waitFor(hasText('Raise Limits and Retry'), 'raise limits')
+    await click('button.btn', 'Raise Limits and Retry')
+    await waitFor(`window.__ops.at(-1).op === 'retry'`, 'retry after raiseLimits')
 
     // 專案規劃等核准：任務板、核准帶版本號、輸入框送修改意見
     await js(`__push({ mode: 'project', discussion: undefined, phase: 'awaiting-approval', planRevision: 2, r1: { summary: 'Two tasks' },
@@ -125,6 +148,15 @@ app.whenReady().then(async () => {
     await click('button.btn', 'Run Sequentially')
     await waitFor(`window.__ops.at(-1).op === 'execStart'`, 'execStart op')
     assert.deepEqual((await lastOp()).args, ['r1', { mode: 'sequential' }])
+
+    // 結束的會議可以刪除，刪完回清單
+    await js(`__push({ phase: 'cancelled' })`)
+    await waitFor(hasText('Delete Meeting'), 'delete button')
+    await click('button', 'Delete Meeting')
+    await waitFor(`!!document.querySelector('.action-sheet')`, 'delete confirm')
+    await click('.action-sheet button', 'Delete Meeting')
+    await waitFor(`window.__ops.some(o => o.op === 'delete') && window.__ops.at(-1).op === 'list'`, 'delete op')
+    await waitFor(hasText('No Cowork meetings'), 'back to list')
     console.log('remote cowork ok')
   } catch (e) {
     console.error(e)

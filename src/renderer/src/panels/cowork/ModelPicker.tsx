@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from '@/i18n'
 import {
-  COWORK_EFFORTS,
   agentLabel,
+  modelPickerState,
+  pickModel,
   type AgentModelChoice,
   type CoworkAgent,
   type CoworkModelCatalog
@@ -65,17 +66,8 @@ export default function ModelPicker({
   className?: string
 }): JSX.Element {
   const { t } = useTranslation()
-  const options = catalog?.options || []
+  const { options, efforts, mustPickEffort, fallbackEffort } = modelPickerState(agent, catalog, value, !!automaticLabel)
   const known = !value.model || options.some((o) => o.id === value.model)
-
-  // 強度選項：codex 依所選（或預設）模型而定；其他家用固定清單
-  const modelForEfforts = value.model || catalog?.fallback.model || ''
-  const opt = options.find((o) => o.id === modelForEfforts)
-  // 清單有給就照清單（空陣列 = 這個模型不支援強度）；agy 自訂的完整 ID 已含強度，不再給選項
-  const efforts = opt?.efforts ?? (agent === 'antigravity' && value.model ? [] : COWORK_EFFORTS[agent])
-  // agy 選了有強度變體的模型時沒有「預設」可選（見上方 onChange）
-  const mustPickEffort = !automaticLabel && agent === 'antigravity' && !!value.model && !!opt?.efforts?.length
-  const fallbackEffort = catalog?.fallback.effort || options.find((o) => o.id === modelForEfforts)?.defaultEffort || ''
 
   return (
     <div className="cw-model-picker">
@@ -84,17 +76,7 @@ export default function ModelPicker({
         aria-label={t('cowork.modelLabel')}
         title={options.find((o) => o.id === value.model)?.label || value.model || fallbackLabel(t, catalog, agent)}
         value={value.model}
-        onChange={(e) => {
-          // 換模型時，原本的強度若新模型不支援就清掉
-          const next = options.find((o) => o.id === e.target.value)
-          const keepEffort = !value.effort || !next?.efforts || next.efforts.includes(value.effort)
-          let effort = keepEffort ? value.effort : ''
-          // agy 的 ID 帶強度：選了有強度變體的模型就一定要有強度，送出去的 <模型>-<強度> 才會是清單裡存在的 ID
-          if (!automaticLabel && agent === 'antigravity' && next?.efforts?.length && !next.efforts.includes(effort)) {
-            effort = next.efforts.includes('medium') ? 'medium' : next.efforts[0]
-          }
-          onChange({ model: e.target.value, effort })
-        }}
+        onChange={(e) => onChange(pickModel(agent, catalog, value, e.target.value, !!automaticLabel))}
       >
         <option value="">{fallbackLabel(t, catalog, agent)}</option>
         {/* Keep an existing choice visible while catalogs load or a model is removed; no free-text entry. */}

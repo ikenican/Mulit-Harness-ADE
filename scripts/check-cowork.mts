@@ -169,6 +169,8 @@ const cleanup: string[] = [tmp]
     { value: 'default', resolvedModel: 'claude-opus-5-5' },
     { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus', description: 'Opus 5.5 · Best for everyday tasks', supportedEffortLevels: ['low', 'high', 'bad"value'] },
     { value: 'haiku', resolvedModel: 'claude-haiku-4-5', description: 'Haiku 4.5 · Fast', supportsEffort: false },
+    // Claude Code 2.1.296 的格式：名稱在 displayName，description 只有說明
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5', description: 'Most efficient for simpler tasks' },
     { value: 'bad"value' }
   ] } } })
   const catalog = shared.parseClaudeModelCatalog('not json\n' + catalogResponse, 'opus')
@@ -176,7 +178,8 @@ const cleanup: string[] = [tmp]
   assert.equal(catalog.fallback.source, 'user-config')
   assert.deepEqual(catalog.options, [
     { id: 'opus', resolvedModel: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['low', 'high'] },
-    { id: 'haiku', resolvedModel: 'claude-haiku-4-5', label: 'Haiku 4.5', efforts: [] }
+    { id: 'haiku', resolvedModel: 'claude-haiku-4-5', label: 'Haiku 4.5', efforts: [] },
+    { id: 'sonnet', resolvedModel: 'claude-sonnet-5-5', label: 'Sonnet 5.5' }
   ])
   assert.equal(shared.parseClaudeModelCatalog(catalogResponse, '').fallback.model, 'claude-opus-5-5')
   assert.throws(() => shared.parseClaudeModelCatalog('{}', ''), /model list/)
