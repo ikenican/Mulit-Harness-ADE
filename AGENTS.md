@@ -52,28 +52,30 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 # Latest Handoff
 
 - Agent: Codex
-- Updated: 2026-10-15 Asia/Taipei
-- Branch: feat/custom-agent; source commit 8ead826, pushed. PR #45 open against master: https://github.com/zkylek1212-k/Mulit-Harness-ADE/pull/45. Not merged or released. User requested a new PR for an opt-in custom harness and matching extension management.
-- Branch starts at origin/master; does not include phone Cowork parity PR #44, which remains open separately: https://github.com/zkylek1212-k/Mulit-Harness-ADE/pull/44.
+- Updated: 2026-10-16 Asia/Taipei
+- Branch: master. Windows v0.1.41 PUBLISHED and marked Latest: https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/tag/v0.1.41. Annotated tag v0.1.41 points to release merge commit 1c7cf17c1fe0d9bfc995405e54b8ab65482e6b99.
+- User explicitly authorized merging both PRs and releasing a new version. PR #44 merged as 2bbdd37, #45 as 9f256da, release/version/docs PR #46 as 1c7cf17. No open PRs at verification. Linux remains independent linux-v0.1.0 prerelease; not changed.
 
-## Done
-- Settings → CLI & Agents → Customize Agent: defaults off; optional display name, executable/command, one-argument-per-line args, executable browse/test, native Skills/Plugins directory and MCP/Hooks file paths. Disabled hides configuration fields, terminal launch/dispatch choices and custom extension editor; existing sessions and config/files are preserved.
-- Terminal launchpad, + menu and prompt dispatcher show the enabled custom harness. Phone New Terminal lists it via the existing shared launchers/PTY route. Global enable/config changes refresh other desktop windows and connected phones.
-- Settings → Extensions has a gated native editor with Skills/MCP/Plugins/Hooks categories and file creation/editing. Uses the user's actual harness paths and format, not guessed adapters. File I/O checks disabled state, relative path boundaries, symbolic links, UTF-8/1 MB limit, JSON syntax, external edits and backup destination hard links. Writes preserve a .workbench-backup; new-file creation does not overwrite existing files.
-- Executable/args/paths/opt-in only read from global userData; customAgent is omitted from workspace settings. Repository launcher IDs cannot impersonate custom-agent. Custom harnesses receive their own args without provider-specific bypass/default flags. Global settings write failures now propagate to the UI.
-- New shared customAgent types, preload IPC contract and native resource helper; no new dependencies. Existing AgentId/Cowork/provider parsers remain unchanged. README includes English/Traditional Chinese usage and limits.
+## Included / integration
+- Phone Cowork now opens via New Terminal → Cowork and matches desktop model/effort/chair/recorder/summary/baseline/limits choices. Includes skip failed speaker, raise-budget retry, conclusion-to-Project and delete finished meetings; fixes void-op success handling and current Claude model labels.
+- Default-off Customize Agent: one custom harness name/command/args; enabled-only desktop/phone terminal launch and prompt dispatch. Native Skills/Plugins directories plus MCP/Hooks file creation/editing under Settings → Extensions; global-only settings, backups, conflict/JSON/UTF-8/size/path/link checks. No provider default/bypass flags injected.
+- Merging #44 into #45 caused only handoff/generated-entry conflicts. Resolved these, verified application source exactly equals local test/pr-44-45 integration, pushed #45, then merged it. Release PR #46 changes root package/lock to 0.1.41 plus bilingual CHANGELOG and current phone Cowork README instructions.
+- Local master fast-forwarded to origin/master; previous local memory commits are retained through the PR history. Local test/pr-44-45 (1797a31, merge 386328d) remains available; feature/release branches kept.
 
-## Validation
-- npm run typecheck and npm run build passed on final source.
-- node scripts/check-custom-agent.cjs passed: persisted settings isolation, opt-in, real phone launcher filtering, direct/launcher PTY args, Windows script prefixes and spaced args, four resource types, backup/conflict/JSON/path/link checks.
-- electron scripts/check-custom-agent-ui.cjs passed: actual React settings save, enable/hide, terminal launch, all four extension editors, draft switch protection, English/Traditional Chinese and light/dark screenshots.
-- node scripts/check-approval.cjs, electron scripts/check-terminal-ui.cjs and node --experimental-strip-types scripts/check-remote.mts passed. Existing PTY test fixtures updated for new shared import.
-- UI screenshots inspected in C:/Users/milan.chang/AppData/Local/Temp/workbench-custom-ui-j2XaG9 (settings.png and extensions language/theme variants).
+## Release assets / checks
+- Published four assets: Agent-Workbench-0.1.41-setup.exe (130282013 bytes), Agent-Workbench-0.1.41-portable.zip (178194759 bytes), setup.exe.blockmap (135815 bytes), latest.yml (362 bytes).
+- Built on release source 6a1e2e4; tagged master source equivalence checked before publication. EXE file/product versions 0.1.41 / 0.1.41.0; packed package.json version 0.1.41.
+- npm run typecheck and npm run dist passed. Used existing scripts/release.ps1 -SkipBuild -Draft after packaging, verified uploaded assets, then gh release edit --draft=false --latest. GitHub reports public, non-prerelease Latest v0.1.41, published 2026-10-16T07:03:58Z.
+- All four uploaded asset sizes and GitHub SHA256 digests match local files. latest.yml version, installer URL/size and both SHA512 fields match the installer. Portable ZIP has 98 entries; executable, ASAR and native PTY binary hashes match win-unpacked.
+- node scripts/check-custom-agent.cjs, node scripts/check-approval.cjs, node --experimental-strip-types scripts/check-remote.mts passed.
+- electron scripts/check-remote-cowork.cjs and electron scripts/check-custom-agent-ui.cjs passed on 0.1.41 build; UI shots in C:/Users/milan.chang/AppData/Local/Temp/workbench-custom-ui-Gvdjzh.
+- Packaged ASAR smoke passed: renderer/preload startup, isolated settings, opt-in custom launcher and real Windows native PTY I/O. Temporary harness: %TEMP%/workbench-v0.1.41-packaged-smoke.js. Prior combined-source check-cowork.mts suite passed during local testing; application code unchanged since that test.
+- Logs/checks: %TEMP%/workbench-v0.1.41-dist.log, workbench-v0.1.41-publish.log, workbench-v0.1.41-assets.json, workbench-v0.1.41-verify.cjs. No release-script source changes or new dependencies.
 
 ## Next / limits
-- Review/merge PR #45 when authorized. One custom harness slot; native extension editing only, no generic marketplace installer or format conversion. Paths must match the harness's own discovery rules. Browse up to six directory levels/500 files; edit UTF-8 text up to 1 MB.
-- No real third-party harness or physical iPhone tested. Cowork, provider history and token telemetry stay with the three built-in CLIs. Linux app unchanged per DEC-011.
-- User's pre-existing untracked Temp/ and phone view bug.png / phone view_bug1.png / phone view_bug2.png were preserved and excluded from commits.
-- Previous phone Cowork work and its validation/limits remain on feat/phone-cowork-parity (PR #44, source 0ad67ea, memory 40a63ab). Do not merge it automatically.
+- Existing Windows installations can use Check for Updates or download the setup/portable asset. No local installed app was closed, upgraded or reconfigured during release.
+- No paid/real provider meeting, third-party custom harness, physical iPhone or full NSIS install was tested. One custom harness slot; native formats/discovery remain the harness's responsibility. Cowork/provider history/token telemetry stay with the original three CLIs; phone board editing stays desktop-only. Linux unchanged per DEC-011.
+- Test-profile remote config remains isolated in agent-workbench-dev, disabled by default on port 47610; installed profile previously used 47600. Test app PID 19480 had exited before release preparation.
+- Pre-existing untracked Temp/ and three phone screenshots were preserved and excluded. Previous master handoff archived at archive/handoff-2026-10-16-before-v0.1.41-release.md; detailed local-test handoff remains on test/pr-44-45.
 
 <!-- END AUTO-MEMORY -->

@@ -1,11 +1,11 @@
 # Project State
 
-- Milestone: v0.1.40 released 2026-10-09 (tag 851b185, Latest): phone Cowork (PR #42) and independent Linux app source/CI (PR #41) merged, release PR #43. Linux linux-v0.1.0 prerelease published 2026-10-09 (CI run 37874886216; AppImage/deb/tar.gz; Latest stays v0.1.40).
-- Previous: v0.1.39 released with Cowork discussions, multi-tabs, recorder, chair decisions, approved Project execution, and bilingual usage/architecture documentation.
-- Status: PR #35/#37/#36, version/docs #38 and HTML architecture #39 merged; v0.1.39 tag a292b22 and release assets published. User authorized main workspace commit/push/sync: docs committed f40e67b, origin/master 51e8d99 merged without conflicts as a740224, local memory history preserved. Main now contains released source and rendered architecture; normal push publishes source/docs and handoff together.
-- Validation: prior planner/discussion/executor, Electron regressions, release build/startup, uploaded hashes and 12 HTML render states passed. Main sync source/doc equality verified; fresh npm ci and typecheck passed, version 0.1.39 and xterm headless/serialize imports verified. Main can run dev now. No full functional suite or new paid real-provider meeting was rerun for Git sync.
-- Linux (DEC-011 / Issue #40): independent apps/linux v0.1.0 committed as 404fbd5 and pushed on feat/linux-independent-app; PR #41 merged into master as 349774e on 2026-10-09 (CI green after SUID sandbox fix 3469c9e), not yet published as linux-v*, copied from Windows v0.1.39; root Windows source/dependencies/build files remain unchanged. Linux owns settings, CI and prerelease publishing. Windows 134-file baseline unchanged and typecheck passed. Linux typecheck, guards, default shells, main/detached-window startup, packaged PTY, three package targets and Debian runtime dependency metadata verified in Ubuntu WSL. GitHub Ubuntu CI green; other distributions remain unverified.
-- Last updated: 2026-10-09
+- Milestone: Windows v0.1.41 released 2026-10-16, tag 1c7cf17, public Latest: phone Cowork desktop parity (PR #44), opt-in custom harness/native Skills/MCP/Plugins/Hooks editing (PR #45), version/docs PR #46. Installer, portable ZIP, blockmap and latest.yml published and verified. Linux remains linux-v0.1.0 prerelease.
+- Previous: v0.1.40 released 2026-10-09 (851b185): phone Cowork #42 and independent Linux source/CI #41; Linux linux-v0.1.0 published 2026-10-09. v0.1.39 introduced Cowork discussions, recorder, chair decisions and approved execution.
+- Status: PR #44 merged 2bbdd37; #45 merged 9f256da after memory-only conflict resolution; #46 merged 1c7cf17. No open PRs at release verification. Main fast-forwarded, release tag pushed; feature/release/local test branches retained.
+- Validation: 0.1.41 typecheck/dist, custom-agent/approval/remote checks and both feature UI regressions passed. Packaged ASAR renderer/preload/custom-launcher/native-PTY smoke passed. ZIP executable/ASAR/native module hashes, uploaded SHA256 digests and updater SHA512/size/version verified. Earlier combined-source Cowork suite passed; no application code changed afterward. No physical iPhone, real third-party harness or full NSIS install tested.
+- Linux (DEC-011 / Issue #40): independent apps/linux v0.1.0, linux-v0.1.0 prerelease published 2026-10-09; separate dependencies/settings/identity/update flow. No Linux changes in Windows 0.1.41. Other distributions and ARM64 remain unverified; Linux updater checks newest 100 releases.
+- Last updated: 2026-10-16
 
 
 ## Macro Progress
