@@ -156,6 +156,40 @@ export interface CoworkModelCatalog {
   error?: string
 }
 
+/**
+ * 模型＋強度選單的規則（桌面 ModelPicker 與手機開會表單共用）。
+ * automatic＝「依階段自動調強度」開著：此時 agy 也允許強度留空。
+ */
+export function modelPickerState(agent: CoworkAgent, catalog: CoworkModelCatalog | undefined, value: AgentModelChoice, automatic: boolean): {
+  options: CoworkModelOption[]
+  efforts: string[]
+  mustPickEffort: boolean
+  fallbackEffort: string
+} {
+  const options = catalog?.options || []
+  // 強度選項：codex 依所選（或預設）模型而定；其他家用固定清單
+  const modelForEfforts = value.model || catalog?.fallback.model || ''
+  const opt = options.find((o) => o.id === modelForEfforts)
+  // 清單有給就照清單（空陣列 = 這個模型不支援強度）；agy 自訂的完整 ID 已含強度，不再給選項
+  const efforts = opt?.efforts ?? (agent === 'antigravity' && value.model ? [] : COWORK_EFFORTS[agent])
+  // agy 選了有強度變體的模型時沒有「預設」可選（見 pickModel）
+  const mustPickEffort = !automatic && agent === 'antigravity' && !!value.model && !!opt?.efforts?.length
+  const fallbackEffort = catalog?.fallback.effort || opt?.defaultEffort || ''
+  return { options, efforts, mustPickEffort, fallbackEffort }
+}
+
+/** 換模型：原本的強度若新模型不支援就清掉；agy 有強度變體的模型一定要帶強度 */
+export function pickModel(agent: CoworkAgent, catalog: CoworkModelCatalog | undefined, value: AgentModelChoice, model: string, automatic: boolean): AgentModelChoice {
+  const next = catalog?.options.find((o) => o.id === model)
+  const keepEffort = !value.effort || !next?.efforts || next.efforts.includes(value.effort)
+  let effort = keepEffort ? value.effort : ''
+  // agy 的 ID 帶強度：選了有強度變體的模型就一定要有強度，送出去的 <模型>-<強度> 才會是清單裡存在的 ID
+  if (!automatic && agent === 'antigravity' && next?.efforts?.length && !next.efforts.includes(effort)) {
+    effort = next.efforts.includes('medium') ? 'medium' : next.efforts[0]
+  }
+  return { model, effort }
+}
+
 /** Claude's initialize control response lists models without making a model call. */
 export function parseClaudeModelCatalog(stdout: string, userModel: string): CoworkModelCatalog {
   for (const line of stdout.split(/\r?\n/)) {
@@ -172,7 +206,10 @@ export function parseClaudeModelCatalog(stdout: string, userModel: string): Cowo
       if (m.value === 'default') { defaultModel = resolved; continue }
       const id = sanitizeModelChoice({ model: m.value }).model || resolved
       if (!id) continue
-      const label = typeof m.description === 'string' ? m.description.split(' · ')[0].trim() : ''
+      // 舊版 CLI：description 是「Opus 5.5 · 說明」、displayName 只有「Opus」；
+      // 2.1.296 起 displayName 就是「Opus 5.5」，description 只剩說明。有「 · 」才從 description 取名稱
+      const desc = typeof m.description === 'string' ? m.description : ''
+      const label = desc.includes(' · ') ? desc.split(' · ')[0].trim() : ''
       options.push({
         id,
         ...(resolved ? { resolvedModel: resolved } : {}),

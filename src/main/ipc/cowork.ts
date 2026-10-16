@@ -437,7 +437,12 @@ async function startRun(workspace: string, req: StartRequest): Promise<CoworkRun
 const ops: Record<string, (workspace: string, ...args: any[]) => unknown> = {
   capabilities: async (workspace, force?: boolean) => {
     const cw = sanitizeCoworkSettings(loadSettings().cowork)
-    return { agents: capabilities(!!force), baseline: await baselineInfo(workspace), defaults: { chair: cw.chair, participants: cw.participants } }
+    // defaults 給手機開會表單：與桌面表單讀設定得到的預設值相同
+    return {
+      agents: capabilities(!!force),
+      baseline: await baselineInfo(workspace),
+      defaults: { chair: cw.chair, participants: cw.participants, models: cw.models, summarizer: cw.summarizer, summarizeEachRound: cw.summarizeEachRound, limits: cw.limits }
+    }
   },
   models: (_w, force?: boolean) => Promise.all(COWORK_AGENTS.map((a) => modelCatalog(a, !!force))),
   list: (workspace) => svc().list(workspace),
