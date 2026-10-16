@@ -4,6 +4,20 @@ export type { Language }
 
 export const translations = {
   en: {
+    customAgent: {
+      title: 'Customize Agent',
+      description: 'Use your own harness. Its launch and extension options appear only while enabled.',
+      name: 'Display name', command: 'Executable or command', args: 'Arguments — one per line, without shell quotes; blank lines are ignored',
+      pathsHint: 'Optional native extension paths. Add or edit files in Settings → Extensions. Use the format your harness supports; these paths do not change where it loads extensions.',
+      skillPath: 'Skills directory', mcpPath: 'MCP configuration file', pluginPath: 'Plugins directory', hookPath: 'Hooks configuration file',
+      optionalPath: 'Absolute path (optional)', testFailed: 'Executable test failed',
+      extensions: 'Custom Agent extensions', nativeHint: 'Edit native files for this harness. Restart the agent to load changes. Saving an existing file keeps a .workbench-backup copy.',
+      skill: 'Skills', mcp: 'MCP', plugin: 'Plugins', hook: 'Hooks',
+      notConfigured: 'Set this extension path in Settings → Agents first.',
+      file: 'Relative file name', newFile: 'New file', open: 'Open / Create', reload: 'Reload file',
+      newHint: 'New file — save to create it.', saved: 'File saved', unsaved: 'Unsaved changes', discard: 'Discard changes',
+      loadError: 'Could not load Custom Agent settings', launch: 'Launch Session →'
+    },
     common: {
       ok: 'OK',
       cancel: 'Cancel',
@@ -703,6 +717,20 @@ export const translations = {
     }
   },
   'zh-TW': {
+    customAgent: {
+      title: 'Customize Agent（自訂 Agent）',
+      description: '使用自己的 harness。啟用後才顯示啟動與擴充管理選項。',
+      name: '顯示名稱', command: '執行檔或指令', args: '啟動參數 — 每行一個，不需 shell 引號；忽略空白行',
+      pathsHint: '可選填原生擴充路徑，再到「設定 → 擴充」新增或編輯檔案。請使用 harness 支援的格式；這些路徑不會變更 harness 的載入位置。',
+      skillPath: 'Skills 資料夾', mcpPath: 'MCP 設定檔', pluginPath: 'Plugins 資料夾', hookPath: 'Hooks 設定檔',
+      optionalPath: '絕對路徑（選填）', testFailed: '執行檔測試失敗',
+      extensions: '自訂 Agent 擴充', nativeHint: '直接編輯此 harness 的原生檔案。變更後請重新啟動 Agent；儲存既有檔案時會保留 .workbench-backup 備份。',
+      skill: 'Skills', mcp: 'MCP', plugin: 'Plugins', hook: 'Hooks',
+      notConfigured: '請先在「設定 → Agent」指定此類擴充的路徑。',
+      file: '相對檔名', newFile: '新增檔案', open: '開啟／建立', reload: '重新載入檔案',
+      newHint: '新檔案 — 儲存後才會建立。', saved: '檔案已儲存', unsaved: '尚有未儲存的變更', discard: '捨棄變更',
+      loadError: '無法載入自訂 Agent 設定', launch: '啟動工作階段 →'
+    },
     common: {
       ok: '確定',
       cancel: '取消',

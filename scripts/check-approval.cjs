@@ -38,7 +38,8 @@ async function main() {
     './settings': { getCustomCliPath: () => null, isCliBypassPermissions: () => false },
     '../ext/paths': { findAgentCli: () => null },
     '../../shared/approvalDetect': detection,
-    '../../shared/portDetect': { detectDevPort: () => null }
+    '../../shared/portDetect': { detectDevPort: () => null },
+    '../../shared/customAgent': await load('src/shared/customAgent.ts')
   })
   const pause = () => new Promise(resolve => setTimeout(resolve, 250))
   const clear = '\x1b[H\x1b[2J'

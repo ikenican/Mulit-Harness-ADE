@@ -1,16 +1,19 @@
 import { ipcMain, app, BrowserWindow } from 'electron'
 import * as fs from 'fs'
-import { join, dirname, resolve, basename } from 'path'
+import { join, dirname, resolve, basename, isAbsolute } from 'path'
 import { execFile, exec } from 'child_process'
 import { promisify } from 'util'
+import { EventEmitter } from 'events'
 import { workspace } from '../index'
 import { findCli } from '../ext/paths'
 import type { AgentId, WorkbenchSettings } from '../../preload/index'
 import { sanitizeCoworkSettings } from '../../shared/cowork'
+import { sanitizeCustomAgent } from '../../shared/customAgent'
 
 const execFileAsync = promisify(execFile)
 const execAsync = promisify(exec)
 const SETTINGS_REL = '.workbench/settings.json'
+export const settingsEvents = new EventEmitter()
 
 /**
  * 判斷指定路徑是否為系統保護目錄或應用程式安裝目錄（非正常使用者專案工作區）
@@ -162,6 +165,8 @@ export function loadSettings(): WorkbenchSettings {
   }
 
   return {
+    // A repository cannot select a program or extension paths on the user's machine.
+    customAgent: sanitizeCustomAgent(parsedGlobal.customAgent),
     cliPaths: {
       claude: sanitizePath(parsed.cliPaths?.claude),
       antigravity: sanitizePath(parsed.cliPaths?.antigravity),
@@ -209,6 +214,7 @@ export function saveSettings(s: WorkbenchSettings): void {
     fs.writeFileSync(gp, JSON.stringify(s, null, 2), 'utf8')
   } catch (e) {
     console.error('[Settings] Failed to save global settings to userData:', e)
+    throw e
   }
 
   // 2. 若當前工作區為有效專案目錄（非系統保護區或應用程式安裝目錄），同步寫入 workspace
@@ -216,7 +222,8 @@ export function saveSettings(s: WorkbenchSettings): void {
     const wp = getWorkspaceSettingsPath()
     if (wp) {
       fs.mkdirSync(dirname(wp), { recursive: true })
-      fs.writeFileSync(wp, JSON.stringify(s, null, 2), 'utf8')
+      const { customAgent: _customAgent, ...workspaceSettings } = s
+      fs.writeFileSync(wp, JSON.stringify(workspaceSettings, null, 2), 'utf8')
     }
   } catch (e) {
     console.warn('[Settings] Failed to sync settings to workspace folder (non-fatal):', e)
@@ -441,9 +448,20 @@ export function registerSettingsHandlers(): void {
 
   ipcMain.handle('settings:set', async (_e, patch: Partial<WorkbenchSettings>): Promise<WorkbenchSettings> => {
     const current = loadSettings()
+    const customAgent = sanitizeCustomAgent(patch.customAgent ?? current.customAgent)
+    if (customAgent.enabled && !customAgent.command) throw new Error('Custom Agent: executable is required')
+    if (customAgent.command.includes('\0') || customAgent.args.some((a) => a.includes('\0'))) {
+      throw new Error('Custom Agent: command and arguments cannot contain NUL')
+    }
+    for (const p of Object.values(customAgent.resources)) {
+      if (p && (!isAbsolute(p) || p.includes('\0'))) {
+        throw new Error('Custom Agent: extension paths must be absolute')
+      }
+    }
     const updated: WorkbenchSettings = {
       ...current,
       ...patch,
+      customAgent,
       cliPaths: {
         ...current.cliPaths,
         ...(patch.cliPaths || {})
@@ -467,6 +485,12 @@ export function registerSettingsHandlers(): void {
       recentWorkspaces: patch.recentWorkspaces !== undefined ? patch.recentWorkspaces : current.recentWorkspaces
     }
     saveSettings(updated)
+    if (patch.customAgent !== undefined) {
+      settingsEvents.emit('changed')
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send('settings:changed')
+      }
+    }
     if (patch.language !== undefined || patch.recentWorkspaces !== undefined) {
       notifyJumpListUpdate()
     }

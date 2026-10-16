@@ -5,7 +5,9 @@ import * as os from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { workspace, getWorkspaceForEvent } from '../index'
-import { isProtectedPath } from './settings'
+import { isProtectedPath, loadSettings } from './settings'
+import { sanitizeCustomAgent, type CustomResourceKind } from '../../shared/customAgent'
+import { listCustomFiles, readCustomFile, writeCustomFile } from '../ext/customAgent'
 import { AGENT_PATHS, findAgentCli } from '../ext/paths'
 import { buildInventory, buildAgentStatus } from '../ext/inventory'
 import { readManifest, writeManifest, managedKeys, connRefsOf } from '../ext/manifest'
@@ -62,6 +64,11 @@ function saveDisabledKeys(keys: Set<string>, wsPath?: string): void {
 }
 
 export function registerExtHandlers(): void {
+  const customAgent = () => sanitizeCustomAgent(loadSettings().customAgent)
+  ipcMain.handle('ext:customList', (_event, kind: CustomResourceKind) => listCustomFiles(customAgent(), kind))
+  ipcMain.handle('ext:customRead', (_event, kind: CustomResourceKind, file: string) => readCustomFile(customAgent(), kind, file))
+  ipcMain.handle('ext:customWrite', (_event, kind: CustomResourceKind, file: string, content: string, before: string | null) =>
+    writeCustomFile(customAgent(), kind, file, content, before))
   const inventory = (ws: string): ExtItem[] => {
     const m = readManifest(ws)
     const items = buildInventory(ws, managedKeys(m))

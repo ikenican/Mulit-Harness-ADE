@@ -136,7 +136,8 @@ app.whenReady().then(async () => {
       './settings': { getCustomCliPath: () => null, isCliBypassPermissions: () => false },
       '../ext/paths': { findAgentCli: () => null },
       '../../shared/approvalDetect': { looksLikeApprovalPrompt: () => false, readApprovalScreen: () => '' },
-      '../../shared/portDetect': { detectDevPort: () => null }
+      '../../shared/portDetect': { detectDevPort: () => null },
+      '../../shared/customAgent': { CUSTOM_AGENT_ID: 'custom-agent' }
     })[id] || require(id), ptyModule, ptyModule.exports)
     const { spawnPty, subscribePty, resizePty } = ptyModule.exports
     const ptyId = spawnPty({ command: 'claude', cols: 120, rows: 30 }, { workspace: '', owner: { id: 1 }, subscribeOwner: false })
