@@ -58,6 +58,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 ## State
 - Commit 245cac4 on the branch: Cowork execution holds out-of-scope changes (task stops as blocked; user reverts, accepts or follows up), skips the node_modules junction when any task scope touches package.json/lockfile/node_modules, passes a structured `cowork-result` handoff plus Git changed-file list to dependent tasks, requires `assignmentReason` on model-generated tasks, and shows the chair's R1 participant assumptions.
 - Memory/docs commit (this handoff): PROTOCOL.md "Handoff format" section; status.sh warns on missing handoff sections or >8000 bytes; cowork.md status banner listing superseded sections; README (EN/zh) and docs/cowork-architecture.md describe the new execution behavior.
+- Commit 4d8e2f4 adds `.github/workflows/fork-release.yml`: on a pushed tag `fork-v<version>` (or manual run), builds on windows-latest, runs typecheck + check-cowork, packages with `publish.owner` overridden to the fork, and publishes setup.exe, blockmap, portable ZIP and latest.yml as a GitHub prerelease. Never run yet. Intended first tag: `fork-v0.1.42-fork.1` (the cloud session's git proxy refused to push tags).
 - Windows v0.1.41 remains the latest release; nothing was released or version-bumped. apps/linux untouched (DEC-011).
 
 ## Verified
@@ -72,10 +73,12 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 - Windows-specific behavior of `revertFiles` (case-insensitive paths, junctions) not run.
 
 ## Next
+- Owner: enable Actions on the fork if prompted, then push the tag from a local clone (`git fetch origin && git tag fork-v0.1.42-fork.1 origin/improve/accuracy-handoff && git push origin fork-v0.1.42-fork.1`) and check the run.
 - Owner: run the Electron checks on Windows, open one Project meeting and one execution, and look at the new cards.
 - Then plan items not started: agent profile settings (user-written strengths), real SessionStart hooks for Codex (`.codex/hooks.json`) and Antigravity after confirming `agy` supports SessionStart, drag-handoff reading CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view, re-testing planning flags on current CLI versions.
 
 ## Risks / do not
+- A Windows build cannot be made in the Linux cloud sandbox: only the linux-x64 node-pty prebuilt is installed and wine is unavailable; a cross-built installer would ship without the Windows terminal binary.
 - Scope matching is case-insensitive and treats a scope entry without "/" as file or directory; an empty scope flags every change. Tasks the chair scoped too narrowly will now stop more often.
 - Runs saved before this change have no assignmentReason/assumptions/result fields; UI hides them when absent.
 - Do not push or merge without the user's go-ahead.
