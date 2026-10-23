@@ -214,6 +214,31 @@ export async function commitAll(dir: string, message: string): Promise<string | 
   return (await git(dir, ['rev-parse', 'HEAD'])).trim()
 }
 
+/**
+ * 這一輪改了哪些檔（相對 worktree，含新增、刪除；改名拆成刪舊＋加新）。
+ * 先 git add -A 再看 index：和接下來 commitAll 收進去的內容一致，也看得到 agent 自己 stage 的檔。
+ */
+export async function changedFiles(dir: string): Promise<string[]> {
+  await git(dir, ['add', '-A'])
+  const out = await git(dir, ['diff', '--cached', '--name-only', '--no-renames', '-z'])
+  return out.split('\0').filter(Boolean)
+}
+
+/** 把指定的檔還原成 HEAD 的內容；HEAD 沒有的（新增的）直接刪掉。路徑必須是 changedFiles 回傳的相對路徑 */
+export async function revertFiles(dir: string, files: string[]): Promise<void> {
+  if (!files.length) return
+  const base = fs.realpathSync(dir)
+  for (const f of files) {
+    const abs = path.resolve(base, f)
+    const rel = path.relative(base, abs)
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`refusing to revert a path outside the worktree: ${f}`)
+    await git(dir, ['reset', '-q', '--', f]).catch(() => '')
+    const inHead = await git(dir, ['cat-file', '-e', `HEAD:${f}`]).then(() => true, () => false)
+    if (inHead) await git(dir, ['checkout', 'HEAD', '--', f])
+    else fs.rmSync(abs, { force: true })
+  }
+}
+
 export async function hasChanges(dir: string): Promise<boolean> {
   return (await git(dir, ['status', '--porcelain', '--untracked-files=all'])).trim().length > 0
 }

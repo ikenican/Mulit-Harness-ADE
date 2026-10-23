@@ -580,6 +580,14 @@ function RunScreen({
                     <Md text={task.detail} />
                     {last && <Md text={last.error || last.text} />}
                     {te?.status === 'failed' && <button className="text-btn press" disabled={busy} onClick={() => act('execRetry', task.id)}>{t('cwRetry')}</button>}
+                    {te?.status === 'blocked' && te.scopeReview && !ex?.cleaned && (
+                      <div className="cw-scope-review">
+                        <b>{t('cwScopeTitle', { count: te.scopeReview.files.length })}</b>
+                        <ul>{te.scopeReview.files.map((f) => <li key={f}><code>{f}</code></li>)}</ul>
+                        <button className="text-btn press" disabled={busy} onClick={() => act('execRevertScope', task.id)}>{t('cwScopeRevert')}</button>
+                        <button className="text-btn press" disabled={busy} onClick={() => act('execAcceptScope', task.id)}>{t('cwScopeAccept')}</button>
+                      </div>
+                    )}
                   </details>
                 )
               })}
