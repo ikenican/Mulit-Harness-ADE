@@ -53,7 +53,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 
 - Agent: Claude (claude.ai cloud session)
 - Updated: 2026-10-24 Asia/Taipei
-- Branch: improve/accuracy-handoff, based on master b179d70 (v0.1.41 release memory commit). Not pushed: this session has no write access to ikenican/Mulit-Harness-ADE.
+- Branch: improve/accuracy-handoff, based on master b179d70 (v0.1.41 release memory commit). Pushed to origin (ikenican/Mulit-Harness-ADE) as branch improve/accuracy-handoff; not merged into master.
 
 ## State
 - Commit 245cac4 on the branch: Cowork execution holds out-of-scope changes (task stops as blocked; user reverts, accepts or follows up), skips the node_modules junction when any task scope touches package.json/lockfile/node_modules, passes a structured `cowork-result` handoff plus Git changed-file list to dependent tasks, requires `assignmentReason` on model-generated tasks, and shows the chair's R1 participant assumptions.
