@@ -48,7 +48,7 @@ The executable, arguments, paths, and enable switch are local user settings, nev
 3. In Discussion, the chair speaks first and participants respond in order, seeing earlier public replies. Replies appear when each call completes; startup and first-output timings show progress. Send a follow-up to start another round, retry a failed speaker, or explicitly skip that speaker.
 4. Select a recorder and choose on-demand/context-limit summaries or a summary after every round. Records contain consensus, disagreements, and open questions; original messages remain available. **Ask the chair to conclude** produces a recommendation for your decision.
 5. A current chair conclusion can populate an editable Project proposal. Starting that proposal runs a fresh code-aware planning and review process. Review its task board and unresolved issues, then approve before executing. Further discussion makes the earlier conclusion stale and requires a new conclusion before conversion.
-6. Review background task results, then merge or clean up the execution worktrees. Closing a Cowork tab only closes its view; use **Cancel meeting** to stop a meeting. Saved meetings can be reopened from history; tab layouts and unsent drafts are session-local.
+6. Review background task results, then merge or clean up the execution worktrees. If an agent changed files outside its task scope, Cowork does not commit them: the task stops so you can revert those files, accept them, or follow up. Each task shows why the chair assigned it, and dependent tasks receive the earlier task's changed files (from Git) and its reported interfaces, checks and unverified points. When any task changes package.json or a lockfile, worktrees install their own dependencies instead of sharing `node_modules`. Closing a Cowork tab only closes its view; use **Cancel meeting** to stop a meeting. Saved meetings can be reopened from history; tab layouts and unsent drafts are session-local.
 
 **Settings → Cowork** controls default participants, chair, recorder, per-agent model/effort, and budgets for new meetings. Automatic effort uses lower effort for discussion, medium for opening proposals and summaries, and higher for review and conclusions, where the model supports it. Explicit effort choices take precedence.
 
@@ -312,7 +312,7 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 
 - **Discussion 討論**：主席先發言，參與者依序看到前面的公開回覆並接續討論。一般資料夾也能使用。每次呼叫完成後顯示回覆，過程可查看啟動與首次輸出時間；追問會啟動下一輪。失敗時可重試或明確跳過該 agent。
 - **摘要與主席結論**：指定參與者作為摘要 agent，選擇按需／上下文達門檻時摘要，或每輪摘要。累積紀錄整理共識、歧見與待確認事項，原始訊息仍保留。「請主席總結」提出建議供使用者拍板；繼續追問後，必須重新總結才能轉專案。
-- **Project 專案**：可把最新主席結論轉成可編輯提案，或直接開始 Project。系統重新讀取 Git 專案、形成方案、獨立審查並由主席整合；使用者確認任務板與未決事項、核准後，才在 worktree 背景執行。完成後由使用者檢視、合併或清理。
+- **Project 專案**：可把最新主席結論轉成可編輯提案，或直接開始 Project。系統重新讀取 Git 專案、形成方案、獨立審查並由主席整合；使用者確認任務板與未決事項、核准後，才在 worktree 背景執行。完成後由使用者檢視、合併或清理。每個任務會顯示主席的指派理由；agent 若改到任務範圍以外的檔，這些改動不會 commit，任務會停下讓你還原、接受或追問。下游任務會拿到前置任務以 Git 取得的改動清單，以及它回報的介面、已驗證與未驗證事項。有任務會改 package.json 或 lockfile 時，worktree 不共用 `node_modules`，改由各自安裝。
 - **設定與預算**：Settings → Cowork 可調整參與者、主席、摘要 agent、模型／強度，以及新會議預算。模型顯示完整版本，沒有 Custom 輸入。自動強度依討論、摘要、審查等階段分配，手動選擇優先。
 
 | 預算 | 預設 | 設定範圍 |
