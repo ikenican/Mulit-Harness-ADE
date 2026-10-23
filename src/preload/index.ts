@@ -440,6 +440,23 @@ export interface UpdaterStatus {
   }
   updateInfo?: UpdateInfo
   error?: string
+  /** 這個版本自己的更新來源（owner/repo）；官方版就是原作者的 repo */
+  channelRepo?: string
+  /** 只有 fork 版才有：原作者那邊的版本狀態，只提示、不自動安裝 */
+  upstream?: UpstreamStatus
+}
+
+export interface UpstreamStatus {
+  repo: string
+  /** 這個 fork 版基於原作者的哪一版 */
+  baseVersion: string
+  latestVersion?: string
+  latestReleaseDate?: string
+  latestUrl?: string
+  /** 原作者有比 baseVersion 新的版本 */
+  newer: boolean
+  checkedAt?: number
+  error?: string
 }
 
 export interface SessionTokenBreakdown {

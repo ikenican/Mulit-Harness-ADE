@@ -239,6 +239,10 @@ once before testing it with `npm run dev`.
 - `npm run dev` uses its own user-data folder (`agent-workbench-dev`), so a dev
   build can run alongside an installed copy without sharing settings or caches.
 
+## Fork builds
+
+This fork publishes its own Windows builds, versioned `<upstream version>-fork.<n>` (for example `0.1.41-fork.1` is the first fork build based on upstream 0.1.41). Push a branch named `release/<version>` and `.github/workflows/fork-release.yml` builds on a Windows runner, publishes release `v<version>` in this repository, and deletes the branch. The installed fork build checks two things: updates from this repository, installed through the normal update flow, and a notice in Settings → About when upstream has a newer version. Upstream versions are never installed over the fork build; merge them into the fork instead.
+
 ## Release Notes & Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history and release details.
@@ -444,6 +448,10 @@ docs/cowork-architecture.md  Cowork 功能流程與模組邊界
 - 儀表板快取（`dashboard-cache.json`、`usage-cache.json`）放在 app 的使用者資料夾，所有視窗共用。
   「當前工作區」由各視窗自行判斷；主行程不會以「目前聚焦的視窗」來歸屬 session。
 - `npm run dev` 使用獨立的使用者資料夾（`agent-workbench-dev`），可與已安裝版本同時執行，互不共用設定與快取。
+
+## Fork 版本
+
+這個 fork 會發佈自己的 Windows 版本，版本號為 `<原作者版本>-fork.<序號>`（例如 `0.1.41-fork.1` 是基於原作者 0.1.41 的第一個 fork 版）。推送名為 `release/<版本>` 的分支，`.github/workflows/fork-release.yml` 就會在 Windows 執行環境打包、在本 repo 發佈 `v<版本>`，並刪除該分支。安裝後的 fork 版會檢查兩件事：本 repo 的更新（走一般的更新流程安裝），以及原作者是否有新版本（只在 設定 → 關於 顯示提示）。原作者的版本不會直接安裝在 fork 版上，要合併進 fork 後再發新版。
 
 ## 版本紀錄與變更日誌
 
