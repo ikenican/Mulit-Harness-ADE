@@ -94,7 +94,8 @@ jobs:
           $v = '${{ steps.v.outputs.version }}'
           Compress-Archive -Path release/win-unpacked/* -DestinationPath "release/Agent-Workbench-$v-portable.zip"
           Get-ChildItem release -File | Format-Table Name, Length
-          # The update manifest is named after the version's channel (fork.yml for -fork.N)
+          # Update manifest: latest.yml. The app's updater reads latest.yml from the newest release whose
+          # tag carries the same prerelease channel as the installed version ("fork"), so upstream tags never match.
           $yml = Get-ChildItem release -Filter *.yml | Where-Object { $_.Name -ne 'builder-debug.yml' }
           if (-not $yml) { throw 'No update manifest (*.yml) was produced' }
           foreach ($f in $yml) { if (-not (Select-String -Path $f.FullName -Pattern "version: $v" -SimpleMatch -Quiet)) { throw "$($f.Name) does not name version $v" } }
