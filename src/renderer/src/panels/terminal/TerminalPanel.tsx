@@ -852,6 +852,14 @@ export default function TerminalPanel(): JSX.Element {
       sendToSession(activeSessionId, terminalDispatch.text)
       return
     }
+    if (terminalDispatch.newShell) {
+      // 只接受內建 shell；剛開的 shell 還在載入設定檔，等輸出靜止再貼，免得開頭被吃掉
+      const key = SHELL_IDS.includes(terminalDispatch.newShell) ? terminalDispatch.newShell : enabledShells[0]?.id || BUILTIN_SHELLS[0].id
+      const fresh = handleNewTerminal(key)
+      selectSession(fresh)
+      pasteWhenReady(fresh, terminalDispatch.text)
+      return
+    }
     // target 'shell' 就要真的是 shell：先前是「任何還活著的分頁」，
     // 於是 markdown 裡的指令會落進正在跑的 agent 提示字元，被當成對 agent 說的話。
     const running = sessionsRef.current.find((s) => !s.isExited && SHELL_IDS.includes(s.launcherKey))

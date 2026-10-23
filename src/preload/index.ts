@@ -69,13 +69,8 @@ const api = {
     planSync: (): Promise<FileChange[]> => ipcRenderer.invoke('ext:planSync'),
     applySync: (): Promise<{ written: string[] }> => ipcRenderer.invoke('ext:applySync'),
     trustWorkspace: (): Promise<boolean> => ipcRenderer.invoke('ext:trustWorkspace'),
-    installCodex: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('ext:installCodex'),
     getAgentInstallInfo: (agent: AgentId): Promise<AgentInstallInfo> =>
       ipcRenderer.invoke('ext:getAgentInstallInfo', agent),
-    installAgent: (
-      agent: AgentId
-    ): Promise<{ ok: boolean; message: string; installedPath?: string }> =>
-      ipcRenderer.invoke('ext:installAgent', agent),
     toggleItem: (kind: string, id: string, enabled: boolean, agent?: AgentId): Promise<boolean> =>
       ipcRenderer.invoke('ext:toggleItem', kind, id, enabled, agent)
   },
@@ -567,6 +562,8 @@ export interface AgentInstallInfo {
   name: string
   command: string
   targetPath: string
+  /** 在哪一種終端執行 command（安裝指令會貼進看得見的終端，由使用者按 Enter） */
+  shell: 'powershell' | 'bash'
 }
 
 /** 某個擴充在某個 agent 上的狀態 */
