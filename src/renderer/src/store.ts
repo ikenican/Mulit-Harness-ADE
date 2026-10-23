@@ -19,6 +19,8 @@ export interface TerminalDispatch {
   text: string
   /** shell = 送到（必要時新開）一般 shell；active = 目前分頁 */
   target: 'shell' | 'active'
+  /** 指定時一律新開這個 shell（例如安裝指令要在乾淨的 PowerShell 裡跑，不貼進使用者正在用的分頁） */
+  newShell?: string
   nonce: number
 }
 
@@ -494,6 +496,21 @@ export function sendToTerminal(text: string, target: 'shell' | 'active' = 'shell
     terminalDispatch: {
       text,
       target,
+      nonce: (state.terminalDispatch?.nonce ?? 0) + 1
+    }
+  })
+}
+
+/**
+ * 新開一個指定的 shell 分頁，等它啟動完成後貼上 text。同樣不自動送出，由使用者確認後按 Enter。
+ */
+export function pasteInNewShell(text: string, shell: string): void {
+  if (state.centerMaximized) set({ centerMaximized: false })
+  set({
+    terminalDispatch: {
+      text,
+      target: 'shell',
+      newShell: shell,
       nonce: (state.terminalDispatch?.nonce ?? 0) + 1
     }
   })

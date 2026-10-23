@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useWorkbench, setTheme, bumpSettings, setUiMode } from '@/store'
+import { useWorkbench, setTheme, bumpSettings, setUiMode, pasteInNewShell } from '@/store'
 import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import RemoteSettings from './RemoteSettings'
@@ -449,40 +449,15 @@ export default function SettingsModal({
     }
   }
 
-  const handleConfirmInstall = async (): Promise<void> => {
+  // 安裝指令貼進一個新的、看得見的終端，由使用者自己按 Enter 執行。
+  // 不再由 App 在背景啟動隱藏的 PowerShell：那種「下載後直接執行」的行為會被防毒軟體判成惡意程式，使用者也看不到實際在跑什麼。
+  const handleConfirmInstall = (): void => {
     if (!installConfirmAgent) return
-    const id = installConfirmAgent.id
-    const agentName = installConfirmAgent.name
+    const { id, command, shell } = installConfirmAgent
     setInstallConfirmAgent(null)
-
-    setInstallingAgent((prev) => ({ ...prev, [id]: true }))
-    setDetectFeedback((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-
-    try {
-      const res = await window.api.ext.installAgent(id)
-      if (res.ok) {
-        window.api.notify.show(agentName, res.message)
-        // 自動重新偵測並套用路徑
-        await handleDetectCli(id)
-      } else {
-        setDetectFeedback((prev) => ({
-          ...prev,
-          [id]: { type: 'fail', msg: res.message }
-        }))
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setDetectFeedback((prev) => ({
-        ...prev,
-        [id]: { type: 'fail', msg: `Installation failed: ${msg}` }
-      }))
-    } finally {
-      setInstallingAgent((prev) => ({ ...prev, [id]: false }))
-    }
+    pasteInNewShell(command, shell)
+    setDetectFeedback((prev) => ({ ...prev, [id]: { type: 'ok', msg: t('settings.installPasted') } }))
+    onClose()
   }
 
   const handleDetectAll = async (): Promise<void> => {
