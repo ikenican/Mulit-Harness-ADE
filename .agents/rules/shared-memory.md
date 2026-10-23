@@ -58,6 +58,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 - Commit e35392e: fork builds are versioned `<upstream>-fork.<n>`. Packaged package.json carries `updateRepo` (fork) and `upstreamRepo`; autoUpdater and the API fallback follow the fork, and Settings > About shows a Fork badge plus an upstream notice row (never installs upstream). `src/shared/version.ts` + `scripts/check-version.mts`.
 - `.github/workflows/fork-release.yml`: pushing branch `release/<x.y.z>-fork.<n>` (x.y.z must equal package.json version) builds on windows-latest, runs typecheck/check-cowork/check-version, packages, checks latest.yml and node-pty files, publishes release `v<version>`, deletes the trigger branch. Tags cannot be pushed from the cloud session; branches can.
 - Released v0.1.41-fork.1 from e35392e (run 40011071236, all steps green): setup.exe, blockmap, portable ZIP, latest.yml. Portable ZIP inspected: app-update.yml owner ikenican; package.json updateRepo/upstreamRepo set; win32 conpty .node files unpacked.
+- Commit 3e798ed: Settings > CLI "Install" no longer spawns a hidden `powershell -ExecutionPolicy Bypass -Command "irm … | iex"` (Defender flagged it as Trojan:Win32/Commando.A!ml on the user's PC). It opens a new PowerShell/bash tab, pastes the official command after the shell settles, and the user presses Enter; `ext:installAgent`/`installCodex` IPC and the npm fallback were removed. Released as v0.1.41-fork.2 via `release/0.1.41-fork.2`.
 - Windows v0.1.41 remains the latest release; nothing was released or version-bumped. apps/linux untouched (DEC-011).
 
 ## Verified
@@ -68,6 +69,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 
 ## Not verified
 - Electron-based checks (`check-custom-agent.cjs`, `check-cowork-tabs.cjs`, `check-terminal-ui.cjs`, `check-remote-cowork.cjs`, `check-custom-agent-ui.cjs`): the Electron binary could not be installed in the cloud sandbox. The new desktop/phone UI (scope review card, assumptions list, assignment reason, result details) was never rendered.
+- The visible-terminal install flow was not run on Windows (paste timing in a fresh PowerShell, Defender behavior).
 - The installed fork build was not run: the in-app update from one fork release to the next, and the upstream notice, have not been exercised.
 - No real Claude/Codex/Antigravity meeting was run; whether real agents emit the `cowork-result` block and fill `assignmentReason` well is unknown. Missing blocks are tolerated (no result stored); an empty reason triggers one repair call.
 - Windows-specific behavior of `revertFiles` (case-insensitive paths, junctions) not run.
