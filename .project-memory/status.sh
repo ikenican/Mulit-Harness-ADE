@@ -49,3 +49,18 @@ cat "$MEM/INDEX.md" 2>/dev/null
 echo
 echo "## handoff.md"
 cat "$MEM/handoff.md" 2>/dev/null
+
+# Handoff shape check (see PROTOCOL.md "Handoff format"): a missing section is easy to miss in
+# free text, and an oversized Tier 1 gets truncated by context-injection hooks.
+REQUIRED_SECTIONS=("## State" "## Verified" "## Not verified" "## Next" "## Risks / do not")
+MISSING=()
+for sec in "${REQUIRED_SECTIONS[@]}"; do
+  grep -qF -- "$sec" "$MEM/handoff.md" 2>/dev/null || MISSING+=("$sec")
+done
+SIZE=$(wc -c < "$MEM/handoff.md" 2>/dev/null || echo 0)
+if [ "${#MISSING[@]}" -gt 0 ] || [ "${SIZE:-0}" -gt 8000 ]; then
+  echo
+  echo "> Handoff check:"
+  [ "${#MISSING[@]}" -gt 0 ] && echo ">   missing section(s): ${MISSING[*]} - treat the handoff as incomplete and verify against Git."
+  [ "${SIZE:-0}" -gt 8000 ] && echo ">   handoff.md is ${SIZE} bytes (limit 8000) - move finished-event detail to archive/."
+fi

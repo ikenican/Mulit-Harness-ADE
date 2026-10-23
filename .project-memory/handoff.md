@@ -1,28 +1,33 @@
 # Latest Handoff
 
-- Agent: Codex
-- Updated: 2026-10-16 Asia/Taipei
-- Branch: master. Windows v0.1.41 PUBLISHED and marked Latest: https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/tag/v0.1.41. Annotated tag v0.1.41 points to release merge commit 1c7cf17c1fe0d9bfc995405e54b8ab65482e6b99.
-- User explicitly authorized merging both PRs and releasing a new version. PR #44 merged as 2bbdd37, #45 as 9f256da, release/version/docs PR #46 as 1c7cf17. No open PRs at verification. Linux remains independent linux-v0.1.0 prerelease; not changed.
+- Agent: Claude (claude.ai cloud session)
+- Updated: 2026-10-24 Asia/Taipei
+- Branch: improve/accuracy-handoff, based on master b179d70 (v0.1.41 release memory commit). Not pushed: this session has no write access to ikenican/Mulit-Harness-ADE.
 
-## Included / integration
-- Phone Cowork now opens via New Terminal → Cowork and matches desktop model/effort/chair/recorder/summary/baseline/limits choices. Includes skip failed speaker, raise-budget retry, conclusion-to-Project and delete finished meetings; fixes void-op success handling and current Claude model labels.
-- Default-off Customize Agent: one custom harness name/command/args; enabled-only desktop/phone terminal launch and prompt dispatch. Native Skills/Plugins directories plus MCP/Hooks file creation/editing under Settings → Extensions; global-only settings, backups, conflict/JSON/UTF-8/size/path/link checks. No provider default/bypass flags injected.
-- Merging #44 into #45 caused only handoff/generated-entry conflicts. Resolved these, verified application source exactly equals local test/pr-44-45 integration, pushed #45, then merged it. Release PR #46 changes root package/lock to 0.1.41 plus bilingual CHANGELOG and current phone Cowork README instructions.
-- Local master fast-forwarded to origin/master; previous local memory commits are retained through the PR history. Local test/pr-44-45 (1797a31, merge 386328d) remains available; feature/release branches kept.
+## State
+- Commit 245cac4 on the branch: Cowork execution holds out-of-scope changes (task stops as blocked; user reverts, accepts or follows up), skips the node_modules junction when any task scope touches package.json/lockfile/node_modules, passes a structured `cowork-result` handoff plus Git changed-file list to dependent tasks, requires `assignmentReason` on model-generated tasks, and shows the chair's R1 participant assumptions.
+- Memory/docs commit (this handoff): PROTOCOL.md "Handoff format" section; status.sh warns on missing handoff sections or >8000 bytes; cowork.md status banner listing superseded sections; README (EN/zh) and docs/cowork-architecture.md describe the new execution behavior.
+- Windows v0.1.41 remains the latest release; nothing was released or version-bumped. apps/linux untouched (DEC-011).
 
-## Release assets / checks
-- Published four assets: Agent-Workbench-0.1.41-setup.exe (130282013 bytes), Agent-Workbench-0.1.41-portable.zip (178194759 bytes), setup.exe.blockmap (135815 bytes), latest.yml (362 bytes).
-- Built on release source 6a1e2e4; tagged master source equivalence checked before publication. EXE file/product versions 0.1.41 / 0.1.41.0; packed package.json version 0.1.41.
-- npm run typecheck and npm run dist passed. Used existing scripts/release.ps1 -SkipBuild -Draft after packaging, verified uploaded assets, then gh release edit --draft=false --latest. GitHub reports public, non-prerelease Latest v0.1.41, published 2026-10-16T07:03:58Z.
-- All four uploaded asset sizes and GitHub SHA256 digests match local files. latest.yml version, installer URL/size and both SHA512 fields match the installer. Portable ZIP has 98 entries; executable, ASAR and native PTY binary hashes match win-unpacked.
-- node scripts/check-custom-agent.cjs, node scripts/check-approval.cjs, node --experimental-strip-types scripts/check-remote.mts passed.
-- electron scripts/check-remote-cowork.cjs and electron scripts/check-custom-agent-ui.cjs passed on 0.1.41 build; UI shots in C:/Users/milan.chang/AppData/Local/Temp/workbench-custom-ui-Gvdjzh.
-- Packaged ASAR smoke passed: renderer/preload startup, isolated settings, opt-in custom launcher and real Windows native PTY I/O. Temporary harness: %TEMP%/workbench-v0.1.41-packaged-smoke.js. Prior combined-source check-cowork.mts suite passed during local testing; application code unchanged since that test.
-- Logs/checks: %TEMP%/workbench-v0.1.41-dist.log, workbench-v0.1.41-publish.log, workbench-v0.1.41-assets.json, workbench-v0.1.41-verify.cjs. No release-script source changes or new dependencies.
+## Verified
+- `npm run typecheck` -> pass
+- `node --experimental-strip-types scripts/check-cowork.mts` -> pass, including new pure tests and the e2e "scope review, structured handoff and dependency linking" scenario (fake CLIs)
+- `check-portDetect`, `check-usage`, `check-bgTasks`, `check-hosts`, `check-remote`, `check-remote-files` (.mts) -> pass; `node scripts/check-approval.cjs` -> pass
+- `npm run build` -> pass (main, preload, renderer)
 
-## Next / limits
-- Existing Windows installations can use Check for Updates or download the setup/portable asset. No local installed app was closed, upgraded or reconfigured during release.
-- No paid/real provider meeting, third-party custom harness, physical iPhone or full NSIS install was tested. One custom harness slot; native formats/discovery remain the harness's responsibility. Cowork/provider history/token telemetry stay with the original three CLIs; phone board editing stays desktop-only. Linux unchanged per DEC-011.
-- Test-profile remote config remains isolated in agent-workbench-dev, disabled by default on port 47610; installed profile previously used 47600. Test app PID 19480 had exited before release preparation.
-- Pre-existing untracked Temp/ and three phone screenshots were preserved and excluded. Previous master handoff archived at archive/handoff-2026-10-16-before-v0.1.41-release.md; detailed local-test handoff remains on test/pr-44-45.
+## Not verified
+- Electron-based checks (`check-custom-agent.cjs`, `check-cowork-tabs.cjs`, `check-terminal-ui.cjs`, `check-remote-cowork.cjs`, `check-custom-agent-ui.cjs`): the Electron binary could not be installed in the cloud sandbox. The new desktop/phone UI (scope review card, assumptions list, assignment reason, result details) was never rendered.
+- No real Claude/Codex/Antigravity meeting was run; whether real agents emit the `cowork-result` block and fill `assignmentReason` well is unknown. Missing blocks are tolerated (no result stored); an empty reason triggers one repair call.
+- Windows-specific behavior of `revertFiles` (case-insensitive paths, junctions) not run.
+
+## Next
+- Owner: run the Electron checks on Windows, open one Project meeting and one execution, and look at the new cards.
+- Then plan items not started: agent profile settings (user-written strengths), real SessionStart hooks for Codex (`.codex/hooks.json`) and Antigravity after confirming `agy` supports SessionStart, drag-handoff reading CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view, re-testing planning flags on current CLI versions.
+
+## Risks / do not
+- Scope matching is case-insensitive and treats a scope entry without "/" as file or directory; an empty scope flags every change. Tasks the chair scoped too narrowly will now stop more often.
+- Runs saved before this change have no assignmentReason/assumptions/result fields; UI hides them when absent.
+- Do not push or merge without the user's go-ahead.
+
+## Details
+- Previous handoff (v0.1.41 release verification detail): archive/handoff-2026-10-16-v0.1.41-release.md

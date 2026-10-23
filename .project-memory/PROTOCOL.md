@@ -68,6 +68,26 @@ exploration with no reusable result.
    This is what makes the handoff reach the other agents and the other machines - a handoff that
    is never committed does not exist for anyone else. Report whether it was pushed.
 
+## Handoff format
+`handoff.md` uses these sections, in this order. `status.sh` warns when one is missing.
+
+```
+# Latest Handoff
+- Agent / Updated (date, Asia/Taipei) / Branch / HEAD commit
+## State          - what is true now: branch, commit, clean or dirty tree, what is merged or released
+## Verified       - each check that was actually run, as `command -> result`
+## Not verified   - what was NOT run or could not be run, and why (write "none" if truly none)
+## Next           - the next concrete step(s) for whoever continues
+## Risks / do not - known risks, and actions the next agent must not take
+## Details        - links to archive/ files holding the full record
+```
+
+Precision rule: the next agent must be able to act on Tier 1 alone. Keep everything it needs
+(exact branch, commit, commands, what is unverified). Move what only documents a finished event
+(asset sizes, hashes, temp paths, PIDs, log file names) to `archive/` and link it under Details.
+Keep `handoff.md` under 8000 bytes (roughly 2,500 tokens) so a context-injection hook can load it
+whole instead of truncating it.
+
 ## Size policy
 - `INDEX.md` tiny (index + rules only, no mutable state).
 - `handoff.md` / `STATE.md` preferably <=50 lines.
