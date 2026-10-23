@@ -1634,6 +1634,11 @@ export default function SettingsModal({
                           ? t('settings.channelInstalled')
                           : t('settings.channelPortable')}
                       </span>
+                      {updaterStatus?.upstream && (
+                        <span className="macos-channel-badge" title={updaterStatus.channelRepo}>
+                          {t('settings.forkBadge', { base: updaterStatus.upstream.baseVersion || '?' })}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1751,6 +1756,50 @@ export default function SettingsModal({
                     {updaterStatus?.error && (
                       <div className="macos-update-error">
                         ⚠️ {updaterStatus.error}
+                      </div>
+                    )}
+
+                    {/* fork 版：原作者的版本只提示、不自動安裝（會蓋掉 fork 的改動） */}
+                    {updaterStatus?.upstream && (
+                      <div className="macos-row">
+                        <div className="macos-row-main" style={{ padding: '14px 16px' }}>
+                          <div className="macos-row-left" style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                            {updaterStatus.upstream.newer ? (
+                              <IconDownload size={18} style={{ color: 'var(--orange)', flexShrink: 0 }} />
+                            ) : (
+                              <IconCheck size={18} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                            )}
+                            <div className="macos-row-info">
+                              <div className="macos-row-title-row">
+                                <span className="macos-row-title">
+                                  {updaterStatus.upstream.newer
+                                    ? t('settings.upstreamNewer', { version: updaterStatus.upstream.latestVersion || '' })
+                                    : updaterStatus.upstream.latestVersion
+                                    ? t('settings.upstreamCurrent')
+                                    : t('settings.upstreamUnknown')}
+                                </span>
+                              </div>
+                              <span className="macos-row-sub">
+                                {t('settings.upstreamSub', {
+                                  repo: updaterStatus.upstream.repo,
+                                  base: updaterStatus.upstream.baseVersion || '?',
+                                  latest: updaterStatus.upstream.latestVersion || '—'
+                                })}
+                                {updaterStatus.upstream.error ? ` · ${updaterStatus.upstream.error}` : ''}
+                              </span>
+                            </div>
+                          </div>
+                          {updaterStatus.upstream.latestUrl && (
+                            <button
+                              type="button"
+                              className="macos-btn-secondary"
+                              style={{ fontSize: '11.5px', padding: '4px 11px', flexShrink: 0 }}
+                              onClick={() => window.api.updater.openRelease(updaterStatus.upstream?.latestUrl)}
+                            >
+                              {t('settings.openUpstreamRelease')}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
