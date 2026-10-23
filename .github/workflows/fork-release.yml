@@ -1,0 +1,92 @@
+name: Fork Windows Release
+
+# Builds the Windows installer and portable ZIP on a real Windows runner and publishes them as a
+# GitHub prerelease of this repository. Triggered by pushing a tag such as fork-v0.1.42-fork.1,
+# or manually with a version.
+#
+# The installed app's update check points at THIS repository (publish.owner is overridden), so a
+# fork build is never replaced by an upstream release. Prereleases are not offered as automatic
+# updates, so each fork build stays put until you install a newer one yourself.
+
+on:
+  push:
+    tags: ['fork-v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the build, e.g. 0.1.42-fork.1 (must be newer than the upstream version it is based on)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#fork-v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Not a valid semver version: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=fork-v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - name: Cowork checks
+        run: node --experimental-strip-types scripts/check-cowork.mts
+
+      - run: npm run build
+
+      - name: Package installer
+        shell: bash
+        run: >
+          npx electron-builder --win --x64 --publish never
+          -c.extraMetadata.version=${{ steps.v.outputs.version }}
+          -c.publish.owner=${{ github.repository_owner }}
+          -c.publish.repo=${{ github.event.repository.name }}
+
+      - name: Portable ZIP
+        shell: pwsh
+        run: |
+          $v = '${{ steps.v.outputs.version }}'
+          Compress-Archive -Path release/win-unpacked/* -DestinationPath "release/Agent-Workbench-$v-portable.zip"
+          Get-ChildItem release -File | Format-Table Name, Length
+
+      - name: Publish prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V='${{ steps.v.outputs.version }}'
+          TAG='${{ steps.v.outputs.tag }}'
+          cat > notes.md <<EOF
+          Fork build of \`${GITHUB_SHA::7}\` (${GITHUB_REF_NAME}).
+
+          Not an official Agent Workbench release. Built on GitHub Actions (windows-latest) from this repository; the installer is not code-signed, so Windows SmartScreen may warn on first run.
+
+          Changes since upstream are listed in the commits of this tag and in \`.project-memory/handoff.md\`.
+          EOF
+          gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "Agent Workbench $V (fork)" --notes-file notes.md \
+            "release/Agent-Workbench-$V-setup.exe" \
+            "release/Agent-Workbench-$V-setup.exe.blockmap" \
+            "release/Agent-Workbench-$V-portable.zip" \
+            "release/latest.yml"
