@@ -32,7 +32,7 @@ const cleanup: string[] = [tmp]
   }
 
   const ctx = { assignable: ['claude', 'codex'] as const, maxTasks: 3 }
-  const t = (o: Record<string, unknown>) => ({ id: 't1', title: 'x', detail: 'd', scope: ['a.ts'], dependsOn: [], assignee: 'claude', acceptance: [], resources: [], ...o })
+  const t = (o: Record<string, unknown>) => ({ id: 't1', title: 'x', detail: 'd', scope: ['a.ts'], dependsOn: [], assignee: 'claude', assignmentReason: 'owns a.ts', acceptance: [], resources: [], ...o })
   const ok = shared.checkTasks([t({}), t({ id: 't2', dependsOn: ['t1'], scope: ['b\\c.ts'] })], { ...ctx, assignable: [...ctx.assignable] })
   assert.ok(ok.ok)
   if (ok.ok) assert.deepEqual(ok.value[1].scope, ['b/c.ts'])
@@ -68,6 +68,33 @@ const cleanup: string[] = [tmp]
   )
   assert.ok(r1.ok)
   if (r1.ok) assert.deepEqual(r1.value.questions.map((q) => q.id), ['q1', 'q2'], 'question ids are renumbered')
+
+  // 指派理由：模型產生的任務必填；使用者改板可以留空
+  const noReason = shared.checkR1({ summary: 's', framing: 'f', tasks: [t({ assignmentReason: '  ' })], questions: [], risks: [] }, { assignable: ['claude'], maxTasks: 5 })
+  assert.ok(!noReason.ok && noReason.errors.some((e) => /assignmentReason/.test(e)), 'model tasks need a reason')
+  assert.ok(shared.checkTasks([t({ assignmentReason: undefined })], { ...ctx, assignable: [...ctx.assignable] }).ok, 'user edits may omit the reason')
+  // 主席的假設：只收合法項目，不合法的不讓規劃失敗
+  const withAssumptions = shared.checkR1(
+    { summary: 's', framing: 'f', assumptions: [{ agent: 'codex', text: 'good at tests' }, { agent: 'nobody', text: 'x' }, 'junk'], tasks: [t({})], questions: [], risks: [] },
+    { assignable: ['claude'], maxTasks: 5 }
+  )
+  assert.ok(withAssumptions.ok)
+  if (withAssumptions.ok) assert.deepEqual(withAssumptions.value.assumptions, [{ agent: 'codex', text: 'good at tests' }])
+
+  // 越界檢查：目錄 scope、沒有斜線的項目、大小寫、未指定 scope
+  assert.deepEqual(shared.filesOutsideScope(['src/', 'README.md'], ['src/a.ts', 'readme.md', 'src2/x.ts', 'docs/a.md']), ['src2/x.ts', 'docs/a.md'])
+  assert.deepEqual(shared.filesOutsideScope(['src/lib'], ['src/lib/a.ts', 'src/lib', 'src/library.ts']), ['src/library.ts'])
+  assert.deepEqual(shared.filesOutsideScope([], ['a.ts']), ['a.ts'], 'no declared scope means any change is outside')
+  // 會改依賴的任務
+  assert.equal(shared.touchesDependencies(['src/a.ts']), false)
+  assert.equal(shared.touchesDependencies(['package.json']), true)
+  assert.equal(shared.touchesDependencies(['apps/linux/package-lock.json']), true)
+  assert.equal(shared.touchesDependencies(['node_modules/']), true)
+  // 結構化結果：取最後一個區塊，格式錯誤不丟例外
+  const res3 = shared.parseExecResult('x\n```cowork-result\n{"interfaces":["a"]}\n```\ny\n```cowork-result\r\n{"interfaces":["b"],"verified":["v"],"unverified":[],"notes":"n"}\r\n```')
+  assert.deepEqual(res3, { interfaces: ['b'], verified: ['v'], unverified: [], notes: 'n' })
+  assert.equal(shared.parseExecResult('```cowork-result\n{not json}\n```'), undefined)
+  assert.equal(shared.parseExecResult('no block'), undefined)
   const r2 = shared.checkR2({ agree: [], objections: [{ id: 'o1', target: '', reason: 'r', alternative: 'a' }, { id: 'o1', target: 't1', reason: 'r2', alternative: '' }], missing: [], claims: [], answers: [] })
   assert.ok(r2.ok)
   if (r2.ok) assert.deepEqual(r2.value.objections.map((o) => [o.id, o.target]), [['o1', 'framing'], ['o2', 't1']])
@@ -399,7 +426,7 @@ const code = async (p: Promise<unknown> | (() => unknown), c: string): Promise<v
   assert.equal(r.phase, 'awaiting-approval', JSON.stringify(r.block))
   const board = shared.currentBoard(r)!
   assert.deepEqual(board.decisions.map((d: any) => d.issueId).sort(), ['claude.q1', 'codex.m1', 'codex.o1'])
-  assert.deepEqual(board.tasks[1].scope, ['src/b.ts'], 'scope normalized')
+  assert.deepEqual(board.tasks[1].scope, ['src/b.ts', 't2.txt'], 'scope normalized')
   assert.equal(r.budget.planningCallsUsed, 3, 'N+1 calls for two agents')
   assert.ok(r.budget.costUsd > 0 && r.budget.tokens > 0)
   assert.equal(r.budget.activeSince, null)
@@ -789,7 +816,17 @@ const three = { ...base, participants: ['claude', 'codex', 'antigravity'] as any
   fs.writeFileSync(log, '')
   await code(svc5.execMessage(r.id, 't2', '   '), 'empty-feedback')
   await svc5.execMessage(r.id, 't2', 'also add a note')
+  // 追問寫的 followup.txt 不在 t2 的 scope：先不 commit，等使用者決定
+  x = await wait5(r.id, (y) => y.execution.tasks.t2.status === 'blocked')
+  assert.deepEqual(x.execution.tasks.t2.scopeReview, { files: ['followup.txt'], followUp: true })
+  assert.equal(x.execution.tasks.t2.commits.length, 1, 'out-of-scope changes are not committed')
+  assert.ok(x.log.some((l: any) => l.t === 'task-scope' && l.taskId === 't2'))
+  await code(svc5.execAcceptScope(r.id, 't1'), 'not-allowed')
+  await svc5.execAcceptScope(r.id, 't2')
   x = await wait5(r.id, (y) => y.phase === 'review' && y.execution.tasks.t2.commits.length === 2)
+  assert.equal(x.execution.tasks.t2.scopeReview, undefined)
+  assert.ok(x.execution.tasks.t2.changedFiles.includes('followup.txt'))
+  assert.match(g(wt.path, 'log', '-1', '--format=%s'), /\(follow-up\)/)
   const resumed = calls().find((c) => c.me === 'antigravity')
   assert.equal(resumed.argv[resumed.argv.indexOf('--conversation') + 1], 'sess-antigravity-t2')
   assert.ok(fs.existsSync(path.join(wt.path, 'followup.txt')))
@@ -882,6 +919,46 @@ const three = { ...base, participants: ['claude', 'codex', 'antigravity'] as any
   await code(svc5.execStart(secondProject.id, { mode: 'sequential', linkDeps: false, bypass: false }), 'active-run-exists')
   await svc5.execCleanup(ready.id)
   console.log('e2e exclusive resources serialize independent tasks ok')
+
+  // 越界改動還原 + 結構化交接 + 會改依賴的任務不共用 node_modules
+  await code(svc5.execRevertScope(secondProject.id, 't1'), 'task-not-found')
+  behave({ execStray: true, execResult: true, logFile: log })
+  const sr0 = await svc5.start({ ...three, workspace: erepo } as any)
+  const sready = await wait5(sr0.id, (y) => y.phase === 'awaiting-approval')
+  assert.equal(shared.currentBoard(sready)!.tasks[0].assignmentReason, 'Owns the helper module')
+  assert.deepEqual(sready.r1.assumptions, [{ agent: 'claude', text: 'good at small modules' }])
+  const withDeps = shared.currentBoard(sready)!.tasks.map((t) => (t.id === 't1' ? { ...t, scope: [...t.scope, 'package.json'] } : t))
+  assert.ok(svc5.editBoard(sready.id, sready.planRevision, withDeps).ok)
+  const sedit = svc5.get(sready.id)!
+  assert.equal(shared.currentBoard(sedit)!.tasks[0].assignmentReason, 'Owns the helper module', 'editing keeps the reason when the assignee is unchanged')
+  svc5.approve(sedit.id, sedit.planRevision)
+  fs.writeFileSync(log, '')
+  await svc5.execStart(sedit.id, { mode: 'sequential', linkDeps: true, bypass: true })
+  x = await wait5(sedit.id, (y) => y.execution.tasks.t1.status === 'blocked')
+  assert.deepEqual(x.execution.depsLinkSkippedFor, ['t1'])
+  assert.equal(x.execution.worktrees.main.depsLinked, false)
+  assert.deepEqual(x.execution.tasks.t1.scopeReview.files, ['stray.txt'])
+  assert.equal(x.execution.tasks.t2.status, 'pending', 'dependents wait while a task is held for scope review')
+  assert.deepEqual(x.execution.tasks.t1.result, { interfaces: ['t1.txt holds the marker'], verified: ['npm test -> pass'], unverified: ['Windows paths'], notes: 'note from t1' })
+  const swt = x.execution.worktrees.main.path
+  assert.ok(calls().find((c) => c.me === 'claude').head.includes('NOT installed'), 'agent is told dependencies are not installed')
+  await svc5.execRevertScope(sedit.id, 't1')
+  x = await wait5(sedit.id, (y) => y.execution.tasks.t1.status === 'done')
+  assert.ok(!fs.existsSync(path.join(swt, 'stray.txt')), 'reverted file removed')
+  assert.ok(fs.existsSync(path.join(swt, 't1.txt')), 'in-scope change kept')
+  assert.deepEqual(x.execution.tasks.t1.changedFiles, ['t1.txt'])
+  assert.ok(!g(swt, 'show', '--name-only', '--format=', 'HEAD').includes('stray.txt'))
+  // t2 也寫了 stray.txt：一樣停下；它的交辦裡有 t1 的結構化交接
+  x = await wait5(sedit.id, (y) => y.execution.tasks.t2.status === 'blocked')
+  const t2brief = calls().find((c) => c.me === 'antigravity').head
+  assert.ok(t2brief.includes('changed files (from git): t1.txt'), t2brief)
+  assert.ok(t2brief.includes('t1.txt holds the marker') && t2brief.includes('NOT verified') && t2brief.includes('Windows paths'))
+  assert.ok(!t2brief.includes('"t1.txt holds the marker"'), 'raw result block is not repeated in the excerpt')
+  await svc5.execRevertScope(sedit.id, 't2')
+  x = await wait5(sedit.id, (y) => y.phase === 'review')
+  assert.equal(x.execution.integration.status, 'ok')
+  await svc5.execCleanup(sedit.id)
+  console.log('e2e scope review, structured handoff and dependency linking ok')
 }
 
 // Discussion: real sequential context, no snapshot or project instructions, retry/skip, next round and budget.

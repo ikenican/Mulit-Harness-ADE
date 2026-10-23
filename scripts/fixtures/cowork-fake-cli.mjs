@@ -43,13 +43,17 @@ if (!step) {
   const failed = task && cfg.execFail === task
   if (!failed) {
     if (task) {
-      writeFileSync(join(process.cwd(), `${task}.txt`), `${me} did ${task}\n`)
+      writeFileSync(join(process.cwd(), `${task}.txt`), `${me} did ${task} (pid ${process.pid})\n`)
+      if (cfg.execStray) writeFileSync(join(process.cwd(), 'stray.txt'), `${me} strayed in ${task}\n`)
       if (cfg.execConflict) writeFileSync(join(process.cwd(), 'shared.txt'), `${task}\n`)
     } else {
       appendFileSync(join(process.cwd(), 'followup.txt'), `${me}: ${prompt.slice(0, 60)}\n`)
     }
   }
-  const reply = failed ? '' : task ? `Done ${task}.` : `Follow-up done.`
+  const resultBlock = cfg.execResult && task
+    ? `\n\n\`\`\`cowork-result\n${JSON.stringify({ interfaces: [`${task}.txt holds the marker`], verified: ['npm test -> pass'], unverified: ['Windows paths'], notes: `note from ${task}` })}\n\`\`\``
+    : ''
+  const reply = failed ? '' : task ? `Done ${task}.${resultBlock}` : `Follow-up done.`
   const ev = (e) => process.stdout.write(JSON.stringify(e) + '\n')
   const file = join(process.cwd(), task ? `${task}.txt` : 'followup.txt')
   if (isCodex) {
@@ -88,9 +92,10 @@ const tasks = () => [
     id: 't1',
     title: 'Add the helper',
     detail: 'Create the helper module.',
-    scope: ['src/a.ts'],
+    scope: ['src/a.ts', 't1.txt'],
     dependsOn: [],
     assignee: assignable[0],
+    assignmentReason: 'Owns the helper module',
     acceptance: ['npm test passes'],
     resources: []
   },
@@ -98,9 +103,10 @@ const tasks = () => [
     id: 't2',
     title: 'Use the helper',
     detail: 'Call the helper from b.',
-    scope: ['src\\b.ts'],
+    scope: ['src\\b.ts', 't2.txt'],
     dependsOn: ['t1'],
     assignee: assignable[assignable.length - 1],
+    assignmentReason: 'Reviewed the call site',
     acceptance: ['b uses the helper'],
     resources: []
   }
@@ -120,7 +126,7 @@ if (step === 'Discussion') {
   out =
     cfg.invalidOnce && !repair
       ? { summary: 's', framing: 'f', tasks: [], questions: [], risks: [] }
-      : { summary: 'Plan', framing: 'Two tasks', tasks: tasks(), questions: [{ id: 'whatever', text: 'Is a.ts the right place?' }], risks: [] }
+      : { summary: 'Plan', framing: 'Two tasks', assumptions: [{ agent: assignable[0], text: 'good at small modules' }], tasks: tasks(), questions: [{ id: 'whatever', text: 'Is a.ts the right place?' }], risks: [] }
 } else if (step === 'R2') {
   out = cfg.r2Objection
     ? {

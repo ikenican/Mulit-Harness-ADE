@@ -1057,6 +1057,18 @@ function ChairOpening({ run, t, highlight, onHighlight }: { run: CoworkRun; t: T
       </div>
       <div className="cw-msg-body">
         <p className="cw-lead">{r1.summary}</p>
+        {r1.assumptions && r1.assumptions.length > 0 && (
+          <div className="cw-assumptions">
+            <div className="cw-field-label">{t('cowork.assumptions')}</div>
+            <ul className="cw-list">
+              {r1.assumptions.map((a, i) => (
+                <li key={i}>
+                  <AgentMark agent={a.agent} size={11} /> <b>{agentLabel(a.agent)}</b>: {a.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <button type="button" className="cw-disclosure" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
           {t('cowork.framing')} · {t('cowork.draftTasks')} {r1.tasks.length} · {t('cowork.questions')} {r1.questions.length}
         </button>
@@ -1575,6 +1587,11 @@ function TaskCard({
         </span>
         {task.dependsOn.length > 0 && <span className="cw-muted">{t('cowork.dependsOn', { deps: task.dependsOn.join(', ') })}</span>}
       </div>
+      {task.assignmentReason && (
+        <div className="cw-assign-reason cw-muted small">
+          {t('cowork.assignmentReason')}: {task.assignmentReason}
+        </div>
+      )}
       {task.scope.length > 0 && (
         <div className="cw-scope">
           {task.scope.map((s) => (
@@ -1680,6 +1697,9 @@ interface DraftTask {
   title: string
   detail: string
   assignee: CoworkAgent
+  /** 原本的指派理由；使用者換了指派對象就清掉，免得理由對不上人 */
+  assignmentReason: string
+  originalAssignee?: CoworkAgent
   scope: string
   dependsOn: string
   acceptance: string
@@ -1691,6 +1711,8 @@ const toDraft = (x: CoworkTask): DraftTask => ({
   title: x.title,
   detail: x.detail,
   assignee: x.assignee,
+  assignmentReason: x.assignmentReason || '',
+  originalAssignee: x.assignee,
   scope: x.scope.join('\n'),
   dependsOn: x.dependsOn.join(', '),
   acceptance: x.acceptance.join('\n'),
@@ -1719,6 +1741,7 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
       title: d.title,
       detail: d.detail,
       assignee: d.assignee,
+      ...(d.assignmentReason && d.assignee === d.originalAssignee ? { assignmentReason: d.assignmentReason } : {}),
       scope: lines(d.scope),
       dependsOn: commas(d.dependsOn),
       acceptance: lines(d.acceptance),
@@ -1778,7 +1801,7 @@ function BoardEditor({ run, board, t, onDone }: { run: CoworkRun; board: CoworkB
           onClick={() =>
             setDrafts((x) => [
               ...x,
-              { id: nextId(), title: '', detail: '', assignee: assignable[0], scope: '', dependsOn: '', acceptance: '', resources: '' }
+              { id: nextId(), title: '', detail: '', assignee: assignable[0], assignmentReason: '', scope: '', dependsOn: '', acceptance: '', resources: '' }
             ])
           }
         >

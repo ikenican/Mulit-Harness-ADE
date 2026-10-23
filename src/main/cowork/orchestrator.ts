@@ -1099,6 +1099,14 @@ export class CoworkService {
     await this.exec(() => this.executor.retry(this.mustGet(runId), taskId))
   }
 
+  async execAcceptScope(runId: string, taskId: string): Promise<void> {
+    await this.exec(() => this.executor.acceptScope(this.mustGet(runId), taskId))
+  }
+
+  async execRevertScope(runId: string, taskId: string): Promise<void> {
+    await this.exec(() => this.executor.revertScope(this.mustGet(runId), taskId))
+  }
+
   async execPause(runId: string): Promise<void> {
     await this.exec(() => this.executor.pause(this.mustGet(runId)))
   }

@@ -475,6 +475,8 @@ const ops: Record<string, (workspace: string, ...args: any[]) => unknown> = {
     }),
   execMessage: (_w, runId: string, taskId: string, text: string) => svc().execMessage(String(runId), String(taskId), String(text ?? '')),
   execRetry: (_w, runId: string, taskId: string) => svc().execRetry(String(runId), String(taskId)),
+  execAcceptScope: (_w, runId: string, taskId: string) => svc().execAcceptScope(String(runId), String(taskId)),
+  execRevertScope: (_w, runId: string, taskId: string) => svc().execRevertScope(String(runId), String(taskId)),
   execPause: (_w, runId: string) => svc().execPause(String(runId)),
   execResume: (_w, runId: string) => svc().execResume(String(runId)),
   execMerge: (_w, runId: string) => svc().execMerge(String(runId)),

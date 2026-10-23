@@ -279,6 +279,9 @@ const api = {
     execMessage: (runId: string, taskId: string, text: string): Promise<CoworkResult<void>> =>
       ipcRenderer.invoke('cowork:execMessage', runId, taskId, text),
     execRetry: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execRetry', runId, taskId),
+    // 越界改動：接受（照原樣 commit）或還原越界的檔
+    execAcceptScope: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execAcceptScope', runId, taskId),
+    execRevertScope: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execRevertScope', runId, taskId),
     execPause: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execPause', runId),
     execResume: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execResume', runId),
     execMerge: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execMerge', runId),
