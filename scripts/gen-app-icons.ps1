@@ -4,6 +4,7 @@
 #   build/icon.png   1024 px, transparent corners (electron-builder derives the macOS/Linux icons from it)
 #   build/icon.ico   16-256 px (Windows exe, installer, taskbar, jump list)
 #   src/renderer/public/remote-icon-180.png / -512.png   full-bleed squares for the phone PWA (iOS rounds them itself)
+#   src/renderer/public/app-icon-256.png   in-app logo (Settings > About) and page favicon
 # The source tile has a ragged white fringe outside its rounded square, so the tile is located and re-masked
 # with a clean anti-aliased rounded rectangle instead of using the source alpha.
 param([string]$Source = "$PSScriptRoot/../build/icon-source.png")
@@ -80,6 +81,8 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 }
 foreach ($p in $pngs) { $bw.Write($p) }
 $bw.Close()
+New-Item -ItemType Directory -Force "$root/src/renderer/public" | Out-Null
+$ui = Resize $master 256; $ui.Save("$root/src/renderer/public/app-icon-256.png", [System.Drawing.Imaging.ImageFormat]::Png); $ui.Dispose()
 
 # ── phone PWA: opaque full-bleed square cut from the tile interior (inside the rounded corners) ──
 $cut = [int]($radius * (1 - 1 / [math]::Sqrt(2))) + 8
@@ -93,4 +96,4 @@ foreach ($s in 180, 512) {
   $b.Save("$root/src/renderer/public/remote-icon-$s.png", [System.Drawing.Imaging.ImageFormat]::Png); $b.Dispose()
 }
 $master.Dispose(); $tile.Dispose(); $src.Dispose()
-Write-Host 'wrote build/icon.png, build/icon.ico, src/renderer/public/remote-icon-180.png, remote-icon-512.png'
+Write-Host 'wrote build/icon.png, build/icon.ico, src/renderer/public/app-icon-256.png, src/renderer/public/remote-icon-180.png, remote-icon-512.png'

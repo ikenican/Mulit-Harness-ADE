@@ -10,6 +10,7 @@ import {
 import { registerGitHandlers } from './ipc/git'
 import { registerPtyHandlers, cleanupPtyForWindow } from './ipc/pty'
 import { registerNotifyHandlers } from './ipc/notify'
+import { appIconPath } from './appIcon'
 import { registerExtHandlers } from './ipc/ext'
 import { registerConnHandlers } from './ipc/conn'
 import { registerSettingsHandlers, getLastWorkspace, isProtectedPath, saveLastWorkspace, addRecentWorkspace } from './ipc/settings'
@@ -149,6 +150,7 @@ export function createWindow(initialWorkspace?: string): BrowserWindow {
     minHeight: 600,
     title: windowTitle,
     backgroundColor: '#161618',
+    icon: appIconPath,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
@@ -305,6 +307,7 @@ function createTerminalWindow(): void {
     minHeight: 400,
     title: 'Agent Terminals - Agent Workbench',
     backgroundColor: '#161618',
+    icon: appIconPath,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
