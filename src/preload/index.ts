@@ -235,6 +235,9 @@ const api = {
     pickFolder: (): Promise<MemSyncResult<{ picked: boolean; state: MemSyncState }>> => ipcRenderer.invoke('memsync:pickFolder'),
     launchCloudApp: (provider: 'onedrive' | 'gdrive'): Promise<MemSyncResult<boolean>> => ipcRenderer.invoke('memsync:launchCloudApp', provider),
     setupRepo: (): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:setupRepo'),
+    /** 免 gh：連結使用者自己建好的私人 repo（網址或 owner/repo） */
+    connectRepo: (input: string): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> =>
+      ipcRenderer.invoke('memsync:connectRepo', input),
     linkProject: (): Promise<MemSyncResult<{ result: MemSyncLinkResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:linkProject'),
     sync: (pullOnly?: boolean): Promise<MemSyncResult<{ result: MemSyncSyncResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:sync', pullOnly),
     /** 開啟／切換專案時呼叫；記憶同步沒開啟時立刻回 null，不碰網路 */

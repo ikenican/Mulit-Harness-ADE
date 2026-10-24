@@ -18,6 +18,7 @@ import {
   detectCloudRoots,
   ensureFolder,
   ensureMemoryScripts,
+  connectRepoByUrl,
   ensureRepo,
   ghStatus,
   linkProject,
@@ -275,6 +276,19 @@ export function registerMemSyncHandlers(): void {
       const r = await exclusive(() => ensureRepo(t, { name: c.repo, clonePath: c.clonePath }))
       const gh = await ghStatus(t)
       saveConfig({ ...c, repoFull: r.repo, login: gh.login || null })
+      return { result: r, state: await state(getWorkspaceForEvent(event)) }
+    })
+  )
+
+  // 免 gh：使用者自己建好的私人 repo 網址；登入交給 Git Credential Manager
+  ipcMain.handle('memsync:connectRepo', (event, input: string) =>
+    wrap(async () => {
+      const c = loadMemSyncConfig()
+      requireConsent(c)
+      if (c.backend !== 'github') throw new MemSyncError('bad-backend', String(c.backend))
+      const t = await tools()
+      const r = await exclusive(() => connectRepoByUrl(t, { input: String(input || ''), clonePath: c.clonePath }))
+      saveConfig({ ...c, repo: r.repo, repoFull: r.repo, login: r.repo.split('/')[0] })
       return { result: r, state: await state(getWorkspaceForEvent(event)) }
     })
   )

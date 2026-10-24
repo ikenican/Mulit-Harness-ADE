@@ -25,6 +25,8 @@ export interface Tools {
   /** gh 執行檔；沒裝時為 null */
   gh: string | null
   run: Run
+  /** 不登入查詢網址的 HTTP 狀態碼（免 gh 路線判斷 repo 是否公開）；測試時注入假的 */
+  httpStatus?: (url: string) => Promise<number>
 }
 
 export class MemSyncError extends Error {
@@ -242,7 +244,50 @@ export async function ensureRepo(tools: Tools, opts: { name: string; clonePath: 
   }
   // git 透過 gh 取得 GitHub 憑證（推送私人 repo 用）
   await tools.run(gh, ['auth', 'setup-git'])
+  return { repo: full, created, ...(await prepareClone(tools, { full, clonePath: opts.clonePath, login: st.login })) }
+}
 
+/** 把 GitHub 網址（https 或 git@）或 owner/repo 正規化成 owner/repo；看不懂就回 null */
+export function parseRepoInput(input: string): string | null {
+  const m = input
+    .trim()
+    .match(/^(?:https?:\/\/(?:www\.)?github\.com\/|git@github\.com:)?([A-Za-z0-9-]{1,39})\/([A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/i)
+  return m ? `${m[1]}/${m[2]}` : null
+}
+
+const defaultHttpStatus = async (url: string): Promise<number> =>
+  (await fetch(url, { headers: { 'User-Agent': 'agent-workbench', Accept: 'application/vnd.github+json' } })).status
+
+/**
+ * 免 gh 路線：使用者自己在 github.com 建好私人 repo，貼上網址。
+ * 不登入查 GitHub API：查得到（200）= 公開 → 拒絕；404 = 私人或不存在，再用 git 確認連得上
+ * （Git Credential Manager 第一次會開 GitHub 登入）。其他狀態（限流、斷網）一律拒絕，不猜。
+ */
+export async function connectRepoByUrl(tools: Tools, opts: { input: string; clonePath: string }): Promise<EnsureRepoResult> {
+  const full = parseRepoInput(opts.input)
+  if (!full) throw new MemSyncError('bad-repo-url', opts.input)
+  let status: number
+  try {
+    status = await (tools.httpStatus || defaultHttpStatus)(`https://api.github.com/repos/${full}`)
+  } catch (e) {
+    throw new MemSyncError('privacy-check-failed', (e as Error).message)
+  }
+  if (status === 200) throw new MemSyncError('repo-public', `${full} is public; memory must go to a private repository`)
+  if (status !== 404) throw new MemSyncError('privacy-check-failed', `GitHub API answered ${status}`)
+  const ls = await tools.run(tools.git, ['ls-remote', '--heads', `https://github.com/${full}.git`], {
+    timeoutMs: 5 * 60_000,
+    env: { GCM_INTERACTIVE: 'always' }
+  })
+  if (ls.code !== 0) throw new MemSyncError('repo-unreachable', (ls.stderr || ls.stdout).trim().slice(0, 400))
+  return { repo: full, created: false, ...(await prepareClone(tools, { full, clonePath: opts.clonePath, login: full.split('/')[0] })) }
+}
+
+/** 確保本機 clone 指向 full；新 repo 時放說明與 .gitignore 並推出第一個提交 */
+async function prepareClone(
+  tools: Tools,
+  opts: { full: string; clonePath: string; login: string | undefined }
+): Promise<{ cloned: boolean; clonePath: string }> {
+  const { full, login } = opts
   let cloned = false
   if (exists(path.join(opts.clonePath, '.git'))) {
     const origin = (await git(tools, opts.clonePath, 'config', '--get', 'remote.origin.url')).stdout.trim()
@@ -257,7 +302,7 @@ export async function ensureRepo(tools: Tools, opts: { name: string; clonePath: 
     await must(tools, tools.git, ['clone', '-q', `https://github.com/${full}.git`, opts.clonePath], undefined, 'clone-failed')
     cloned = true
   }
-  await ensureIdentity(tools, opts.clonePath, st.login)
+  await ensureIdentity(tools, opts.clonePath, login)
 
   // 新 repo 沒有任何提交：放一份說明與 .gitignore，推出第一個提交
   const ignore = path.join(opts.clonePath, '.gitignore')
@@ -277,7 +322,7 @@ export async function ensureRepo(tools: Tools, opts: { name: string; clonePath: 
     await gitMust(tools, opts.clonePath, 'commit', '-q', '-m', 'memory: initialize')
     await gitMust(tools, opts.clonePath, 'push', '-q', '-u', 'origin', 'HEAD')
   }
-  return { repo: full, created, cloned, clonePath: opts.clonePath }
+  return { cloned, clonePath: opts.clonePath }
 }
 
 // ── 專案連結 ───────────────────────────────────────────────────────────

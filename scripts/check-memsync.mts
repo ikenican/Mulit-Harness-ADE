@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
+import { connectRepoByUrl, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-check-'))
@@ -305,6 +305,47 @@ assert.match(fs.readFileSync(path.join(folder, 'someone', 'demo', 'commit-handof
 const chMig = await exec(BASH, ['.project-memory/commit-handoff.sh', 'after move'], { cwd: projA })
 assert.match(chMig.stdout, /Saved in the synced folder/)
 console.log('switch storage: GitHub clone -> cloud folder migration, old copy kept ok')
+
+// ── PC N without gh: user-created private repo by URL, public check via the (fake) unauthenticated API ──
+assert.equal(parseRepoInput('https://github.com/tester/ai-project-memory'), 'tester/ai-project-memory')
+assert.equal(parseRepoInput('https://github.com/tester/ai-project-memory.git/'), 'tester/ai-project-memory')
+assert.equal(parseRepoInput('git@github.com:tester/my.mem.git'), 'tester/my.mem')
+assert.equal(parseRepoInput(' tester/ai-project-memory '), 'tester/ai-project-memory')
+assert.equal(parseRepoInput('https://gitlab.com/tester/x'), null)
+assert.equal(parseRepoInput('https://github.com/tester/../x'), null)
+const apiCalls: string[] = []
+const noGh = (status: number | Error): Tools => ({
+  git: GIT,
+  gh: null,
+  run,
+  httpStatus: async (url) => {
+    apiCalls.push(url)
+    if (status instanceof Error) throw status
+    if (status !== 0) return status
+    const full = url.replace('https://api.github.com/repos/', '')
+    return repos.get(full) === false ? 200 : 404 // unauthenticated: public repos visible, private/missing 404
+  }
+})
+const pcN = path.join(tmp, 'pcN')
+fs.mkdirSync(pcN)
+const memN = path.join(pcN, 'mem')
+const ghBefore = ghCalls.length
+await assert.rejects(connectRepoByUrl(noGh(0), { input: 'not a url', clonePath: memN }), (e: MemSyncError) => e.code === 'bad-repo-url')
+await assert.rejects(connectRepoByUrl(noGh(0), { input: 'https://github.com/tester/public-mem', clonePath: memN }), (e: MemSyncError) => e.code === 'repo-public')
+await assert.rejects(connectRepoByUrl(noGh(403), { input: 'tester/ai-project-memory', clonePath: memN }), (e: MemSyncError) => e.code === 'privacy-check-failed', 'rate limit: refuse, do not guess')
+await assert.rejects(connectRepoByUrl(noGh(new Error('offline')), { input: 'tester/ai-project-memory', clonePath: memN }), (e: MemSyncError) => e.code === 'privacy-check-failed')
+await assert.rejects(connectRepoByUrl(noGh(0), { input: 'tester/does-not-exist', clonePath: memN }), (e: MemSyncError) => e.code === 'repo-unreachable')
+assert.ok(!fs.existsSync(memN), 'nothing cloned on refusal')
+const rc = await connectRepoByUrl(noGh(0), { input: 'https://github.com/tester/ai-project-memory.git', clonePath: memN })
+assert.deepEqual([rc.repo, rc.created, rc.cloned], ['tester/ai-project-memory', false, true])
+assert.equal(apiCalls.at(-1), 'https://api.github.com/repos/tester/ai-project-memory')
+await g(pcN, 'clone', '-q', 'https://github.com/someone/demo.git', 'demo')
+const projN = path.join(pcN, 'demo')
+const lcN = await linkProject(noGh(0), { workspace: projN, clonePath: memN, login: 'tester' })
+assert.equal(lcN.source, 'repo')
+assert.ok(fs.existsSync(path.join(projN, '.project-memory', 'handoff.md')), 'PC N reads the shared memory')
+assert.equal(ghCalls.length, ghBefore, 'gh never called on the no-gh route')
+console.log('no gh: URL parsing, public/rate-limit/unreachable refusals, private repo connected and linked ok')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('memsync ok')

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from '@/i18n'
 import { pasteInNewShell } from '@/store'
 import { IconShield, IconRefresh, IconFolder } from './Icons'
@@ -17,16 +17,19 @@ export default function MemorySyncSettings(): JSX.Element {
   const [st, setSt] = useState<MemSyncState | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
   const [repoName, setRepoName] = useState('')
+  const [repoUrl, setRepoUrl] = useState('')
+  const [route, setRoute] = useState<'gh' | 'url' | null>(null)
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
 
-  const errorText = useCallback(
-    (code: string, fallback: string): string => {
-      const key = `memsync.err.${code}`
-      const s = t(key, { message: fallback })
-      return s === key ? fallback : s
-    },
-    [t]
-  )
+  // useTranslation 每次 render 都給新的 t；放進 ref，讓 act／refresh 保持穩定，
+  // 否則開頁的 refresh effect 會每次 render 重跑（不停重新偵測 git／gh，訊息也被清掉）
+  const tRef = useRef(t)
+  tRef.current = t
+  const errorText = useCallback((code: string, fallback: string): string => {
+    const key = `memsync.err.${code}`
+    const s = tRef.current(key, { message: fallback })
+    return s === key ? fallback : s
+  }, [])
 
   /** 執行一個動作：回傳帶新狀態就更新，失敗顯示原因；onOk 回傳要顯示的成功訊息 */
   const act = useCallback(
@@ -68,6 +71,8 @@ export default function MemorySyncSettings(): JSX.Element {
   const backend = c.backend
   const isFolder = backend === 'onedrive' || backend === 'gdrive'
   const p = st.project
+  // 連結方式：沒選過時，有裝 gh 就走 gh，沒裝就走貼網址（免安裝）
+  const ghRoute = route ?? (st.gh.installed ? 'gh' : 'url')
   const providerName = (b: MemSyncBackend): string => t(`memsync.backend_${b}`)
 
   const setupRepo = async (): Promise<void> => {
@@ -227,6 +232,66 @@ export default function MemorySyncSettings(): JSX.Element {
           {/* GitHub：gh 與私人 repo */}
           {backend === 'github' && (
             <>
+              {!st.rootReady && (
+                <div className="macos-section">
+                  <span className="macos-section-header">{t('memsync.stepRoute', { n: step++ })}</span>
+                  <div className="macos-inset-group" style={{ padding: '14px 16px' }}>
+                    <div className="macos-lang-cards">
+                      {(['gh', 'url'] as const).map((r) => (
+                        <button key={r} type="button" className={`macos-lang-card ${ghRoute === r ? 'active' : ''}`} disabled={acting} onClick={() => setRoute(r)}>
+                          <div className="macos-lang-info">
+                            <span className="macos-lang-name">{t(r === 'gh' ? 'memsync.routeGh' : 'memsync.routeUrl')}</span>
+                            <span className="macos-lang-sub">{t(r === 'gh' ? 'memsync.routeGhSub' : 'memsync.routeUrlSub')}</span>
+                          </div>
+                          <span className="macos-radio-dot" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!st.rootReady && ghRoute === 'url' && (
+                <div className="macos-section">
+                  <span className="macos-section-header">{t('memsync.stepRepoUrl', { n: step++ })}</span>
+                  <div className="macos-inset-group" style={{ padding: '12px 16px' }}>
+                    <p className="macos-row-sub" style={{ marginTop: 0 }}>{t('memsync.urlIntro')}</p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <button type="button" className="macos-btn-secondary" onClick={() => window.open('https://github.com/new', '_blank')}>
+                        {t('memsync.openGithubNew')}
+                      </button>
+                    </div>
+                    <label className="macos-row-sub" htmlFor="memsync-repo-url" style={{ display: 'block', marginBottom: 6 }}>
+                      {t('memsync.repoUrlLabel')}
+                    </label>
+                    <input
+                      id="memsync-repo-url"
+                      className="macos-input"
+                      value={repoUrl}
+                      placeholder={`https://github.com/<you>/${c.repo.split('/').pop() || 'ai-project-memory'}`}
+                      onChange={(e) => setRepoUrl(e.target.value)}
+                      disabled={acting}
+                      spellCheck={false}
+                    />
+                    <p className="remote-note">{t('memsync.clonePathNote', { path: c.clonePath })}</p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="macos-btn-primary"
+                        disabled={acting || !repoUrl.trim()}
+                        onClick={() =>
+                          void act('repo', () => window.api.memsync.connectRepo(repoUrl.trim()), (d) => t('memsync.repoLinked', { repo: d.result.repo }))
+                        }
+                      >
+                        {busy === 'repo' ? t('memsync.urlConnecting') : t('memsync.connectRepo')}
+                      </button>
+                    </div>
+                    <p className="remote-note">{t('memsync.urlLoginHint')}</p>
+                  </div>
+                </div>
+              )}
+
+              {!st.rootReady && ghRoute === 'gh' && (
               <div className="macos-section">
                 <span className="macos-section-header">{t('memsync.stepGh', { n: step++ })}</span>
                 <div className="macos-inset-group" style={{ padding: '12px 16px' }}>
@@ -251,7 +316,9 @@ export default function MemorySyncSettings(): JSX.Element {
                   {(!st.gh.installed || !st.gh.loggedIn) && <p className="remote-note">{t('memsync.pastedHint')}</p>}
                 </div>
               </div>
+              )}
 
+              {(st.rootReady || ghRoute === 'gh') && (
               <div className="macos-section">
                 <span className="macos-section-header">{t('memsync.stepRepo', { n: step++ })}</span>
                 <div className="macos-inset-group" style={{ padding: '12px 16px' }}>
@@ -282,6 +349,7 @@ export default function MemorySyncSettings(): JSX.Element {
                   </div>
                 </div>
               </div>
+              )}
             </>
           )}
 
