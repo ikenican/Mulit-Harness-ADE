@@ -50,7 +50,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 
 - Agent: Claude Code (local, user's Windows 11 PC, D:\AI_Project\Mulit-Harness-ADE)
 - Updated: 2026-10-24 Asia/Taipei
-- Branch: improve/accuracy-handoff; code HEAD 649bb98 (+ this memory commit). Being pushed to origin with the user's go-ahead (2026-10-24), together with release/0.1.41-fork.4. Not merged into master.
+- Branch: improve/accuracy-handoff; pushed to origin (user ran the push 2026-10-24; GitHub credentials are now stored in Git Credential Manager on this PC). Not merged into master.
 
 ## State
 - Main-process blocking removed (details and numbers: archive/2026-10-24-main-thread-perf.md): async CLI detection and Cowork `--help` probe (64ac1fe); dashboard/usage scanning in a worker thread via `src/main/ipc/sessionScan.ts` + `dashboardWorker.ts`, falling back to main if the worker fails (d2dff07). Bench: `scripts/bench-main-blocking.cjs`.
@@ -61,6 +61,7 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 - 649bb98: file tree header button opens the project folder in Explorer (`files:revealWorkspace`, path resolved in main).
 - d085d8c/6674fda: `dev.cmd` (double-click) → `dev.ps1` → `npm run dev`. This PC's PowerShell policy is Restricted, so .ps1 cannot run directly. Dev build uses %APPDATA%\agent-workbench-dev and runs beside the installed app.
 - Installed on the user's PC: a LOCAL build of 0.1.41-fork.3 (10:36, before the UI commits; built with electron-builder after seeding %LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0 from a partial extraction). Hence the GitHub release is fork.4, so the in-app updater offers it. No fork.3 exists on GitHub.
+- Released v0.1.41-fork.4 from 26864cb: fork-release run 40096197546, all steps green; assets setup.exe (126.7 MB), blockmap, portable ZIP (175.6 MB), latest.yml; marked latest; trigger branch deleted.
 - package.json still 0.1.41; apps/linux untouched (DEC-011).
 
 ## Verified
@@ -69,15 +70,16 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 - `node_modules/.bin/electron scripts/check-{cowork-tabs,terminal-ui,remote-cowork,custom-agent-ui}.cjs` -> pass on Windows
 - Layout drag, toggles (7 cases), terminal width 959 px / height 661 px at 1440x900, workspace switch (A tab / B resume / back to A / back to B, no duplicates), reveal folder (Explorer opened the folder): driven over CDP in isolated dev instances (separate --user-data-dir, fake home for the workspace test)
 - Local fork.3 installer: exe and setup.exe icons extracted and checked
+- Published fork.4 setup.exe downloaded: FileVersion 0.1.41-fork.4, new icon
 
 ## Not verified
-- The GitHub Actions run for release/0.1.41-fork.4 (pending at this commit) and the in-app update fork.3 → fork.4.
+- The in-app update from the installed local fork.3 to fork.4.
 - Real mouse drag of the header items and of the splitter (tests used synthetic DragEvents / the splitter's keyboard control).
 - Paste-then-Enter delay (user report): not reproduced; ConPTY, PowerShell, Claude Code direct and through the main pty pipeline respond in ~15-100 ms. Waiting for the user's details (which tab, how pasted, size, delay, Windows Terminal comparison).
 - Real winget/npm Codex install, a real multi-agent meeting, Windows `revertFiles`, very large real logs.
 
 ## Next
-- Watch the fork-release run for release/0.1.41-fork.4; check the release assets and record the run id; confirm the installed fork.3 is offered fork.4.
+- Confirm the installed fork.3 is offered fork.4 by the in-app updater (Settings > About).
 - Remaining performance candidates (not changed): archive/2026-10-24-main-thread-perf.md.
 - Earlier plan items: agent profile settings, Codex/Antigravity SessionStart hooks, drag-handoff from CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view.
 
