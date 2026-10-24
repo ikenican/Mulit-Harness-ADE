@@ -10,6 +10,6 @@
   "theme_color": "#486a6d",
   "icons": [
     { "src": "/remote-icon-180.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "/remote-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/remote-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }
