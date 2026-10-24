@@ -169,6 +169,8 @@ export default function App(): JSX.Element {
   // 監聽跨面板請求開啟/聚焦終端：若指定 ensureRightDock 且目前非右側停靠，自動切換至右側停靠
   useEffect(() => {
     if (!terminalOpenSession || isVibe) return
+    // 終端欄被關掉時，有人要開／聚焦終端（例如從儀表板點會話）就把它打開
+    if (layout.termHidden) setLayout((l) => ({ ...l, termHidden: false }))
     if (terminalOpenSession.ensureRightDock && layout.dock !== 'right') {
       setLayout((l) => ({
         ...l,
@@ -197,6 +199,19 @@ export default function App(): JSX.Element {
   // 開發模式預設收起中央欄（編輯器／Preview），畫面只剩側邊欄＋終端；聚焦模式下中央欄必定展開
   const isCenterCollapsed = !isVibe && !isCenterMaximized && Boolean(layout.centerCollapsed)
   const expandCenter = (): void => setLayout((l) => ({ ...l, centerCollapsed: false }))
+  // 頂端列兩個開關：>_ 開關終端欄，編輯器分頁開關編輯器欄；關掉其中一個時另一個一定開著
+  const isTermHidden = !isVibe && !isCenterMaximized && !isCenterCollapsed && Boolean(layout.termHidden)
+  const toggleTerminal = (): void =>
+    setLayout((l) => (l.termHidden ? { ...l, termHidden: false } : { ...l, termHidden: true, centerCollapsed: false }))
+  const onEditorTab = (tab: CenterTab): void => {
+    if (!isCenterCollapsed && center === tab) {
+      // 再點一次亮著的分頁 → 關掉編輯器欄（終端跟著打開）
+      setLayout((l) => ({ ...l, centerCollapsed: true, termHidden: false }))
+      return
+    }
+    setCenter(tab)
+    expandCenter()
+  }
   // 頂端列拖曳排序：終端圖示排在編輯器組前面 → 終端欄在左（右側停靠）或在上（底部停靠）
   const termFirst = !isVibe && Boolean(layout.termFirst)
   const editorGroupRef = useRef<HTMLDivElement>(null)
@@ -216,9 +231,13 @@ export default function App(): JSX.Element {
   // 上限依目前視窗算，避免把中央區擠沒了
   const maxLeft = (): number =>
     Math.min(LIMITS.leftMax, window.innerWidth - LIMITS.centerMin - (isBottom ? 0 : layout.rightW))
+  // 開發模式：終端可以拖到只替編輯器留 editorMin；Vibe 模式維持原本上限
   const maxRight = (): number =>
-    Math.min(LIMITS.rightMax, window.innerWidth - LIMITS.centerMin - (isLeftCollapsed ? 0 : layout.leftW))
-  const maxTerm = (): number => Math.max(LIMITS.termMin, window.innerHeight - 200)
+    isVibe
+      ? Math.min(LIMITS.rightMax, window.innerWidth - LIMITS.centerMin - (isLeftCollapsed ? 0 : layout.leftW))
+      : Math.max(LIMITS.rightMin, window.innerWidth - LIMITS.editorMin - 1 - (isLeftCollapsed ? 0 : layout.leftW))
+  // 38px 是頂端列
+  const maxTerm = (): number => Math.max(LIMITS.termMin, window.innerHeight - 38 - LIMITS.editorMin - 1)
 
   const nudgeLeft = (dx: number): void =>
     setLayout((l) => {
@@ -260,6 +279,22 @@ export default function App(): JSX.Element {
         gridTemplateRows: '1fr',
         gridTemplateAreas: `"rail left sp1 term sp2 center"`
       }
+    : isTermHidden
+    ? isBottom
+      ? {
+          gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
+          gridTemplateRows: termFirst ? '0px 0px 1fr' : '1fr 0px 0px',
+          gridTemplateAreas: termFirst
+            ? `"left sp1 term" "left sp1 sp2" "left sp1 center"`
+            : `"left sp1 center" "left sp1 sp2" "left sp1 term"`
+        }
+      : {
+          gridTemplateColumns: termFirst
+            ? `${effectiveLeftW}px ${sp1W} 0px 0px 1fr`
+            : `${effectiveLeftW}px ${sp1W} 1fr 0px 0px`,
+          gridTemplateRows: '1fr',
+          gridTemplateAreas: termFirst ? `"left sp1 term sp2 center"` : `"left sp1 center sp2 term"`
+        }
     : isBottom && termFirst
     ? {
         gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
@@ -345,10 +380,8 @@ export default function App(): JSX.Element {
                 <button
                   key={tab}
                   className={!isCenterCollapsed && center === tab ? 'on' : ''}
-                  onClick={() => {
-                    setCenter(tab)
-                    expandCenter()
-                  }}
+                  title={!isCenterCollapsed && center === tab ? t('header.hideEditor') : undefined}
+                  onClick={() => onEditorTab(tab)}
                 >
                   {t(`header.${tab}`)}
                 </button>
@@ -356,11 +389,12 @@ export default function App(): JSX.Element {
             </div>
           </div>
           <button
-            className={`btn-icon header-drag-item header-term-btn ${isCenterCollapsed ? 'active' : ''} ${dragging === 'terminal' ? 'dragging' : ''}`}
+            className={`btn-icon header-drag-item header-term-btn ${isTermHidden ? '' : 'active'} ${dragging === 'terminal' ? 'dragging' : ''}`}
             style={{ order: termFirst ? 1 : 2 }}
             draggable
-            title={t('header.terminalOnly')}
-            onClick={() => setLayout((l) => ({ ...l, centerCollapsed: true }))}
+            aria-pressed={!isTermHidden}
+            title={isTermHidden ? t('header.showTerminal') : t('header.hideTerminal')}
+            onClick={toggleTerminal}
             onDragStart={(e) => {
               e.dataTransfer.effectAllowed = 'move'
               e.dataTransfer.setData('text/plain', 'terminal')
@@ -541,7 +575,7 @@ export default function App(): JSX.Element {
           </div>
         </main>
 
-        {!isCenterMaximized && !isCenterCollapsed && (
+        {!isCenterMaximized && !isCenterCollapsed && !isTermHidden && (
           <Splitter
             axis={isBottom ? 'horizontal' : 'vertical'}
             label={isBottom ? 'Terminal height' : 'Terminal width'}
@@ -561,7 +595,7 @@ export default function App(): JSX.Element {
           className={`col col-term ${isVibe && agentBusy ? 'agent-busy' : ''}`}
           style={{
             gridArea: 'term',
-            display: isCenterMaximized ? 'none' : 'flex',
+            display: isCenterMaximized || isTermHidden ? 'none' : 'flex',
             minWidth: !isBottom ? LIMITS.rightMin : 0
           }}
         >

@@ -11,6 +11,8 @@ export interface LayoutState {
   centerCollapsed?: boolean
   /** 開發模式：終端排在編輯器前面（右側停靠時在左、底部停靠時在上）；由頂端列拖曳圖示決定 */
   termFirst?: boolean
+  /** 開發模式：終端欄是否關閉（頂端列 >_ 開關）；不會與 centerCollapsed 同時為真 */
+  termHidden?: boolean
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
@@ -45,7 +47,9 @@ export const LIMITS = {
   rightMax: 900,
   termMin: 120,
   /** 中央區至少留這麼多 */
-  centerMin: 280
+  centerMin: 280,
+  /** 開發模式拖寬／拖高終端時，編輯器至少留這麼多（不再受 rightMax 限制） */
+  editorMin: 200
 }
 
 export function loadLayout(mode: 'developer' | 'vibe' = 'developer'): LayoutState {
@@ -77,7 +81,9 @@ export function loadLayout(mode: 'developer' | 'vibe' = 'developer'): LayoutStat
       dock,
       leftCollapsed: isCollapsed,
       centerCollapsed: p.centerCollapsed ?? true,
-      termFirst: p.termFirst === true
+      termFirst: p.termFirst === true,
+      // 兩欄都關掉會是空畫面：存檔若是這樣就把終端打開
+      termHidden: p.termHidden === true && p.centerCollapsed === false
     }
   } catch {
     return { ...DEFAULT_LAYOUT }
