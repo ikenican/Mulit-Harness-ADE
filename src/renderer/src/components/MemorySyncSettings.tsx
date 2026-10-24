@@ -62,6 +62,8 @@ export default function MemorySyncSettings(): JSX.Element {
   if (!st) return <div className="macos-settings-body"><p className="remote-note">{t('common.loading')}</p></div>
 
   const c = st.config
+  // 只是在重新讀取狀態時不停用按鈕：第一次開頁偵測 git／gh 要幾秒，那段時間的點擊不該被吞掉
+  const acting = busy !== null && busy !== 'refresh'
   const consented = !!c.consentAt
   const backend = c.backend
   const isFolder = backend === 'onedrive' || backend === 'gdrive'
@@ -126,7 +128,7 @@ export default function MemorySyncSettings(): JSX.Element {
         </div>
         <div className="macos-row-right">
           <label className="apple-toggle">
-            <input type="checkbox" disabled={busy !== null} checked={checked} onChange={(e) => onChange(e.target.checked)} />
+            <input type="checkbox" disabled={acting} checked={checked} onChange={(e) => onChange(e.target.checked)} />
             <span className="apple-toggle-slider" />
           </label>
         </div>
@@ -158,7 +160,7 @@ export default function MemorySyncSettings(): JSX.Element {
                 <label className="apple-toggle">
                   <input
                     type="checkbox"
-                    disabled={busy !== null}
+                    disabled={acting}
                     checked={consented}
                     onChange={(e) => void act('config', () => window.api.memsync.setConfig({ consent: e.target.checked }))}
                   />
@@ -194,7 +196,7 @@ export default function MemorySyncSettings(): JSX.Element {
                       key={b}
                       type="button"
                       className={`macos-lang-card ${backend === b ? 'active' : ''}`}
-                      disabled={busy !== null}
+                      disabled={acting}
                       onClick={() => {
                         if (b === backend) return
                         if (st.rootReady && !window.confirm(t('memsync.backendSwitchConfirm', { from: backend ? providerName(backend) : '', to: providerName(b) }))) return
@@ -236,7 +238,7 @@ export default function MemorySyncSettings(): JSX.Element {
                         {t('memsync.loginGh')}
                       </button>
                     )}
-                    <button type="button" className="macos-btn-secondary" disabled={busy !== null} onClick={() => void refresh()}>
+                    <button type="button" className="macos-btn-secondary" disabled={acting} onClick={() => void refresh()}>
                       <IconRefresh size={12} /> {t('memsync.recheck')}
                     </button>
                   </div>
@@ -256,13 +258,13 @@ export default function MemorySyncSettings(): JSX.Element {
                       <label className="macos-row-sub" htmlFor="memsync-repo" style={{ display: 'block', marginBottom: 6 }}>
                         {t('memsync.repoNameLabel', { login: st.gh.login || '<you>' })}
                       </label>
-                      <input id="memsync-repo" className="macos-input" value={repoName} onChange={(e) => setRepoName(e.target.value)} disabled={busy !== null} spellCheck={false} />
+                      <input id="memsync-repo" className="macos-input" value={repoName} onChange={(e) => setRepoName(e.target.value)} disabled={acting} spellCheck={false} />
                       <p className="remote-note">{t('memsync.clonePathNote', { path: c.clonePath })}</p>
                     </>
                   )}
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {!st.rootReady && (
-                      <button type="button" className="macos-btn-primary" disabled={busy !== null || !st.gh.loggedIn} onClick={() => void setupRepo()}>
+                      <button type="button" className="macos-btn-primary" disabled={acting || !st.gh.loggedIn} onClick={() => void setupRepo()}>
                         {busy === 'repo' ? t('memsync.working') : t('memsync.setupRepo')}
                       </button>
                     )}
@@ -297,7 +299,7 @@ export default function MemorySyncSettings(): JSX.Element {
                       <button
                         type="button"
                         className={st.rootReady ? 'macos-btn-secondary' : 'macos-btn-primary'}
-                        disabled={busy !== null}
+                        disabled={acting}
                         onClick={() => void act('folder', () => window.api.memsync.pickFolder(), (d) => (d.picked ? t('memsync.folderSet') : null))}
                       >
                         <IconFolder size={12} /> {st.rootReady ? t('memsync.folderChange') : t('memsync.folderChoose')}
@@ -342,7 +344,7 @@ export default function MemorySyncSettings(): JSX.Element {
                     </p>
                     {p.linked && p.tracked.length > 0 && <p className="remote-note danger">⚠️ {t('memsync.stillTracked', { n: p.tracked.length })}</p>}
                     {(p.linkedToOldStore || (!p.linkedElsewhere && (p.hasLocalMemory || p.hasRemoteMemory || (p.linked && p.tracked.length > 0)))) && (
-                      <button type="button" className="macos-btn-primary" disabled={busy !== null} onClick={() => void link()}>
+                      <button type="button" className="macos-btn-primary" disabled={acting} onClick={() => void link()}>
                         {busy === 'link'
                           ? t('memsync.working')
                           : p.linkedToOldStore
@@ -371,7 +373,7 @@ export default function MemorySyncSettings(): JSX.Element {
               </div>
               {backend === 'github' ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
-                  <button type="button" className="macos-btn-primary" disabled={busy !== null} onClick={() => void syncNow()}>
+                  <button type="button" className="macos-btn-primary" disabled={acting} onClick={() => void syncNow()}>
                     {busy === 'sync' ? t('memsync.working') : t('memsync.syncNow')}
                   </button>
                   <span className="macos-row-sub">
