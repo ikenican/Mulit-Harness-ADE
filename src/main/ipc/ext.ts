@@ -308,6 +308,18 @@ export interface AgentInstallInfo {
   shell: 'powershell' | 'bash'
 }
 
+/**
+ * Windows：先跑官方安裝腳本，抓不到（例如 2026-10 使用者回報 chatgpt.com/codex/install.ps1 回 404）就改用 npm 套件。
+ * 整段在看得見的 PowerShell 裡執行，失敗原因與改走 npm 都會印出來。
+ */
+function psWithNpmFallback(scriptUrl: string, npmPackage: string): string {
+  return (
+    `try { irm ${scriptUrl} -ErrorAction Stop | iex } ` +
+    `catch { Write-Warning "Official installer failed: $($_.Exception.Message) - falling back to: npm install -g ${npmPackage}"; ` +
+    `npm install -g ${npmPackage} }`
+  )
+}
+
 export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): AgentInstallInfo {
   const isWin = process.platform === 'win32'
   const shell: AgentInstallInfo['shell'] = isWin ? 'powershell' : 'bash'
@@ -320,7 +332,7 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
       name: 'Claude Code',
       shell,
       command: isWin
-        ? 'irm https://claude.ai/install.ps1 | iex'
+        ? psWithNpmFallback('https://claude.ai/install.ps1', '@anthropic-ai/claude-code')
         : 'curl -fsSL https://claude.ai/install.sh | bash',
       targetPath: isWin
         ? path.join(H, '.local', 'bin', 'claude.exe')
@@ -344,7 +356,7 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
       name: 'Codex CLI',
       shell,
       command: isWin
-        ? 'irm https://chatgpt.com/codex/install.ps1 | iex'
+        ? psWithNpmFallback('https://chatgpt.com/codex/install.ps1', '@openai/codex')
         : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
       targetPath: isWin
         ? path.join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin', 'codex.exe')
