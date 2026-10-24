@@ -193,9 +193,12 @@ app.whenReady().then(async () => {
         ['dashboard:data (cold cache)', 'dashboard:data', [true]],
         ['dashboard:data (warm)', 'dashboard:data', [false]],
         ['dashboard:data (warm, force)', 'dashboard:data', [true]],
-        ['dashboard:usage (warm)', 'dashboard:usage', []]
+        ['dashboard:usage (warm)', 'dashboard:usage', []],
+        ['dashboard:bgTasks (cold)', 'dashboard:bgTasks', ['D:\\bench\\project-0']],
+        ['dashboard:bgTasks (warm)', 'dashboard:bgTasks', ['D:\\bench\\project-0']]
       ]
     : [
+        ['ext:inventory', 'ext:inventory', []],
         ['ext:agents (1st)', 'ext:agents', []],
         ['ext:agents (2nd)', 'ext:agents', []],
         ['cowork:capabilities force (1st, --help probes)', 'cowork:capabilities', [true]],
