@@ -32,6 +32,8 @@ const api = {
     openExternal: (path: string, customToolPath?: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('files:openExternal', path, customToolPath),
     showInFolder: (path: string): Promise<void> => ipcRenderer.invoke('files:showInFolder', path),
+    /** 在檔案總管／Finder 開啟這個視窗目前的專案資料夾 */
+    revealWorkspace: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('files:revealWorkspace'),
     stat: (path: string): Promise<FileStat> => ipcRenderer.invoke('files:stat', path),
     pickExecutable: (title?: string): Promise<string | null> =>
       ipcRenderer.invoke('files:pickExecutable', title),

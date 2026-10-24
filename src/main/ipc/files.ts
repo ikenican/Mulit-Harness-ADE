@@ -425,6 +425,14 @@ export function registerFileHandlers(): void {
     }
   )
 
+  // 在檔案總管／Finder 開啟這個視窗目前的專案資料夾（路徑由 main 決定，不接受 renderer 傳入）
+  ipcMain.handle('files:revealWorkspace', async (event): Promise<{ ok: boolean; error?: string }> => {
+    const ws = getWorkspaceForEvent(event)
+    if (!ws || !existsSync(ws)) return { ok: false, error: 'no workspace folder' }
+    const err = await shell.openPath(ws)
+    return err ? { ok: false, error: err } : { ok: true }
+  })
+
   // Show item in OS file explorer / Finder
   ipcMain.handle('files:showInFolder', async (event, targetPath: string): Promise<void> => {
     const ws = getWorkspaceForEvent(event)
