@@ -53,48 +53,44 @@ For the freshest copy plus a remote-drift check, run `bash .project-memory/statu
 
 - Agent: Claude Code (local, user's Windows 11 PC, D:\AI_Project\Mulit-Harness-ADE)
 - Updated: 2026-10-24 Asia/Taipei
-- Branch: improve/accuracy-handoff; code HEAD b2de833 (+ this memory commit). Local commits 8d8ddba..b2de833 are NOT pushed; origin/improve/accuracy-handoff is still ccca94e. Not merged into master.
+- Branch: improve/accuracy-handoff; code HEAD 649bb98 (+ this memory commit). Being pushed to origin with the user's go-ahead (2026-10-24), together with release/0.1.41-fork.4. Not merged into master.
 
 ## State
-- 64ac1fe: CLI detection without blocking main. `findCliAsync`/`findAgentCliAsync` (src/main/ext/paths.ts) use execFile + fs.promises with the same selection rules as `findCli`. Async users: Cowork capabilities, ext:agents, Settings CLI test. The Cowork `--help` flag probe is execFile instead of spawnSync, and concurrent calls share one in-flight probe. `resolveCli`/`resolveExecCli` may return a Promise; the executor registers its AbortController before awaiting. Sync `findCli` (terminal spawn) reuses a found path for 5 min after re-checking that it exists; not-found is never cached.
-- d2dff07: dashboard scanning runs in a worker thread. Scanners moved verbatim (only exports changed) from dashboard.ts to `src/main/ipc/sessionScan.ts`; it and `usage.ts` no longer import Electron. `dashboardWorker.ts` (electron-vite `?nodeWorker`) serves `dashboard:data` and `dashboard:usage`; if the worker cannot start or fails, the same functions run on main. State and active PTYs are read after the scan; concurrent non-forced requests share one scan. Archive/delete/unmark use the cached-session snapshot returned by the worker.
-- 9a336a1: Codex install. Windows: official script → `winget install --id OpenAI.Codex -e` → npm → message. macOS/Linux: the script is downloaded first, and npm is used if the download or the script fails (`curl | sh` used to exit 0 on a 404). chatgpt.com/codex/install.ps1, install.sh and releases.openai.com/codex all returned 404 on 2026-10-24, even though the Codex README still lists them.
-- 902eb19 + b2de833: new app icon from the user's glossy.png (kept untracked in the repo root; copy at build/icon-source.png). scripts/gen-app-icons.ps1 re-masks the tile (drops the ragged white fringe) and writes build/icon.png, build/icon.ico (win.icon + NSIS installer/uninstaller/header), public/app-icon-256.png (Settings > About logo, favicon) and the phone PWA icons (512 no longer maskable). Windows and OS notifications use src/main/appIcon.ts. gen-remote-icons.mjs is superseded (would restore the old icon).
-- Release in progress: the user asked (2026-10-24) to release with the new icon as release/0.1.41-fork.3. This PC has no GitHub credentials, so the user must push that branch (Git Credential Manager browser login); fork-release.yml then builds, publishes v0.1.41-fork.3 and deletes the branch.
-- scripts/bench-main-blocking.cjs (8d8ddba, 0cedbb0, 59de84b): measures main-thread blocking as real IPC round trips (see Details).
-- Nothing released; package.json still 0.1.41; apps/linux untouched (DEC-011). package-lock.json was restored after npm 11 rewrote "peer" flags (not committed).
+- Main-process blocking removed (details and numbers: archive/2026-10-24-main-thread-perf.md): async CLI detection and Cowork `--help` probe (64ac1fe); dashboard/usage scanning in a worker thread via `src/main/ipc/sessionScan.ts` + `dashboardWorker.ts`, falling back to main if the worker fails (d2dff07). Bench: `scripts/bench-main-blocking.cjs`.
+- 9a336a1: Codex install falls back official script → winget OpenAI.Codex → npm on Windows; sh form no longer hides a 404. chatgpt.com/codex/install.* returned 404 on 2026-10-24.
+- 902eb19 + b2de833: new app icon from the user's glossy.png (untracked in repo root; copy build/icon-source.png). `scripts/gen-app-icons.ps1` writes build/icon.png/.ico, public/app-icon-256.png and phone PWA icons; windows/notifications use `src/main/appIcon.ts`; NSIS icons set in electron-builder.yml.
+- UI layout (developer mode, src/renderer/src/App.tsx + layout.ts): header has the editor group (Editor/Preview/Memory/Browser) and a terminal icon; dragging them reorders the panes (`termFirst`: terminal left in right dock / top in bottom dock, applied live, saved). The terminal icon toggles the terminal pane (`termHidden`); clicking the active editor tab hides the editor; never both hidden; a terminal open request unhides it. The old show/hide-editor button was removed (924ab38, c4ff50d, 7fbbd65). Terminal can grow until the editor has 200 px (`LIMITS.editorMin`; the 900 px cap no longer applies in developer mode).
+- 5173bf2: switching workspace selects that project's most recently used open terminal tab (tabs record `workspace`); with none, it resumes the project's latest Claude/Codex/Antigravity session from dashboard data. Skips the first workspace set at startup and skips if a tab for the project appears during the lookup.
+- 649bb98: file tree header button opens the project folder in Explorer (`files:revealWorkspace`, path resolved in main).
+- d085d8c/6674fda: `dev.cmd` (double-click) → `dev.ps1` → `npm run dev`. This PC's PowerShell policy is Restricted, so .ps1 cannot run directly. Dev build uses %APPDATA%\agent-workbench-dev and runs beside the installed app.
+- Installed on the user's PC: a LOCAL build of 0.1.41-fork.3 (10:36, before the UI commits; built with electron-builder after seeding %LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0 from a partial extraction). Hence the GitHub release is fork.4, so the in-app updater offers it. No fork.3 exists on GitHub.
+- package.json still 0.1.41; apps/linux untouched (DEC-011).
 
 ## Verified
-- `npm run typecheck` -> pass (after each change)
-- `node --experimental-strip-types scripts/check-{cowork,version,usage,bgTasks,portDetect,hosts,remote,remote-files}.mts` -> all pass; `node scripts/check-approval.cjs` -> pass; `node scripts/check-custom-agent.cjs` -> pass
-- `node_modules/.bin/electron scripts/check-{cowork-tabs,terminal-ui,remote-cowork,custom-agent-ui}.cjs` -> all pass on Windows (first run on Windows)
-- `npm run build` -> pass; out/main has dashboardWorker-*.js, sessionScan-*.js and the icon .ico/.png chunks
-- Icons loaded from an asar copy of out/: nativeImage icon.png 1024 / icon.ico 256 non-empty; favicon and About logo resolve to 256 px
-- Bench, worst IPC round trip before -> after: dashboard:data cold 527-535 -> 0.4-1.4 ms, warm 60-72 -> 0.3-1.9 ms; ext:agents 90-102 -> 1-14 ms; cowork:capabilities first 279-293 -> 3-4 ms. Paired runs: dashboard:data/usage output byte-identical (12/12).
-- findCli vs findCliAsync -> identical for 13 cases on this PC
-- Built app packed into an asar, run with Electron, real renderer -> dashboard data correct, worker used (no fallback log)
-- Codex install command: PowerShell 5.1 parse OK; with the real 404 and stubbed winget/npm: winget ok / winget fails → npm / neither → message; sh form in Git Bash: 404 → npm
+- `npm run typecheck` -> pass; `npm run build` -> pass
+- `node --experimental-strip-types scripts/check-{cowork,version,usage,bgTasks,portDetect,hosts,remote,remote-files}.mts` -> pass; `check-approval.cjs`, `check-custom-agent.cjs` -> pass
+- `node_modules/.bin/electron scripts/check-{cowork-tabs,terminal-ui,remote-cowork,custom-agent-ui}.cjs` -> pass on Windows
+- Layout drag, toggles (7 cases), terminal width 959 px / height 661 px at 1440x900, workspace switch (A tab / B resume / back to A / back to B, no duplicates), reveal folder (Explorer opened the folder): driven over CDP in isolated dev instances (separate --user-data-dir, fake home for the workspace test)
+- Local fork.3 installer: exe and setup.exe icons extracted and checked
 
 ## Not verified
-- `npx electron-builder --dir` failed locally (winCodeSign 7z needs symlink privilege), so an installer-built app was not run; the asar test above stands in. The fork-release workflow (windows-latest) should package normally.
-- Real `winget install OpenAI.Codex` and real npm install were not run (stubbed), to avoid installing Codex on the user's PC.
-- Installed fork in-app update, a real multi-agent meeting, and Windows `revertFiles` behaviour: still not run (see archived handoff).
-- Dashboard with very large real logs (>64 MB) and many Antigravity sessions: only the synthetic fixture was used.
+- The GitHub Actions run for release/0.1.41-fork.4 (pending at this commit) and the in-app update fork.3 → fork.4.
+- Real mouse drag of the header items and of the splitter (tests used synthetic DragEvents / the splitter's keyboard control).
+- Paste-then-Enter delay (user report): not reproduced; ConPTY, PowerShell, Claude Code direct and through the main pty pipeline respond in ~15-100 ms. Waiting for the user's details (which tab, how pasted, size, delay, Windows Terminal comparison).
+- Real winget/npm Codex install, a real multi-agent meeting, Windows `revertFiles`, very large real logs.
 
 ## Next
-- After the user pushes release/0.1.41-fork.3: watch the fork-release run, then check the release assets (setup.exe icon, installer icon, portable ZIP) and record the run id. Pushing improve/accuracy-handoff itself still needs the user's go-ahead.
-- Paste-then-Enter delay (user report 2026-10-24): not reproduced. ConPTY/cmd, PowerShell, Claude Code direct and through the app's main pty pipeline all respond in ~15-100 ms after a paste (PowerShell PSReadLine ~0.9 s for 10k chars). Bracketed paste reaches Claude Code and agy. Waiting on the user: which tab, how they paste, size, how long, whether Windows Terminal lags too. Remaining suspects: renderer side, or fork.2 main-process blocking (fixed in fork.3).
-- Remaining performance candidates (listed for the user, not changed): incremental parsing of active session logs (polled every 5 s); usage ignores files >64 MB (accuracy); unmarkDeletedOrArchivedWorkspace scans on main at every workspace open; loadSettings uncached; Cowork writeJsonAtomic fsync + Atomics.wait retry on main; scanBgTasks every 4 s; sync findCli for uninstalled CLIs on tab open. Full list with numbers: archive/2026-10-24-main-thread-perf.md.
-- Then the earlier plan items: agent profile settings, Codex/Antigravity SessionStart hooks, drag-handoff from CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view.
+- Watch the fork-release run for release/0.1.41-fork.4; check the release assets and record the run id; confirm the installed fork.3 is offered fork.4.
+- Remaining performance candidates (not changed): archive/2026-10-24-main-thread-perf.md.
+- Earlier plan items: agent profile settings, Codex/Antigravity SessionStart hooks, drag-handoff from CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view.
 
 ## Risks / do not
-- Dashboard session status depends on log age: compare dashboard output only with paired runs on the same fixture mtimes (bench `--touch`, or touch once and alternate WB_BENCH_SRC runs).
-- The worker writes dashboard-cache.json / usage-cache.json in userData; if the worker fails, main writes them instead. Never both at once by design, but a crash mid-scan falls back on main.
-- The dev app adds "-dev" to `--user-data-dir`; without that flag a dev run shares %APPDATA%\agent-workbench with the user's installed app.
-- Do not push, merge, or release without the user's go-ahead. Do not touch apps/linux (DEC-011).
+- Dashboard session status depends on log age: compare dashboard output only with paired runs on the same fixture mtimes.
+- A test dev instance must use its own `--user-data-dir`; otherwise the single-instance lock hands over to the user's running dev window and the test instance exits.
+- Do not merge into master or release without the user's go-ahead. Do not touch apps/linux (DEC-011). Do not delete user files (glossy.png) without asking.
 
 ## Details
-- Bench method, raw numbers, remaining-candidate list: archive/2026-10-24-main-thread-perf.md
-- Previous handoff (Cowork scope review, fork.1/fork.2 releases): archive/handoff-2026-10-24-before-main-thread-perf.md
+- Bench method, numbers, remaining candidates: archive/2026-10-24-main-thread-perf.md
+- Previous handoffs: archive/handoff-2026-10-24-before-main-thread-perf.md (Cowork scope review, fork.1/fork.2)
 
 <!-- END AUTO-MEMORY -->
