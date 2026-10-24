@@ -1,5 +1,5 @@
 ﻿# 啟動 Agent Workbench 開發版（從原始碼直接跑，不用打包）
-# 用法：在檔案總管對這個檔案按右鍵 →「用 PowerShell 執行」，
+# 用法：雙擊同資料夾的 dev.cmd（Windows 預設禁止直接執行 .ps1），
 #       或在 PowerShell 執行：powershell -ExecutionPolicy Bypass -File .\dev.ps1
 # 開發版的設定存在 %APPDATA%\agent-workbench-dev，跟已安裝的 Workbench 分開，可以同時開。
 # 視窗開著時改 src/renderer 會自動刷新；改 src/main 會自動重啟。關掉這個視窗或按 Ctrl+C 結束。
