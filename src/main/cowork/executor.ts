@@ -48,7 +48,7 @@ export interface ExecHost {
   dirOf(run: CoworkRun): string
   save(run: CoworkRun): void
   emit(run: CoworkRun): void
-  resolveExecCli(agent: CoworkAgent): ExecCli | { error: string }
+  resolveExecCli(agent: CoworkAgent): ExecCli | { error: string } | Promise<ExecCli | { error: string }>
   /** Same-repo execution stays exclusive until its worktrees are merged or cleaned; planning may run concurrently. */
   otherActiveRun(run: CoworkRun): CoworkRun | undefined
   now(): number
@@ -237,8 +237,16 @@ export class CoworkExecutor {
     run.log.push({ t: 'task-start', taskId, agent: te.agent, followUp: !!o.message, at: this.host.now() })
     this.host.save(run)
 
-    const cli = this.host.resolveExecCli(te.agent)
-    if ('error' in cli) return this.endTurn(run, taskId, agentTurn, { ok: false, error: `${te.agent} is not available: ${cli.error}` })
+    // 先登記 controller 再等 resolveExecCli（可能要跑 where）：等待中按停止也會讓下面的 runProcess 立刻收掉
+    const ac = new AbortController()
+    const set = this.controllers.get(run.id) || new Set()
+    set.add(ac)
+    this.controllers.set(run.id, set)
+    const cli = await this.host.resolveExecCli(te.agent)
+    if ('error' in cli) {
+      set.delete(ac)
+      return this.endTurn(run, taskId, agentTurn, { ok: false, error: `${te.agent} is not available: ${cli.error}` })
+    }
 
     const n = te.turns.length
     const outFile = path.join(this.host.dirOf(run), 'exec', `${taskId}-${n}.last.txt`)
@@ -255,10 +263,6 @@ export class CoworkExecutor {
 
     let final: { ok: boolean; text: string; error?: string } | null = null
     let lastText = ''
-    const ac = new AbortController()
-    const set = this.controllers.get(run.id) || new Set()
-    set.add(ac)
-    this.controllers.set(run.id, set)
     this.clockStart(run)
     let result
     try {

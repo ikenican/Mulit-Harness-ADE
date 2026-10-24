@@ -89,9 +89,10 @@ export interface ResolvedCli {
 export interface CoworkDeps {
   /** 例如 userData/cowork */
   dataDir: string
-  resolveCli(agent: CoworkAgent): ResolvedCli | { error: string }
+  /** 可以是非同步的：找 CLI（where）與檢查 flag（--help）都不該擋住 main process */
+  resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } | Promise<ResolvedCli | { error: string }>
   /** 背景執行用：使用者平常的 CLI（完整設定，不用隔離家目錄） */
-  resolveExecCli?(agent: CoworkAgent): ExecCli | { error: string }
+  resolveExecCli?(agent: CoworkAgent): ExecCli | { error: string } | Promise<ExecCli | { error: string }>
   emit(run: CoworkRun): void
   now?(): number
 }
@@ -260,7 +261,7 @@ export class CoworkService {
     if (participants.length < 2) throw new CoworkError('need-two-participants')
     if (opts.summarizer && !participants.includes(opts.summarizer)) throw new CoworkError('not-allowed', 'The recorder must be a participant.')
     for (const a of participants) {
-      const cli = this.deps.resolveCli(a)
+      const cli = await this.deps.resolveCli(a)
       if ('error' in cli) throw new CoworkError('agent-not-eligible', `${a}: ${cli.error}`, { agent: a, reason: cli.error })
     }
 
@@ -673,7 +674,7 @@ export class CoworkService {
     if (this.msUsed(run) >= maxMs) {
       return { ok: false, kind: 'budget', error: `Planning time limit reached (${run.limits.maxPlanningMinutes} min).` }
     }
-    const cli = this.deps.resolveCli(agent)
+    const cli = await this.deps.resolveCli(agent)
     if ('error' in cli) return { ok: false, kind: 'failed', error: `${agent} is not available: ${cli.error}` }
     try {
       await this.ensureSnapshot(run)
