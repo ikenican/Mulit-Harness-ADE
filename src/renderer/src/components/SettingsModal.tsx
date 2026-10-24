@@ -4,6 +4,7 @@ import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import RemoteSettings from './RemoteSettings'
 import CoworkSettings from './CoworkSettings'
+import MemorySyncSettings from './MemorySyncSettings'
 import CustomAgentSettings from './CustomAgentSettings'
 import {
   IconSun,
@@ -833,6 +834,17 @@ export default function SettingsModal({
 
             <button
               type="button"
+              className={`macos-sidebar-item ${tab === 'memsync' ? 'active' : ''}`}
+              onClick={() => setTab('memsync')}
+            >
+              <div className="macos-icon-squircle" style={{ background: '#475569' }}>
+                <IconShield size={14} />
+              </div>
+              <span className="macos-sidebar-item-text">{t('memsync.tab')}</span>
+            </button>
+
+            <button
+              type="button"
               className={`macos-sidebar-item ${tab === 'about' ? 'active' : ''}`}
               onClick={() => setTab('about')}
             >
@@ -1549,6 +1561,23 @@ export default function SettingsModal({
             </>
           )}
 
+          {tab === 'memsync' && (
+            <>
+              <div className="macos-settings-header">
+                <div className="macos-settings-header-top">
+                  <div>
+                    <h2 className="macos-settings-title">{t('memsync.title')}</h2>
+                    <p className="macos-settings-desc">{t('memsync.desc')}</p>
+                  </div>
+                  <button type="button" className="macos-close-btn" onClick={onClose} title={t('settings.closeEsc')}>
+                    <IconClose size={12} />
+                  </button>
+                </div>
+              </div>
+              <MemorySyncSettings />
+            </>
+          )}
+
           {tab === 'cowork' && (
             <>
               <div className="macos-settings-header">
@@ -1855,6 +1884,8 @@ export default function SettingsModal({
                 t('settings.footerAboutHint')
               ) : tab === 'cowork' ? (
                 t('settings.footerCoworkHint')
+              ) : tab === 'memsync' ? (
+                t('memsync.footerHint')
               ) : (
                 t('settings.footerGeneralHint')
               )}

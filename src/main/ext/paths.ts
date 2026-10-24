@@ -157,6 +157,14 @@ function candidatePaths(cmd: string): string[] {
         join(localAppData, 'pnpm', 'codex.cmd')
       )
     }
+    // 記憶同步用：winget 裝的 Git／GitHub CLI 在 App 啟動後才裝好時，App 的 PATH 還沒有它們
+    const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files'
+    if (cmd === 'git') {
+      candidates.unshift(join(programFiles, 'Git', 'cmd', 'git.exe'), join(localAppData, 'Programs', 'Git', 'cmd', 'git.exe'))
+    }
+    if (cmd === 'gh') {
+      candidates.unshift(join(programFiles, 'GitHub CLI', 'gh.exe'), join(localAppData, 'Programs', 'GitHub CLI', 'gh.exe'))
+    }
     return candidates
   }
   // 非 Windows 平台候補路徑（當 Electron 未繼承終端 shell PATH 時之安全防護）

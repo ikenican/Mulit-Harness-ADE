@@ -44,7 +44,7 @@ export interface GitCommitDiffTarget {
   files?: Array<{ path: string; status: string }>
 }
 
-export type SettingsTab = 'appearance' | 'cli' | 'doctools' | 'extensions' | 'remote' | 'cowork' | 'about'
+export type SettingsTab = 'appearance' | 'cli' | 'doctools' | 'extensions' | 'remote' | 'cowork' | 'memsync' | 'about'
 
 export interface SettingsModalState {
   isOpen: boolean

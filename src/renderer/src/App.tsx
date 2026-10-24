@@ -92,6 +92,12 @@ export default function App(): JSX.Element {
     })
   }, [workspaceRoot, agentBusy, liveAgentSessionIds, detectedDevUrl, agentModifiedFiles])
 
+  // 記憶同步：開啟／切換專案時拉取私人記憶 repo（main 只在已同意、開啟自動拉取、專案已連結時才動作）
+  useEffect(() => {
+    if (!workspaceRoot) return
+    window.api.memsync.autoPull().catch(() => {})
+  }, [workspaceRoot])
+
   // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
   // 設定被別處改了（手機遠端切換 Bypass 等）→ 讓各面板重新讀取
   useEffect(() => window.api.settings.onChanged(() => bumpSettings()), [])
