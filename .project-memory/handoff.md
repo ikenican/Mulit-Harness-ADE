@@ -11,6 +11,7 @@
 - `.github/workflows/fork-release.yml`: pushing branch `release/<x.y.z>-fork.<n>` (x.y.z must equal package.json version) builds on windows-latest, runs typecheck/check-cowork/check-version, packages, checks latest.yml and node-pty files, publishes release `v<version>`, deletes the trigger branch. Tags cannot be pushed from the cloud session; branches can.
 - Released v0.1.41-fork.1 from e35392e (run 40011071236, all steps green): setup.exe, blockmap, portable ZIP, latest.yml. Portable ZIP inspected: app-update.yml owner ikenican; package.json updateRepo/upstreamRepo set; win32 conpty .node files unpacked.
 - Commit 3e798ed: Settings > CLI "Install" no longer spawns a hidden `powershell -ExecutionPolicy Bypass -Command "irm … | iex"` (Defender flagged it as Trojan:Win32/Commando.A!ml on the user's PC). It opens a new PowerShell/bash tab, pastes the official command after the shell settles, and the user presses Enter; `ext:installAgent`/`installCodex` IPC and the npm fallback were removed. Released as v0.1.41-fork.2 via `release/0.1.41-fork.2`.
+- Next commit after fork.2: Windows install commands for Claude Code and Codex wrap the official script in try/catch and fall back to `npm install -g` (user got 404 from chatgpt.com/codex/install.ps1 on 2026-10-24). Not released yet; PowerShell syntax not executed (no pwsh in the sandbox).
 - Windows v0.1.41 remains the latest release; nothing was released or version-bumped. apps/linux untouched (DEC-011).
 
 ## Verified
