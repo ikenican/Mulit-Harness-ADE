@@ -28,7 +28,8 @@
 - Windows-specific behavior of `revertFiles` (case-insensitive paths, junctions) not run.
 
 ## Next
-- Owner: install v0.1.41-fork.1, check Settings > About (Fork badge, upstream row), run one Cowork Project + execution. Next fork release: push `release/0.1.41-fork.2`.
+- User installed v0.1.41-fork.2 and the visible-terminal install works. Next fork release: push `release/0.1.41-fork.3` (includes the npm fallback).
+- Next optimization: remove main-process blocking calls (sync `where` in src/main/ext/paths.ts CLI detection; sync readdir/stat scanning in src/main/ipc/dashboard.ts and usage parsing; spawnSync in src/main/ipc/cowork.ts). Stay on Electron (decided 2026-10-24: Tauri would split rendering across WebView2/WKWebView/WebKitGTK).
 - Owner: run the Electron checks on Windows, open one Project meeting and one execution, and look at the new cards.
 - Then plan items not started: agent profile settings (user-written strengths), real SessionStart hooks for Codex (`.codex/hooks.json`) and Antigravity after confirming `agy` supports SessionStart, drag-handoff reading CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view, re-testing planning flags on current CLI versions.
 
