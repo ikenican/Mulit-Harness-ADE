@@ -13,6 +13,9 @@ const { monitorEventLoopDelay } = require('node:perf_hooks')
 const esbuild = require('esbuild')
 
 const ROOT = path.resolve(__dirname, '..')
+// WB_BENCH_SRC=<another checkout> bundles that checkout's src/ (e.g. a worktree of the commit before a change),
+// so before/after can run back to back on the same fixture
+const SRC = path.resolve(process.env.WB_BENCH_SRC || ROOT)
 const mode = process.argv.includes('cli') ? 'cli' : 'scan'
 const jsonIdx = process.argv.indexOf('--json')
 const jsonOut = jsonIdx > 0 ? process.argv[jsonIdx + 1] : null
@@ -70,7 +73,7 @@ async function bundle() {
   // inside the repo so externals (node-pty, …) resolve from node_modules
   const outDir = path.join(ROOT, 'node_modules', '.cache', 'wb-bench')
   const out = path.join(outDir, `handlers-${process.pid}.cjs`)
-  const indexTs = path.join(ROOT, 'src', 'main', 'index.ts')
+  const indexTs = path.join(SRC, 'src', 'main', 'index.ts')
   const stubIndex = {
     name: 'stub-main-index',
     setup(b) {
@@ -103,7 +106,7 @@ async function bundle() {
         export { registerDashboardHandlers } from './src/main/ipc/dashboard'
         export { registerExtHandlers } from './src/main/ipc/ext'
         export { registerCoworkHandlers } from './src/main/ipc/cowork'`,
-      resolveDir: ROOT,
+      resolveDir: SRC,
       loader: 'ts'
     },
     bundle: true,
@@ -111,6 +114,7 @@ async function bundle() {
     format: 'cjs',
     outfile: out,
     external: ['electron', '@lydell/node-pty', 'electron-updater', 'node-forge'],
+    nodePaths: [path.join(ROOT, 'node_modules')],
     plugins: [stubIndex],
     logLevel: 'error'
   })
@@ -148,6 +152,19 @@ app.on('window-all-closed', () => {})
 app.whenReady().then(async () => {
   if (mode === 'scan') {
     makeFixture()
+    // --touch: every fake session was written "just now" (status active, all listed); without it the
+    // fixture ages and sessions turn idle/completed, so compare before/after runs made with the same flag
+    if (process.argv.includes('--touch')) {
+      const now = new Date()
+      const walk = (d) => {
+        for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+          const p = path.join(d, e.name)
+          if (e.isDirectory()) walk(p)
+          fs.utimesSync(p, now, now)
+        }
+      }
+      walk(FAKE_HOME)
+    }
     process.env.USERPROFILE = FAKE_HOME
     process.env.HOME = FAKE_HOME
   }
