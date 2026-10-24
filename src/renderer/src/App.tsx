@@ -21,8 +21,6 @@ import {
   IconMaximize,
   IconMinimize,
   IconClose,
-  IconSplitSingle,
-  IconSplitVertical,
   IconTerminalBox
 } from '@/components/Icons'
 import {
@@ -356,13 +354,6 @@ export default function App(): JSX.Element {
                 </button>
               ))}
             </div>
-            <button
-              className={`btn-icon ${isCenterCollapsed ? '' : 'active'}`}
-              title={isCenterCollapsed ? t('header.showCenter') : t('header.hideCenter')}
-              onClick={() => setLayout((l) => ({ ...l, centerCollapsed: !l.centerCollapsed }))}
-            >
-              {isCenterCollapsed ? <IconSplitVertical size={14} /> : <IconSplitSingle size={14} />}
-            </button>
           </div>
           <button
             className={`btn-icon header-drag-item header-term-btn ${isCenterCollapsed ? 'active' : ''} ${dragging === 'terminal' ? 'dragging' : ''}`}
