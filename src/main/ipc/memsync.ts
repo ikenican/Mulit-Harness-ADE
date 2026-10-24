@@ -14,6 +14,7 @@ import {
   MemSyncError,
   cloneState,
   defaultClonePath,
+  detectCloudApps,
   detectCloudRoots,
   ensureFolder,
   ensureMemoryScripts,
@@ -136,7 +137,10 @@ function commands(gh: string | null): MemSyncState['commands'] {
   return {
     shell: isWin ? 'powershell' : 'bash',
     installGh: isWin ? 'winget install --id GitHub.cli -e --source winget' : 'brew install gh  # or see https://cli.github.com',
-    loginGh: `${ghCmd} auth login --hostname github.com --git-protocol https --web; ${ghCmd} auth setup-git`
+    loginGh: `${ghCmd} auth login --hostname github.com --git-protocol https --web; ${ghCmd} auth setup-git`,
+    // 雲端硬碟程式：winget 官方套件（Microsoft／Google LLC）；macOS 用 Homebrew cask
+    installOneDrive: isWin ? 'winget install --id Microsoft.OneDrive -e --source winget' : 'brew install --cask onedrive',
+    installGDrive: isWin ? 'winget install --id Google.GoogleDrive -e --source winget' : 'brew install --cask google-drive'
   }
 }
 
@@ -148,6 +152,7 @@ async function isGitRepo(t: Tools, dir: string): Promise<boolean> {
 async function state(workspace: string): Promise<MemSyncState> {
   const config = loadMemSyncConfig()
   const cloudRoots = detectCloudRoots()
+  const cloudApps = detectCloudApps()
   const root = memoryRoot(config)
   const ready = !!root && rootReady(root)
   let t: Tools
@@ -157,6 +162,7 @@ async function state(workspace: string): Promise<MemSyncState> {
     return {
       config,
       cloudRoots,
+      cloudApps,
       root,
       rootReady: ready,
       gitMissing: true,
@@ -172,7 +178,7 @@ async function state(workspace: string): Promise<MemSyncState> {
     cloneState(t, config.clonePath)
   ])
   const project = root && (await isGitRepo(t, workspace)) ? await projectState(t, { workspace, clonePath: root }) : null
-  return { config, cloudRoots, root, rootReady: ready, gitMissing: false, gh, clone, project, commands: commands(t.gh) }
+  return { config, cloudRoots, cloudApps, root, rootReady: ready, gitMissing: false, gh, clone, project, commands: commands(t.gh) }
 }
 
 async function wrap<T>(fn: () => Promise<T>): Promise<MemSyncResult<T>> {
@@ -325,6 +331,18 @@ export function registerMemSyncHandlers(): void {
         }
         return { pulled, linked }
       })
+    })
+  )
+
+  // 開啟雲端硬碟程式讓使用者登入（只開偵測到的官方程式路徑，不接受 renderer 傳路徑）
+  ipcMain.handle('memsync:launchCloudApp', (_event, provider: CloudProvider) =>
+    wrap(async () => {
+      if (provider !== 'onedrive' && provider !== 'gdrive') throw new MemSyncError('bad-backend', String(provider))
+      const cloud = detectCloudApps()[provider]
+      if (!cloud.exe) throw new MemSyncError(provider === 'onedrive' ? 'onedrive-missing' : 'gdrive-missing')
+      const err = await shell.openPath(cloud.exe)
+      if (err) throw new MemSyncError('launch-failed', err)
+      return true
     })
   )
 

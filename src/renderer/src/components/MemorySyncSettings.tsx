@@ -9,7 +9,7 @@ import type { MemSyncBackend, MemSyncResult, MemSyncState } from '../../../prelo
 // 流程：同意 → 選存放方式 → （GitHub：安裝／登入 gh、建立 repo；雲端硬碟：選資料夾）→ 接上專案 → 自動同步。
 // 這一頁的動作立即生效（不經過底部的「儲存」），因為它們會動到檔案與雲端。
 
-type Busy = null | 'config' | 'repo' | 'folder' | 'link' | 'sync' | 'refresh'
+type Busy = null | 'config' | 'repo' | 'folder' | 'link' | 'sync' | 'refresh' | 'launch'
 const BACKENDS: MemSyncBackend[] = ['github', 'onedrive', 'gdrive']
 
 export default function MemorySyncSettings(): JSX.Element {
@@ -22,7 +22,7 @@ export default function MemorySyncSettings(): JSX.Element {
   const errorText = useCallback(
     (code: string, fallback: string): string => {
       const key = `memsync.err.${code}`
-      const s = t(key)
+      const s = t(key, { message: fallback })
       return s === key ? fallback : s
     },
     [t]
@@ -206,7 +206,13 @@ export default function MemorySyncSettings(): JSX.Element {
                       <div className="macos-lang-info">
                         <span className="macos-lang-name">{providerName(b)}</span>
                         <span className="macos-lang-sub">
-                          {b === 'github' ? t('memsync.backendGithubSub') : detected ? t('memsync.backendFolderSub') : t('memsync.backendNotFound')}
+                          {b === 'github'
+                            ? t('memsync.backendGithubSub')
+                            : detected
+                              ? t('memsync.backendFolderSub')
+                              : st.cloudApps[b].installed
+                                ? t('memsync.backendNotSignedIn')
+                                : t('memsync.backendNotFound')}
                         </span>
                       </div>
                       <span className="macos-radio-dot" />
@@ -285,9 +291,35 @@ export default function MemorySyncSettings(): JSX.Element {
               <span className="macos-section-header">{t('memsync.stepFolder', { n: step++, provider: providerName(backend) })}</span>
               <div className="macos-inset-group" style={{ padding: '12px 16px' }}>
                 {st.cloudRoots[backend].length === 0 ? (
-                  <p className="remote-note danger" style={{ marginTop: 0 }}>
-                    ⚠️ {t(backend === 'onedrive' ? 'memsync.err.onedrive-missing' : 'memsync.err.gdrive-missing')}
-                  </p>
+                  <>
+                    <p className="macos-row-sub" style={{ marginTop: 0 }}>
+                      {st.cloudApps[backend].installed
+                        ? t('memsync.cloudNotSignedIn', { provider: providerName(backend) })
+                        : t('memsync.cloudNotInstalled', { provider: providerName(backend) })}
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {!st.cloudApps[backend].installed && (
+                        <button
+                          type="button"
+                          className="macos-btn-secondary"
+                          onClick={() => pasteInNewShell(backend === 'onedrive' ? st.commands.installOneDrive : st.commands.installGDrive, st.commands.shell)}
+                        >
+                          {t('memsync.installCloud', { provider: providerName(backend) })}
+                        </button>
+                      )}
+                      {st.cloudApps[backend].installed && st.cloudApps[backend].exe && (
+                        <button type="button" className="macos-btn-secondary" disabled={acting} onClick={() => void act('launch', () => window.api.memsync.launchCloudApp(backend))}>
+                          {t('memsync.launchCloud', { provider: providerName(backend) })}
+                        </button>
+                      )}
+                      <button type="button" className="macos-btn-secondary" disabled={acting} onClick={() => void refresh()}>
+                        <IconRefresh size={12} /> {t('memsync.recheck')}
+                      </button>
+                    </div>
+                    <p className="remote-note">
+                      {st.cloudApps[backend].installed ? t('memsync.cloudSignInHint', { provider: providerName(backend) }) : t('memsync.cloudPastedHint')}
+                    </p>
+                  </>
                 ) : (
                   <>
                     <p className="macos-row-sub" style={{ marginTop: 0 }}>

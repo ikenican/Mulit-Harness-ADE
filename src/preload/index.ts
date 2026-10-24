@@ -233,6 +233,7 @@ const api = {
       patch: Partial<{ consent: boolean; backend: MemSyncBackend; repo: string; autoSync: boolean; autoLink: boolean }>
     ): Promise<MemSyncResult<MemSyncState>> => ipcRenderer.invoke('memsync:setConfig', patch),
     pickFolder: (): Promise<MemSyncResult<{ picked: boolean; state: MemSyncState }>> => ipcRenderer.invoke('memsync:pickFolder'),
+    launchCloudApp: (provider: 'onedrive' | 'gdrive'): Promise<MemSyncResult<boolean>> => ipcRenderer.invoke('memsync:launchCloudApp', provider),
     setupRepo: (): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:setupRepo'),
     linkProject: (): Promise<MemSyncResult<{ result: MemSyncLinkResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:linkProject'),
     sync: (pullOnly?: boolean): Promise<MemSyncResult<{ result: MemSyncSyncResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:sync', pullOnly),
@@ -691,6 +692,8 @@ export interface MemSyncState {
   config: MemSyncConfig
   /** 偵測到的雲端硬碟根目錄 */
   cloudRoots: { onedrive: string[]; gdrive: string[] }
+  /** 雲端硬碟程式是否已安裝（已安裝但沒登入時 cloudRoots 會是空的） */
+  cloudApps: { onedrive: { installed: boolean; exe?: string }; gdrive: { installed: boolean; exe?: string } }
   /** 目前的記憶根目錄（clone 或資料夾），尚未選擇時為 null */
   root: string | null
   rootReady: boolean
@@ -708,7 +711,7 @@ export interface MemSyncState {
     hasRemoteMemory: boolean
     tracked: string[]
   } | null
-  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string }
+  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string }
 }
 export interface MemSyncRepoResult {
   repo: string

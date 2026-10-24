@@ -75,6 +75,38 @@ export function detectCloudRoots(env: NodeJS.ProcessEnv = process.env, home = os
   return { onedrive: uniq(onedrive), gdrive: uniq(gdrive) }
 }
 
+/**
+ * 雲端硬碟程式有沒有裝（不等於有登入：登入並建立同步資料夾後 detectCloudRoots 才找得到）。
+ * exe 是用來「開啟並登入」的程式。
+ */
+export function detectCloudApps(env: NodeJS.ProcessEnv = process.env): Record<CloudProvider, { installed: boolean; exe?: string }> {
+  const first = (list: string[]): string | undefined => list.find((p) => p && exists(p))
+  const pf = env.ProgramFiles || 'C:\\Program Files'
+  const pf86 = env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
+  const local = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+  let onedrive: string | undefined
+  let gdrive: string | undefined
+  if (process.platform === 'win32') {
+    onedrive = first([path.join(local, 'Microsoft', 'OneDrive', 'OneDrive.exe'), path.join(pf, 'Microsoft OneDrive', 'OneDrive.exe'), path.join(pf86, 'Microsoft OneDrive', 'OneDrive.exe')])
+    // Google 雲端硬碟電腦版：<Program Files>\Google\Drive File Stream\launch.bat（或版本資料夾裡的 GoogleDriveFS.exe）
+    const dfs = path.join(pf, 'Google', 'Drive File Stream')
+    gdrive = first([path.join(dfs, 'launch.bat')])
+    if (!gdrive && exists(dfs)) {
+      for (const v of fs.readdirSync(dfs).sort().reverse()) {
+        const exe = path.join(dfs, v, 'GoogleDriveFS.exe')
+        if (exists(exe)) {
+          gdrive = exe
+          break
+        }
+      }
+    }
+  } else if (process.platform === 'darwin') {
+    onedrive = first(['/Applications/OneDrive.app'])
+    gdrive = first(['/Applications/Google Drive.app'])
+  }
+  return { onedrive: { installed: !!onedrive, ...(onedrive ? { exe: onedrive } : {}) }, gdrive: { installed: !!gdrive, ...(gdrive ? { exe: gdrive } : {}) } }
+}
+
 function isInside(child: string, parent: string): boolean {
   const rel = path.relative(path.resolve(parent), path.resolve(child))
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
