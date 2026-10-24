@@ -19,6 +19,7 @@ import {
   ensureFolder,
   ensureMemoryScripts,
   connectRepoByUrl,
+  createRepoViaGitLogin,
   ensureRepo,
   ghStatus,
   linkProject,
@@ -97,7 +98,7 @@ function activeRoot(c: MemSyncConfig): string | null {
 // git／gh 一律關掉互動提示：背景執行時沒人能回答，寧可失敗回報也不要卡住
 const run: Run = (cmd, args, opts) =>
   new Promise((resolve) => {
-    execFile(
+    const child = execFile(
       cmd,
       args,
       {
@@ -114,6 +115,9 @@ const run: Run = (cmd, args, opts) =>
         resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') || (err ? err.message : '') })
       }
     )
+    // git credential 等指令從 stdin 讀查詢；沒有輸入時直接關掉，避免等待
+    child.stdin?.on('error', () => {})
+    child.stdin?.end(opts?.input ?? '')
   })
 
 async function tools(): Promise<Tools> {
@@ -276,6 +280,19 @@ export function registerMemSyncHandlers(): void {
       const r = await exclusive(() => ensureRepo(t, { name: c.repo, clonePath: c.clonePath }))
       const gh = await ghStatus(t)
       saveConfig({ ...c, repoFull: r.repo, login: gh.login || null })
+      return { result: r, state: await state(getWorkspaceForEvent(event)) }
+    })
+  )
+
+  // 免 gh 一鍵建立：用 Git Credential Manager 的 GitHub 登入建立私人 repo
+  ipcMain.handle('memsync:createRepoViaGit', (event, name: string) =>
+    wrap(async () => {
+      const c = loadMemSyncConfig()
+      requireConsent(c)
+      if (c.backend !== 'github') throw new MemSyncError('bad-backend', String(c.backend))
+      const t = await tools()
+      const r = await exclusive(() => createRepoViaGitLogin(t, { name: String(name || c.repo.split('/').pop() || ''), clonePath: c.clonePath }))
+      saveConfig({ ...c, repo: r.repo.split('/')[1], repoFull: r.repo, login: r.repo.split('/')[0] })
       return { result: r, state: await state(getWorkspaceForEvent(event)) }
     })
   )

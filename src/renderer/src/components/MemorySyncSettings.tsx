@@ -9,7 +9,7 @@ import type { MemSyncBackend, MemSyncResult, MemSyncState } from '../../../prelo
 // 流程：同意 → 選存放方式 → （GitHub：安裝／登入 gh、建立 repo；雲端硬碟：選資料夾）→ 接上專案 → 自動同步。
 // 這一頁的動作立即生效（不經過底部的「儲存」），因為它們會動到檔案與雲端。
 
-type Busy = null | 'config' | 'repo' | 'folder' | 'link' | 'sync' | 'refresh' | 'launch'
+type Busy = null | 'config' | 'repo' | 'auto' | 'folder' | 'link' | 'sync' | 'refresh' | 'launch'
 const BACKENDS: MemSyncBackend[] = ['github', 'onedrive', 'gdrive']
 
 export default function MemorySyncSettings(): JSX.Element {
@@ -73,6 +73,8 @@ export default function MemorySyncSettings(): JSX.Element {
   const p = st.project
   // 連結方式：沒選過時，有裝 gh 就走 gh，沒裝就走貼網址（免安裝）
   const ghRoute = route ?? (st.gh.installed ? 'gh' : 'url')
+  // 一鍵建立只要 repo 名稱（設定裡可能存成 owner/repo）
+  const lazyName = repoName.split('/').pop() || ''
   const providerName = (b: MemSyncBackend): string => t(`memsync.backend_${b}`)
 
   const setupRepo = async (): Promise<void> => {
@@ -255,9 +257,38 @@ export default function MemorySyncSettings(): JSX.Element {
                 <div className="macos-section">
                   <span className="macos-section-header">{t('memsync.stepRepoUrl', { n: step++ })}</span>
                   <div className="macos-inset-group" style={{ padding: '12px 16px' }}>
-                    <p className="macos-row-sub" style={{ marginTop: 0 }}>{t('memsync.urlIntro')}</p>
+                    {/* 一鍵：用 Git 的 GitHub 登入直接建立私人 repo */}
+                    <p className="macos-row-sub" style={{ marginTop: 0 }}>{t('memsync.autoIntro')}</p>
+                    <label className="macos-row-sub" htmlFor="memsync-repo-auto" style={{ display: 'block', marginBottom: 6 }}>
+                      {t('memsync.autoNameLabel')}
+                    </label>
+                    <input id="memsync-repo-auto" className="macos-input" value={lazyName} onChange={(e) => setRepoName(e.target.value)} disabled={acting} spellCheck={false} />
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '10px 0' }}>
+                      <button
+                        type="button"
+                        className="macos-btn-primary"
+                        disabled={acting || !lazyName.trim()}
+                        onClick={() =>
+                          void act('auto', () => window.api.memsync.createRepoViaGit(lazyName.trim()), (d) =>
+                            t(d.result.created ? 'memsync.repoCreated' : 'memsync.repoLinked', { repo: d.result.repo })
+                          )
+                        }
+                      >
+                        {busy === 'auto' ? t('memsync.urlConnecting') : t('memsync.autoCreate')}
+                      </button>
+                    </div>
+                    <p className="remote-note">{t('memsync.urlLoginHint')}</p>
+
+                    {/* 備用：網頁上建立（名稱與 Private 已預填），貼回網址 */}
+                    <p className="macos-row-sub" style={{ marginTop: 14 }}>{t('memsync.urlIntro')}</p>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                      <button type="button" className="macos-btn-secondary" onClick={() => window.open('https://github.com/new', '_blank')}>
+                      <button
+                        type="button"
+                        className="macos-btn-secondary"
+                        onClick={() =>
+                          window.open(`https://github.com/new?name=${encodeURIComponent(lazyName.trim() || 'ai-project-memory')}&visibility=private`, '_blank')
+                        }
+                      >
                         {t('memsync.openGithubNew')}
                       </button>
                     </div>

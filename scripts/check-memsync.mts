@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { connectRepoByUrl, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
+import { connectRepoByUrl, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-check-'))
@@ -346,6 +346,61 @@ assert.equal(lcN.source, 'repo')
 assert.ok(fs.existsSync(path.join(projN, '.project-memory', 'handoff.md')), 'PC N reads the shared memory')
 assert.equal(ghCalls.length, ghBefore, 'gh never called on the no-gh route')
 console.log('no gh: URL parsing, public/rate-limit/unreachable refusals, private repo connected and linked ok')
+
+// ── one-click create without gh: token from (fake) Git Credential Manager, (fake) GitHub API ──
+const rejected: string[] = []
+const posts: unknown[] = []
+const lazyTools = (cred: 'ok' | 'cancel', opts: { expired?: boolean; createPublic?: boolean } = {}): Tools => ({
+  git: GIT,
+  gh: null,
+  run: async (cmd, args, o) => {
+    if (cmd === GIT && args[0] === 'credential') {
+      assert.equal(o?.input?.includes('host=github.com'), true, 'credential query names github.com')
+      if (args[1] === 'reject') {
+        rejected.push(o?.input || '')
+        return { code: 0, stdout: '', stderr: '' }
+      }
+      return cred === 'ok' ? { code: 0, stdout: 'protocol=https\nhost=github.com\nusername=tester\npassword=TOKEN-1\n', stderr: '' } : { code: 1, stdout: '', stderr: 'user cancelled' }
+    }
+    return run(cmd, args, o)
+  },
+  githubApi: async (method, apiPath, token, body) => {
+    assert.equal(token, 'TOKEN-1', 'API called with the token from git credential fill')
+    if (opts.expired) return { status: 401, json: { message: 'Bad credentials' } }
+    if (method === 'GET' && apiPath === '/user') return { status: 200, json: { login: 'tester' } }
+    if (method === 'GET' && apiPath.startsWith('/repos/')) {
+      const full = apiPath.slice('/repos/'.length)
+      return repos.has(full) ? { status: 200, json: { private: repos.get(full) } } : { status: 404, json: { message: 'Not Found' } }
+    }
+    if (method === 'POST' && apiPath === '/user/repos') {
+      posts.push(body)
+      const name = (body as { name: string }).name
+      const bare = path.join(remotes, 'tester', name) + '.git'
+      fs.mkdirSync(path.dirname(bare), { recursive: true })
+      await exec(GIT, ['init', '-q', '--bare', bare])
+      repos.set(`tester/${name}`, opts.createPublic ? false : (body as { private: boolean }).private)
+      return { status: 201, json: { full_name: `tester/${name}` } }
+    }
+    return { status: 500, json: null }
+  }
+})
+const memL = path.join(tmp, 'pcL', 'mem')
+await assert.rejects(createRepoViaGitLogin(lazyTools('ok'), { name: '../x', clonePath: memL }), (e: MemSyncError) => e.code === 'bad-repo-name')
+await assert.rejects(createRepoViaGitLogin(lazyTools('cancel'), { name: 'lazy-mem', clonePath: memL }), (e: MemSyncError) => e.code === 'git-login-failed')
+await assert.rejects(createRepoViaGitLogin(lazyTools('ok', { expired: true }), { name: 'lazy-mem', clonePath: memL }), (e: MemSyncError) => e.code === 'git-login-failed')
+assert.equal(rejected.length, 1, 'expired login handed back to git credential reject')
+assert.match(rejected[0], /password=TOKEN-1/)
+await assert.rejects(createRepoViaGitLogin(lazyTools('ok'), { name: 'public-mem', clonePath: memL }), (e: MemSyncError) => e.code === 'repo-public')
+await assert.rejects(createRepoViaGitLogin(lazyTools('ok', { createPublic: true }), { name: 'oops-mem', clonePath: memL }), (e: MemSyncError) => e.code === 'repo-public', 'created repo re-checked')
+assert.ok(!fs.existsSync(memL), 'nothing cloned on refusal')
+const lz = await createRepoViaGitLogin(lazyTools('ok'), { name: 'lazy-mem', clonePath: memL })
+assert.deepEqual([lz.repo, lz.created, lz.cloned], ['tester/lazy-mem', true, true])
+assert.deepEqual(posts.at(-1), { name: 'lazy-mem', private: true, description: 'Agent Workbench project memory (private)' })
+assert.match(await g(memL, 'log', '--oneline', 'origin/main'), /memory: initialize/, 'first commit pushed to the new repo')
+const lz2 = await createRepoViaGitLogin(lazyTools('ok'), { name: 'ai-project-memory', clonePath: path.join(tmp, 'pcL', 'mem2') })
+assert.deepEqual([lz2.repo, lz2.created], ['tester/ai-project-memory', false], 'existing private repo reused')
+assert.equal(ghCalls.length, ghBefore, 'gh never called on the one-click route')
+console.log('one-click create: login cancel/expired, public refusals, created private + initialized, existing reused ok')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('memsync ok')

@@ -235,6 +235,9 @@ const api = {
     pickFolder: (): Promise<MemSyncResult<{ picked: boolean; state: MemSyncState }>> => ipcRenderer.invoke('memsync:pickFolder'),
     launchCloudApp: (provider: 'onedrive' | 'gdrive'): Promise<MemSyncResult<boolean>> => ipcRenderer.invoke('memsync:launchCloudApp', provider),
     setupRepo: (): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:setupRepo'),
+    /** 免 gh 一鍵建立：用 Git 的 GitHub 登入建立（或沿用）私人 repo */
+    createRepoViaGit: (name: string): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> =>
+      ipcRenderer.invoke('memsync:createRepoViaGit', name),
     /** 免 gh：連結使用者自己建好的私人 repo（網址或 owner/repo） */
     connectRepo: (input: string): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> =>
       ipcRenderer.invoke('memsync:connectRepo', input),

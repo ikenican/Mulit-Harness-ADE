@@ -17,8 +17,15 @@ export interface RunResult {
 export type Run = (
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; timeoutMs?: number; env?: Record<string, string> }
+  opts?: { cwd?: string; timeoutMs?: number; env?: Record<string, string>; input?: string }
 ) => Promise<RunResult>
+
+export type GithubApi = (
+  method: 'GET' | 'POST',
+  apiPath: string,
+  token: string,
+  body?: unknown
+) => Promise<{ status: number; json: Record<string, unknown> | null }>
 
 export interface Tools {
   git: string
@@ -27,6 +34,8 @@ export interface Tools {
   run: Run
   /** 不登入查詢網址的 HTTP 狀態碼（免 gh 路線判斷 repo 是否公開）；測試時注入假的 */
   httpStatus?: (url: string) => Promise<number>
+  /** 帶權杖呼叫 GitHub API（一鍵建立私人 repo）；測試時注入假的 */
+  githubApi?: GithubApi
 }
 
 export class MemSyncError extends Error {
@@ -280,6 +289,67 @@ export async function connectRepoByUrl(tools: Tools, opts: { input: string; clon
   })
   if (ls.code !== 0) throw new MemSyncError('repo-unreachable', (ls.stderr || ls.stdout).trim().slice(0, 400))
   return { repo: full, created: false, ...(await prepareClone(tools, { full, clonePath: opts.clonePath, login: full.split('/')[0] })) }
+}
+
+const defaultGithubApi: GithubApi = async (method, apiPath, token, body) => {
+  const res = await fetch(`https://api.github.com${apiPath}`, {
+    method,
+    headers: {
+      'User-Agent': 'agent-workbench',
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  })
+  let json: Record<string, unknown> | null = null
+  try {
+    json = (await res.json()) as Record<string, unknown>
+  } catch {
+    json = null
+  }
+  return { status: res.status, json }
+}
+
+const CRED_QUERY = 'protocol=https\nhost=github.com\n\n'
+
+/**
+ * 一鍵建立：向 Git Credential Manager 要 github.com 的登入（沒有就跳出 GitHub 登入），
+ * 用那個權杖建立私人 repo（已存在且私人就沿用、公開就拒絕），建好再確認真的是私人。
+ * 權杖只在這次呼叫的記憶體裡使用，不寫到任何地方（它本來就由 Git 的憑證管理員保管）。
+ */
+export async function createRepoViaGitLogin(tools: Tools, opts: { name: string; clonePath: string }): Promise<EnsureRepoResult> {
+  const name = opts.name.trim() || DEFAULT_REPO_NAME
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(name) || name === '.' || name === '..') throw new MemSyncError('bad-repo-name', name)
+  const cred = await tools.run(tools.git, ['credential', 'fill'], { input: CRED_QUERY, timeoutMs: 5 * 60_000, env: { GCM_INTERACTIVE: 'always' } })
+  const fields = new Map(cred.stdout.split(/\r?\n/).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)] as [string, string]))
+  const token = fields.get('password') || ''
+  if (cred.code !== 0 || !token) throw new MemSyncError('git-login-failed', (cred.stderr || 'no GitHub login').trim().slice(0, 300))
+  const api = tools.githubApi || defaultGithubApi
+  const me = await api('GET', '/user', token)
+  if (me.status === 401) {
+    // 憑證管理員裡的登入過期：丟掉它，下次重試會重新登入
+    await tools.run(tools.git, ['credential', 'reject'], { input: `protocol=https\nhost=github.com\nusername=${fields.get('username') || ''}\npassword=${token}\n\n` })
+    throw new MemSyncError('git-login-failed', 'GitHub login expired; try again to sign in')
+  }
+  const login = typeof me.json?.login === 'string' ? me.json.login : ''
+  if (me.status !== 200 || !login) throw new MemSyncError('github-api-failed', `GET /user answered ${me.status}`)
+  const full = `${login}/${name}`
+
+  let created = false
+  const existing = await api('GET', `/repos/${full}`, token)
+  if (existing.status === 200) {
+    if (existing.json?.private !== true) throw new MemSyncError('repo-public', `${full} is public; memory must go to a private repository`)
+  } else if (existing.status === 404) {
+    const made = await api('POST', '/user/repos', token, { name, private: true, description: 'Agent Workbench project memory (private)' })
+    if (made.status !== 201) throw new MemSyncError('repo-create-failed', `GitHub answered ${made.status}: ${String(made.json?.message || '')}`)
+    created = true
+    const check = await api('GET', `/repos/${full}`, token)
+    if (check.status !== 200 || check.json?.private !== true) throw new MemSyncError('repo-public', `${full} was not created as private`)
+  } else {
+    throw new MemSyncError('github-api-failed', `GET /repos/${full} answered ${existing.status}`)
+  }
+  return { repo: full, created, ...(await prepareClone(tools, { full, clonePath: opts.clonePath, login })) }
 }
 
 /** 確保本機 clone 指向 full；新 repo 時放說明與 .gitignore 並推出第一個提交 */
