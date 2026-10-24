@@ -1,6 +1,9 @@
-// 記憶同步的 Electron 接線：設定檔、gh／git 的位置、IPC。流程本身在 ../memsync/core.ts。
+// 記憶同步的 Electron 接線：設定檔、gh／git 的位置、IPC、背景同步。流程本身在 ../memsync/core.ts。
 // 設定存在 userData/memory-sync.json，每台電腦各自一份；這一頁的動作立即生效，不經過設定頁的「儲存」。
-import { app, ipcMain, shell } from 'electron'
+//
+// 存放方式：GitHub 私人 repo（git 同步）、OneDrive／Google Drive 資料夾（雲端硬碟程式同步，
+// Workbench 不做網路動作）。沒有同意開啟時，這裡不做任何同步，也不碰網路。
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -11,42 +14,82 @@ import {
   MemSyncError,
   cloneState,
   defaultClonePath,
+  detectCloudRoots,
+  ensureFolder,
+  ensureMemoryScripts,
   ensureRepo,
   ghStatus,
   linkProject,
   projectState,
+  rootReady,
   syncNow,
+  type CloudProvider,
   type Run,
   type Tools
 } from '../memsync/core'
-import type { MemSyncConfig, MemSyncState, MemSyncResult } from '../../preload/index'
+import type { MemSyncBackend, MemSyncConfig, MemSyncState, MemSyncResult } from '../../preload/index'
+import commitHandoffScript from '../memsync/templates/commit-handoff.sh?raw'
+import statusScript from '../memsync/templates/status.sh?raw'
+
+/** 接上記憶同步的專案一律用這兩個腳本（依設定存本機／雲端資料夾／私人 repo，絕不寫進專案 repo） */
+const MEMORY_SCRIPTS = { 'commit-handoff.sh': commitHandoffScript, 'status.sh': statusScript }
 
 const configFile = (): string => path.join(app.getPath('userData'), 'memory-sync.json')
+const SYNC_INTERVAL_MS = 10 * 60 * 1000
 
 function defaults(): MemSyncConfig {
-  return { consentAt: null, repo: DEFAULT_REPO_NAME, clonePath: defaultClonePath(), autoPull: true, repoFull: null, login: null }
+  return {
+    consentAt: null,
+    backend: null,
+    repo: DEFAULT_REPO_NAME,
+    clonePath: defaultClonePath(),
+    repoFull: null,
+    login: null,
+    folderPath: null,
+    autoSync: true,
+    autoLink: true
+  }
 }
 
+const BACKENDS: MemSyncBackend[] = ['github', 'onedrive', 'gdrive']
+
 export function loadMemSyncConfig(): MemSyncConfig {
+  const d = defaults()
   try {
     const raw = JSON.parse(fs.readFileSync(configFile(), 'utf8'))
-    const d = defaults()
     return {
       consentAt: typeof raw.consentAt === 'number' ? raw.consentAt : null,
+      backend: BACKENDS.includes(raw.backend) ? raw.backend : null,
       repo: typeof raw.repo === 'string' && raw.repo.trim() ? raw.repo.trim() : d.repo,
       clonePath: typeof raw.clonePath === 'string' && path.isAbsolute(raw.clonePath) ? raw.clonePath : d.clonePath,
-      autoPull: raw.autoPull !== false,
       repoFull: typeof raw.repoFull === 'string' ? raw.repoFull : null,
-      login: typeof raw.login === 'string' ? raw.login : null
+      login: typeof raw.login === 'string' ? raw.login : null,
+      folderPath: typeof raw.folderPath === 'string' && path.isAbsolute(raw.folderPath) ? raw.folderPath : null,
+      // 舊版設定叫 autoPull
+      autoSync: (raw.autoSync ?? raw.autoPull) !== false,
+      autoLink: raw.autoLink !== false
     }
   } catch {
-    return defaults()
+    return d
   }
 }
 
 function saveConfig(c: MemSyncConfig): void {
   fs.mkdirSync(path.dirname(configFile()), { recursive: true })
   fs.writeFileSync(configFile(), JSON.stringify(c, null, 2))
+}
+
+/** 記憶根目錄：GitHub 模式是 clone，雲端硬碟模式是使用者選的資料夾 */
+function memoryRoot(c: MemSyncConfig): string | null {
+  if (c.backend === 'github') return c.clonePath
+  if (c.backend === 'onedrive' || c.backend === 'gdrive') return c.folderPath
+  return null
+}
+
+/** 已同意、選好存放方式、根目錄也準備好了 */
+function activeRoot(c: MemSyncConfig): string | null {
+  const root = memoryRoot(c)
+  return c.consentAt && root && rootReady(root) ? root : null
 }
 
 // git／gh 一律關掉互動提示：背景執行時沒人能回答，寧可失敗回報也不要卡住
@@ -77,6 +120,14 @@ async function tools(): Promise<Tools> {
   return { git, gh: await findCliAsync('gh'), run }
 }
 
+// 同一時間只跑一個會動到記憶根目錄的動作（背景同步、手動同步、連結）
+let chain: Promise<unknown> = Promise.resolve()
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const next = chain.then(fn, fn)
+  chain = next.catch(() => {})
+  return next
+}
+
 const isWin = process.platform === 'win32'
 
 /** 貼進看得見的終端讓使用者自己按 Enter 的指令；gh 剛裝好時 App 的 PATH 還沒有它，所以用完整路徑 */
@@ -96,15 +147,32 @@ async function isGitRepo(t: Tools, dir: string): Promise<boolean> {
 
 async function state(workspace: string): Promise<MemSyncState> {
   const config = loadMemSyncConfig()
+  const cloudRoots = detectCloudRoots()
+  const root = memoryRoot(config)
+  const ready = !!root && rootReady(root)
   let t: Tools
   try {
     t = await tools()
-  } catch (e) {
-    return { config, gitMissing: true, gh: { installed: false, loggedIn: false }, clone: { exists: false }, project: null, commands: commands(null) }
+  } catch {
+    return {
+      config,
+      cloudRoots,
+      root,
+      rootReady: ready,
+      gitMissing: true,
+      gh: { installed: false, loggedIn: false },
+      clone: { exists: false },
+      project: null,
+      commands: commands(null)
+    }
   }
-  const [gh, clone] = await Promise.all([ghStatus(t), cloneState(t, config.clonePath)])
-  const project = (await isGitRepo(t, workspace)) ? await projectState(t, { workspace, clonePath: config.clonePath }) : null
-  return { config, gitMissing: false, gh, clone, project, commands: commands(t.gh) }
+  // gh 狀態只在 GitHub 模式需要（會連網路），其他模式不查
+  const [gh, clone] = await Promise.all([
+    config.backend === 'github' ? ghStatus(t) : Promise.resolve({ installed: !!t.gh, loggedIn: false }),
+    cloneState(t, config.clonePath)
+  ])
+  const project = root && (await isGitRepo(t, workspace)) ? await projectState(t, { workspace, clonePath: root }) : null
+  return { config, cloudRoots, root, rootReady: ready, gitMissing: false, gh, clone, project, commands: commands(t.gh) }
 }
 
 async function wrap<T>(fn: () => Promise<T>): Promise<MemSyncResult<T>> {
@@ -121,25 +189,74 @@ function requireConsent(c: MemSyncConfig): void {
   if (!c.consentAt) throw new MemSyncError('no-consent', 'Memory sync has not been enabled')
 }
 
+function requireRoot(c: MemSyncConfig): string {
+  requireConsent(c)
+  const root = activeRoot(c)
+  if (!root) throw new MemSyncError('no-clone', 'Set up the memory storage first')
+  return root
+}
+
+/** 背景同步（只有 GitHub 模式；雲端硬碟模式由它自己的程式同步） */
+async function backgroundSync(): Promise<void> {
+  const c = loadMemSyncConfig()
+  const root = activeRoot(c)
+  if (!root || c.backend !== 'github' || !c.autoSync) return
+  try {
+    const t = await tools()
+    const r = await exclusive(() => syncNow(t, { clonePath: root, login: c.login || undefined }))
+    if (r.error) console.warn('[memsync] background sync:', r.error)
+  } catch (e) {
+    console.warn('[memsync] background sync failed:', (e as Error).message)
+  }
+}
+
 export function registerMemSyncHandlers(): void {
   ipcMain.handle('memsync:state', (event) => wrap(() => state(getWorkspaceForEvent(event))))
 
-  ipcMain.handle('memsync:setConfig', (event, patch: Partial<{ consent: boolean; repo: string; clonePath: string; autoPull: boolean }>) =>
+  ipcMain.handle(
+    'memsync:setConfig',
+    (event, patch: Partial<{ consent: boolean; backend: MemSyncBackend; repo: string; autoSync: boolean; autoLink: boolean }>) =>
+      wrap(async () => {
+        const c = loadMemSyncConfig()
+        if (typeof patch?.consent === 'boolean') c.consentAt = patch.consent ? Date.now() : null
+        if (patch?.backend !== undefined) {
+          if (!BACKENDS.includes(patch.backend)) throw new MemSyncError('bad-backend', String(patch.backend))
+          // 換存放方式：已接上的專案在下次開啟時（或按「搬到新的存放位置」）從舊位置搬過來
+          c.backend = patch.backend
+        }
+        if (typeof patch?.repo === 'string') {
+          const r = patch.repo.trim()
+          if (r && !/^([A-Za-z0-9-]{1,39}\/)?[A-Za-z0-9._-]{1,100}$/.test(r)) throw new MemSyncError('bad-repo-name', r)
+          c.repo = r || DEFAULT_REPO_NAME
+        }
+        if (typeof patch?.autoSync === 'boolean') c.autoSync = patch.autoSync
+        if (typeof patch?.autoLink === 'boolean') c.autoLink = patch.autoLink
+        saveConfig(c)
+        return state(getWorkspaceForEvent(event))
+      })
+  )
+
+  // 雲端硬碟模式：選資料夾。只接受偵測到的 OneDrive／Google Drive 底下的資料夾
+  ipcMain.handle('memsync:pickFolder', (event) =>
     wrap(async () => {
       const c = loadMemSyncConfig()
-      if (typeof patch?.consent === 'boolean') c.consentAt = patch.consent ? Date.now() : null
-      if (typeof patch?.repo === 'string') {
-        const r = patch.repo.trim()
-        if (r && !/^([A-Za-z0-9-]{1,39}\/)?[A-Za-z0-9._-]{1,100}$/.test(r)) throw new MemSyncError('bad-repo-name', r)
-        c.repo = r || DEFAULT_REPO_NAME
+      requireConsent(c)
+      if (c.backend !== 'onedrive' && c.backend !== 'gdrive') throw new MemSyncError('bad-backend', String(c.backend))
+      const provider: CloudProvider = c.backend
+      const roots = detectCloudRoots()[provider]
+      if (!roots.length) throw new MemSyncError(provider === 'onedrive' ? 'onedrive-missing' : 'gdrive-missing')
+      const suggested = path.join(roots[0], DEFAULT_REPO_NAME)
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const opts: Electron.OpenDialogOptions = {
+        title: provider === 'onedrive' ? 'OneDrive' : 'Google Drive',
+        defaultPath: c.folderPath || (fs.existsSync(suggested) ? suggested : roots[0]),
+        properties: ['openDirectory', 'createDirectory']
       }
-      if (typeof patch?.clonePath === 'string') {
-        if (!path.isAbsolute(patch.clonePath)) throw new MemSyncError('bad-clone-path', patch.clonePath)
-        c.clonePath = patch.clonePath
-      }
-      if (typeof patch?.autoPull === 'boolean') c.autoPull = patch.autoPull
-      saveConfig(c)
-      return state(getWorkspaceForEvent(event))
+      const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts)
+      if (r.canceled || !r.filePaths[0]) return { picked: false, state: await state(getWorkspaceForEvent(event)) }
+      ensureFolder({ root: r.filePaths[0], provider, cloudRoots: roots })
+      saveConfig({ ...c, folderPath: r.filePaths[0] })
+      return { picked: true, state: await state(getWorkspaceForEvent(event)) }
     })
   )
 
@@ -147,8 +264,9 @@ export function registerMemSyncHandlers(): void {
     wrap(async () => {
       const c = loadMemSyncConfig()
       requireConsent(c)
+      if (c.backend !== 'github') throw new MemSyncError('bad-backend', String(c.backend))
       const t = await tools()
-      const r = await ensureRepo(t, { name: c.repo, clonePath: c.clonePath })
+      const r = await exclusive(() => ensureRepo(t, { name: c.repo, clonePath: c.clonePath }))
       const gh = await ghStatus(t)
       saveConfig({ ...c, repoFull: r.repo, login: gh.login || null })
       return { result: r, state: await state(getWorkspaceForEvent(event)) }
@@ -158,11 +276,11 @@ export function registerMemSyncHandlers(): void {
   ipcMain.handle('memsync:linkProject', (event) =>
     wrap(async () => {
       const c = loadMemSyncConfig()
-      requireConsent(c)
+      const root = requireRoot(c)
       const workspace = getWorkspaceForEvent(event)
       const t = await tools()
       if (!(await isGitRepo(t, workspace))) throw new MemSyncError('not-a-git-repo', workspace)
-      const r = await linkProject(t, { workspace, clonePath: c.clonePath, login: c.login || undefined })
+      const r = await exclusive(() => linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS, migrate: true }))
       return { result: r, state: await state(workspace) }
     })
   )
@@ -170,30 +288,51 @@ export function registerMemSyncHandlers(): void {
   ipcMain.handle('memsync:sync', (event, pullOnly?: boolean) =>
     wrap(async () => {
       const c = loadMemSyncConfig()
-      requireConsent(c)
+      const root = requireRoot(c)
       const workspace = getWorkspaceForEvent(event)
       const t = await tools()
-      const r = await syncNow(t, { clonePath: c.clonePath, workspace: (await isGitRepo(t, workspace)) ? workspace : undefined, pullOnly: !!pullOnly, login: c.login || undefined })
+      const ws = (await isGitRepo(t, workspace)) ? workspace : undefined
+      const r = await exclusive(() => syncNow(t, { clonePath: root, workspace: ws, pullOnly: !!pullOnly, login: c.login || undefined }))
       return { result: r, state: await state(workspace) }
     })
   )
 
-  // 開專案時自動拉取：只在已同意、開啟自動拉取、這個專案已連結時進行；其餘情況安靜略過
-  ipcMain.handle('memsync:autoPull', (event) =>
+  /**
+   * 開啟／切換專案時：已開啟記憶同步才動作，否則立刻回 null（不碰網路）。
+   * GitHub 模式先拉取（另一台電腦的最新記憶），再把有記憶的專案自動接上。
+   */
+  ipcMain.handle('memsync:onProjectOpen', (event) =>
     wrap(async () => {
       const c = loadMemSyncConfig()
-      if (!c.consentAt || !c.autoPull || !fs.existsSync(path.join(c.clonePath, '.git'))) return null
+      const root = activeRoot(c)
+      if (!root) return null
       const workspace = getWorkspaceForEvent(event)
       const t = await tools()
       if (!(await isGitRepo(t, workspace))) return null
-      const p = await projectState(t, { workspace, clonePath: c.clonePath })
-      if (!p.linked) return null
-      return syncNow(t, { clonePath: c.clonePath, workspace, pullOnly: true })
+      return exclusive(async () => {
+        // GitHub：拉取（已連結的專案順便更新入口檔）；雲端硬碟：只更新入口檔，不碰網路
+        const pulled = c.backend === 'github' && !c.autoSync ? null : await syncNow(t, { clonePath: root, workspace, pullOnly: true })
+        const p = await projectState(t, { workspace, clonePath: root })
+        let linked: Awaited<ReturnType<typeof linkProject>> | null = null
+        if (c.autoLink && p.linkedElsewhere && p.linkedToOldStore) {
+          // 換過存放方式：Workbench 自己建的舊連結自動搬到新位置
+          linked = await linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS, migrate: true })
+        } else if (c.autoLink && !p.linked && !p.linkedElsewhere && (p.hasLocalMemory || p.hasRemoteMemory)) {
+          linked = await linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS })
+        } else if (p.linked) {
+          // 已連結的專案：腳本跟著 Workbench 更新（另一台電腦連結時寫進共用位置的可能是舊版）
+          ensureMemoryScripts(p.target, MEMORY_SCRIPTS)
+        }
+        return { pulled, linked }
+      })
     })
   )
 
   ipcMain.handle('memsync:openClone', async () => {
-    const c = loadMemSyncConfig()
-    if (fs.existsSync(c.clonePath)) await shell.openPath(c.clonePath)
+    const root = memoryRoot(loadMemSyncConfig())
+    if (root && fs.existsSync(root)) await shell.openPath(root)
   })
+
+  const timer = setInterval(() => void backgroundSync(), SYNC_INTERVAL_MS)
+  timer.unref()
 }

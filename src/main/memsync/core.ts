@@ -48,6 +48,71 @@ export function defaultClonePath(home = os.homedir()): string {
   return path.join(home, '.ai-project-memory')
 }
 
+// ── 雲端硬碟資料夾模式（OneDrive／Google Drive） ─────────────────────────
+// 記憶放在使用者選的資料夾（由雲端硬碟程式同步），Workbench 不做任何網路動作。
+// 資料夾根目錄放一個標記檔，commit-handoff.sh 靠它知道「存好就好，不用提交」。
+export const FOLDER_MARKER = '.workbench-memory.json'
+export type CloudProvider = 'onedrive' | 'gdrive'
+
+/** 這台電腦上偵測到的雲端硬碟根目錄（不存在的不列） */
+export function detectCloudRoots(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): Record<CloudProvider, string[]> {
+  const uniq = (list: string[]): string[] => [...new Set(list.filter((p) => p && exists(p)).map((p) => path.resolve(p)))]
+  const onedrive = [env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial].filter((p): p is string => !!p)
+  const gdrive = [path.join(home, 'Google Drive'), path.join(home, 'My Drive')]
+  if (process.platform === 'win32') {
+    for (let c = 68; c <= 90; c++) {
+      const d = `${String.fromCharCode(c)}:\\`
+      for (const n of ['My Drive', '我的雲端硬碟']) gdrive.push(path.join(d, n))
+    }
+  }
+  const cloudStorage = path.join(home, 'Library', 'CloudStorage') // macOS
+  if (exists(cloudStorage)) {
+    for (const n of fs.readdirSync(cloudStorage)) {
+      if (n.startsWith('OneDrive')) onedrive.push(path.join(cloudStorage, n))
+      if (n.startsWith('GoogleDrive')) gdrive.push(path.join(cloudStorage, n, 'My Drive'))
+    }
+  }
+  return { onedrive: uniq(onedrive), gdrive: uniq(gdrive) }
+}
+
+function isInside(child: string, parent: string): boolean {
+  const rel = path.relative(path.resolve(parent), path.resolve(child))
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
+export function isFolderRoot(root: string): boolean {
+  return exists(path.join(root, FOLDER_MARKER))
+}
+
+/**
+ * 準備雲端資料夾：必須在偵測到的雲端硬碟根目錄「底下」（不能是根目錄本身），
+ * 之後所有記憶與備份都只寫在這個資料夾裡。
+ */
+export function ensureFolder(opts: { root: string; provider: CloudProvider; cloudRoots: string[] }): { root: string } {
+  if (!path.isAbsolute(opts.root)) throw new MemSyncError('bad-folder', opts.root)
+  if (!opts.cloudRoots.length) throw new MemSyncError(opts.provider === 'onedrive' ? 'onedrive-missing' : 'gdrive-missing')
+  if (opts.cloudRoots.some((r) => path.relative(path.resolve(r), path.resolve(opts.root)) === '')) throw new MemSyncError('pick-subfolder', opts.root)
+  if (!opts.cloudRoots.some((r) => isInside(opts.root, r))) throw new MemSyncError('folder-outside-cloud', opts.root)
+  if (exists(path.join(opts.root, '.git'))) throw new MemSyncError('folder-is-git-repo', opts.root)
+  fs.mkdirSync(opts.root, { recursive: true })
+  const marker = path.join(opts.root, FOLDER_MARKER)
+  if (!exists(marker)) fs.writeFileSync(marker, JSON.stringify({ backend: 'folder', provider: opts.provider, createdAt: new Date().toISOString() }, null, 2) + '\n')
+  const readme = path.join(opts.root, 'README.md')
+  if (!exists(readme)) {
+    fs.writeFileSync(
+      readme,
+      '# Project memory (synced folder)\n\nShared `.project-memory/` folders for Agent Workbench projects, one folder per project ' +
+        '(`<owner>/<repo>/`), synced by your cloud drive. Each project links its `.project-memory` here.\n'
+    )
+  }
+  return { root: opts.root }
+}
+
+/** 記憶根目錄是否可用：GitHub 模式是 clone，資料夾模式是有標記檔的資料夾 */
+export function rootReady(root: string): boolean {
+  return exists(path.join(root, '.git')) || isFolderRoot(root)
+}
+
 const exists = (p: string): boolean => fs.existsSync(p)
 
 async function must(tools: Tools, cmd: string, args: string[], cwd?: string, code = 'command-failed'): Promise<string> {
@@ -192,6 +257,10 @@ export interface ProjectState {
   linked: boolean
   /** .project-memory 是連結但指向別處 */
   linkedElsewhere: boolean
+  /** linkedElsewhere 時連結實際指向的位置 */
+  linkedTo?: string
+  /** 指向的是另一個（舊的）記憶存放位置裡的同一個專案資料夾 */
+  linkedToOldStore?: boolean
   /** 專案裡有實體的 .project-memory 資料夾（尚未搬移） */
   hasLocalMemory: boolean
   /** 記憶 repo 裡已有這個專案的記憶（另一台電腦已經搬過） */
@@ -228,12 +297,16 @@ export async function projectState(tools: Tools, opts: { workspace: string; clon
     /* 沒有 .project-memory */
   }
   const linked = isLink && sameDir(memPath, target)
+  const linkedTo = isLink && !linked ? realOrNull(memPath) || undefined : undefined
   const r = await git(tools, opts.workspace, 'ls-files', '--', MEMORY_DIR, ...ENTRY_FILES.map((e) => e.project))
   return {
     key,
     target,
     linked,
     linkedElsewhere: isLink && !linked,
+    ...(linkedTo ? { linkedTo } : {}),
+    // Workbench 自己建的連結（另一個存放位置的 <owner>/<repo>）：換存放方式後可以自動搬
+    ...(linkedTo ? { linkedToOldStore: linkedTo.replace(/\\/g, '/').toLowerCase().endsWith('/' + key.toLowerCase()) && exists(path.join(linkedTo, 'handoff.md')) } : {}),
     hasLocalMemory: isDir && exists(path.join(memPath, 'handoff.md')),
     hasRemoteMemory: exists(path.join(target, 'handoff.md')),
     tracked: r.code === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : []
@@ -299,6 +372,25 @@ async function restoreEntryFiles(tools: Tools, workspace: string, target: string
   if (bash && exists(sync)) await tools.run(bash, [sync], { cwd: workspace })
 }
 
+/**
+ * 把記憶資料夾裡的 commit-handoff.sh／status.sh 換成 Workbench 附的版本（依記憶同步設定決定
+ * 存本機、存雲端資料夾或推到私人 repo；舊版會用 `git add -f` 把記憶強制提交進專案 repo）。
+ * 內容一樣就不寫。回傳有更新的檔名。
+ */
+export function ensureMemoryScripts(target: string, scripts: Record<string, string>): string[] {
+  const updated: string[] = []
+  for (const [name, content] of Object.entries(scripts)) {
+    if (!/^[A-Za-z0-9._-]+\.sh$/.test(name)) continue
+    const file = path.join(target, name)
+    const want = content.replace(/\r\n/g, '\n')
+    const have = exists(file) ? fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n') : null
+    if (have === want) continue
+    fs.writeFileSync(file, want)
+    updated.push(name)
+  }
+  return updated
+}
+
 export interface LinkResult {
   key: string
   target: string
@@ -316,15 +408,35 @@ export interface LinkResult {
  * - 其他電腦：記憶 repo 已有這個專案 → 直接連結（本機若有舊的 .project-memory 先備份）。
  * 最後專案 repo 停止追蹤記憶檔與入口檔（一個只動這些路徑與 .gitignore 的提交）。
  */
-export async function linkProject(tools: Tools, opts: { workspace: string; clonePath: string; login?: string }): Promise<LinkResult> {
-  if (!exists(path.join(opts.clonePath, '.git'))) throw new MemSyncError('no-clone', 'Set up the private memory repository first')
+export async function linkProject(
+  tools: Tools,
+  opts: { workspace: string; clonePath: string; login?: string; scripts?: Record<string, string>; migrate?: boolean }
+): Promise<LinkResult> {
+  // clonePath 是記憶根目錄：GitHub 模式的 clone，或雲端硬碟模式的資料夾
+  if (!rootReady(opts.clonePath)) throw new MemSyncError('no-clone', 'Set up the memory storage first')
   const st = await projectState(tools, opts)
-  if (st.linkedElsewhere) throw new MemSyncError('linked-elsewhere', `${MEMORY_DIR} already links somewhere else`)
   const memPath = path.join(opts.workspace, MEMORY_DIR)
   let source: LinkResult['source'] = 'already-linked'
   let backup: string | undefined
 
-  if (!st.linked) {
+  if (st.linkedElsewhere) {
+    // 換了存放方式：把舊位置的記憶搬到新位置，連結改指過去（舊位置的檔案不刪）
+    if (!opts.migrate) throw new MemSyncError('linked-elsewhere', `${MEMORY_DIR} already links somewhere else`)
+    const from = st.linkedTo
+    if (!from || !exists(path.join(from, 'handoff.md'))) throw new MemSyncError('linked-elsewhere', `${MEMORY_DIR} links to a folder without memory`)
+    backup = path.join(opts.clonePath, BACKUP_DIR, st.key.replace('/', '__'), new Date().toISOString().replace(/[:.]/g, '-'))
+    fs.mkdirSync(path.dirname(backup), { recursive: true })
+    fs.cpSync(from, backup, { recursive: true })
+    if (!st.hasRemoteMemory) {
+      fs.mkdirSync(path.dirname(st.target), { recursive: true })
+      fs.cpSync(from, st.target, { recursive: true })
+      source = 'local'
+    } else {
+      source = 'repo'
+    }
+    fs.unlinkSync(memPath) // 只移除連結本身
+    fs.symlinkSync(st.target, memPath, process.platform === 'win32' ? 'junction' : 'dir')
+  } else if (!st.linked) {
     if (!st.hasLocalMemory && !st.hasRemoteMemory) throw new MemSyncError('no-memory', 'This project has no .project-memory yet')
     if (st.hasLocalMemory) {
       backup = path.join(opts.clonePath, BACKUP_DIR, st.key.replace('/', '__'), new Date().toISOString().replace(/[:.]/g, '-'))
@@ -345,11 +457,12 @@ export async function linkProject(tools: Tools, opts: { workspace: string; clone
     fs.symlinkSync(st.target, memPath, process.platform === 'win32' ? 'junction' : 'dir')
   }
 
+  if (opts.scripts) ensureMemoryScripts(st.target, opts.scripts)
   await restoreEntryFiles(tools, opts.workspace, st.target)
 
-  // 記憶 repo：把這個專案的記憶推上去
+  // 記憶 repo：把這個專案的記憶推上去（雲端硬碟模式由同步程式上傳，這裡不做事）
   const rel = st.key
-  if ((await git(tools, opts.clonePath, 'status', '--porcelain', '--', rel)).stdout.trim()) {
+  if (exists(path.join(opts.clonePath, '.git')) && (await git(tools, opts.clonePath, 'status', '--porcelain', '--', rel)).stdout.trim()) {
     await ensureIdentity(tools, opts.clonePath, opts.login)
     await gitMust(tools, opts.clonePath, 'add', '-A', '--', rel)
     await gitMust(tools, opts.clonePath, 'commit', '-q', '-m', `memory: link ${st.key}`, '--', rel)
@@ -434,8 +547,16 @@ export async function syncNow(
   tools: Tools,
   opts: { clonePath: string; workspace?: string; pullOnly?: boolean; login?: string }
 ): Promise<SyncResult> {
-  if (!exists(path.join(opts.clonePath, '.git'))) throw new MemSyncError('no-clone', 'Set up the private memory repository first')
   const res: SyncResult = { committed: false, pulled: false, pushed: false }
+  // 雲端硬碟模式：同步交給 OneDrive／Google Drive，只重新產生入口檔
+  if (isFolderRoot(opts.clonePath)) {
+    if (opts.workspace) {
+      const st = await projectState(tools, { workspace: opts.workspace, clonePath: opts.clonePath })
+      if (st.linked) await restoreEntryFiles(tools, opts.workspace, st.target)
+    }
+    return res
+  }
+  if (!exists(path.join(opts.clonePath, '.git'))) throw new MemSyncError('no-clone', 'Set up the private memory repository first')
   if (!opts.pullOnly && (await git(tools, opts.clonePath, 'status', '--porcelain')).stdout.trim()) {
     await ensureIdentity(tools, opts.clonePath, opts.login)
     await gitMust(tools, opts.clonePath, 'add', '-A')

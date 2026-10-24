@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { ensureRepo, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
+import { ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-check-'))
@@ -217,6 +217,94 @@ console.log('sync: conflicting edits reported, rebase aborted, local commit kept
 const l3 = await linkProject(tools, { workspace: projA, clonePath: memA, login: 'tester' })
 assert.equal(l3.source, 'already-linked')
 assert.ok(!l3.projectCommit)
+
+// ── cloud-drive folder mode (OneDrive / Google Drive): no git, no network in Workbench ──
+const cloud = path.join(tmp, 'OneDrive') // stands in for the drive root; both PCs see the same synced folder
+fs.mkdirSync(cloud)
+assert.throws(() => ensureFolder({ root: cloud, provider: 'onedrive', cloudRoots: [cloud] }), (e: MemSyncError) => e.code === 'pick-subfolder')
+assert.throws(() => ensureFolder({ root: path.join(tmp, 'elsewhere'), provider: 'onedrive', cloudRoots: [cloud] }), (e: MemSyncError) => e.code === 'folder-outside-cloud')
+assert.throws(() => ensureFolder({ root: path.join(cloud, 'm'), provider: 'onedrive', cloudRoots: [] }), (e: MemSyncError) => e.code === 'onedrive-missing')
+fs.mkdirSync(path.join(cloud, 'repo', '.git'), { recursive: true })
+assert.throws(() => ensureFolder({ root: path.join(cloud, 'repo'), provider: 'onedrive', cloudRoots: [cloud] }), (e: MemSyncError) => e.code === 'folder-is-git-repo')
+const folder = path.join(cloud, 'ai-project-memory')
+ensureFolder({ root: folder, provider: 'onedrive', cloudRoots: [cloud] })
+assert.ok(fs.existsSync(path.join(folder, '.workbench-memory.json')))
+
+// PC C: a project with local memory moves into the folder
+const projC = path.join(tmp, 'pcC', 'demo2')
+fs.mkdirSync(projC, { recursive: true })
+await g(projC, 'init', '-q')
+await g(projC, 'config', 'user.name', 'Dev')
+await g(projC, 'config', 'user.email', 'dev@example.com')
+await g(projC, 'remote', 'add', 'origin', 'https://github.com/someone/demo2.git')
+fs.mkdirSync(path.join(projC, '.project-memory'))
+for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) fs.copyFileSync(path.join(ROOT, '.project-memory', f), path.join(projC, '.project-memory', f))
+fs.writeFileSync(path.join(projC, '.project-memory', 'handoff.md'), '# Latest Handoff\n\n## State\n- C1\n')
+fs.writeFileSync(path.join(projC, '.project-memory', 'INDEX.md'), '# Index\n')
+fs.writeFileSync(path.join(projC, 'AGENTS.md'), '# Agents\n')
+fs.writeFileSync(path.join(projC, 'main.js'), '1\n')
+await g(projC, 'add', '-A')
+await g(projC, 'commit', '-q', '-m', 'init')
+
+// memory sync OFF: commit-handoff.sh keeps the handoff local, makes no commit, touches no network
+const gitTrace = path.join(tmp, 'git-trace.txt')
+const off = await exec(BASH, ['.project-memory/commit-handoff.sh', 'off'], { cwd: projC, env: { GIT_TRACE: gitTrace } })
+assert.equal(off.code, 0, off.stdout + off.stderr)
+assert.match(off.stdout, /Memory sync is off/)
+assert.equal((await g(projC, 'log', '--oneline')).trim().split('\n').length, 1, 'nothing committed when off')
+const st0 = await exec(BASH, ['.project-memory/status.sh'], { cwd: projC, env: { GIT_TRACE: gitTrace } })
+assert.equal(st0.code, 0)
+const traced = fs.existsSync(gitTrace) ? fs.readFileSync(gitTrace, 'utf8') : ''
+assert.ok(!/\b(fetch|push|pull|ls-remote|remote-https)\b/.test(traced), 'no network git commands while memory sync is off')
+console.log('memory sync off: handoff local only, no commit, no network git calls ok')
+
+const lc = await linkProject(tools, { workspace: projC, clonePath: folder })
+assert.equal(lc.source, 'local')
+assert.ok(isLink(path.join(projC, '.project-memory')))
+assert.ok(fs.existsSync(path.join(folder, 'someone', 'demo2', 'handoff.md')))
+assert.ok(!fs.existsSync(path.join(folder, '.git')), 'folder mode never creates a git repository')
+assert.ok(lc.projectCommit, 'project stopped tracking memory')
+assert.deepEqual((await g(projC, 'ls-files')).split(/\r?\n/).filter(Boolean).sort(), ['.gitignore', 'main.js'])
+fs.appendFileSync(path.join(projC, '.project-memory', 'handoff.md'), '- C2\n')
+const chC = await exec(BASH, ['.project-memory/commit-handoff.sh', 'C2'], { cwd: projC })
+assert.equal(chC.code, 0, chC.stdout + chC.stderr)
+assert.match(chC.stdout, /Saved in the synced folder/)
+assert.ok(fs.existsSync(path.join(folder, 'someone', 'demo2', 'entry', 'AGENTS.md')), 'entry template stored in the folder')
+assert.deepEqual(await syncNow(tools, { clonePath: folder, workspace: projC }), { committed: false, pulled: false, pushed: false })
+
+// PC D: the cloud client delivered the same folder; a fresh clone links to it
+const projD = path.join(tmp, 'pcD', 'demo2')
+fs.mkdirSync(path.dirname(projD), { recursive: true })
+fs.cpSync(projC, projD, { recursive: true, filter: (src) => !src.includes(`${path.sep}.project-memory`) && path.basename(src) !== 'AGENTS.md' })
+// a stale upstream-style script in the shared storage (it would `git add -f` memory into the
+// project repo) is replaced by the bundled version when a project links
+const storedScript = path.join(folder, 'someone', 'demo2', 'commit-handoff.sh')
+fs.writeFileSync(storedScript, '#!/usr/bin/env bash\ngit add -f -- .project-memory\n')
+const bundled = {
+  'commit-handoff.sh': fs.readFileSync(path.join(ROOT, 'src', 'main', 'memsync', 'templates', 'commit-handoff.sh'), 'utf8'),
+  'status.sh': fs.readFileSync(path.join(ROOT, 'src', 'main', 'memsync', 'templates', 'status.sh'), 'utf8')
+}
+const ld = await linkProject(tools, { workspace: projD, clonePath: folder, scripts: bundled })
+assert.equal(ld.source, 'repo')
+assert.equal(fs.readFileSync(storedScript, 'utf8'), bundled['commit-handoff.sh'].replace(/\r\n/g, '\n'), 'stale script replaced')
+assert.match(fs.readFileSync(path.join(projD, '.project-memory', 'handoff.md'), 'utf8'), /C2/)
+assert.match(fs.readFileSync(path.join(projD, 'AGENTS.md'), 'utf8'), /C2/, 'entry file restored and regenerated from the shared handoff')
+console.log('folder mode: refusals, move + untrack, commit-handoff saves only, second PC links ok')
+
+// switching storage: projA is linked to the GitHub clone; move it to the cloud folder
+const sMig = await projectState(tools, { workspace: projA, clonePath: folder })
+assert.ok(sMig.linkedElsewhere && sMig.linkedToOldStore, JSON.stringify(sMig))
+await assert.rejects(linkProject(tools, { workspace: projA, clonePath: folder }), (e: MemSyncError) => e.code === 'linked-elsewhere', 'no migration without migrate')
+const oldHandoff = fs.readFileSync(path.join(memA, 'someone', 'demo', 'handoff.md'), 'utf8')
+const lm = await linkProject(tools, { workspace: projA, clonePath: folder, migrate: true, scripts: bundled })
+assert.equal(lm.source, 'local')
+assert.ok((await projectState(tools, { workspace: projA, clonePath: folder })).linked, 'now linked to the folder')
+assert.equal(fs.readFileSync(path.join(folder, 'someone', 'demo', 'handoff.md'), 'utf8'), oldHandoff, 'memory copied to the new storage')
+assert.equal(fs.readFileSync(path.join(memA, 'someone', 'demo', 'handoff.md'), 'utf8'), oldHandoff, 'old storage untouched (only the link was removed)')
+assert.match(fs.readFileSync(path.join(folder, 'someone', 'demo', 'commit-handoff.sh'), 'utf8'), /Memory sync is off/, 'bundled scripts installed')
+const chMig = await exec(BASH, ['.project-memory/commit-handoff.sh', 'after move'], { cwd: projA })
+assert.match(chMig.stdout, /Saved in the synced folder/)
+console.log('switch storage: GitHub clone -> cloud folder migration, old copy kept ok')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('memsync ok')

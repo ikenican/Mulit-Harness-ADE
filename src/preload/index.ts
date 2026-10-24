@@ -226,15 +226,19 @@ const api = {
       return () => ipcRenderer.removeListener('remote:status', listener)
     }
   },
-  // 記憶同步：專案記憶放進私人 GitHub repo —— main/ipc/memsync.ts、main/memsync/core.ts
+  // 記憶同步：專案記憶放進私人 GitHub repo 或 OneDrive／Google Drive 資料夾 —— main/ipc/memsync.ts、main/memsync/core.ts
   memsync: {
     state: (): Promise<MemSyncResult<MemSyncState>> => ipcRenderer.invoke('memsync:state'),
-    setConfig: (patch: Partial<{ consent: boolean; repo: string; clonePath: string; autoPull: boolean }>): Promise<MemSyncResult<MemSyncState>> =>
-      ipcRenderer.invoke('memsync:setConfig', patch),
+    setConfig: (
+      patch: Partial<{ consent: boolean; backend: MemSyncBackend; repo: string; autoSync: boolean; autoLink: boolean }>
+    ): Promise<MemSyncResult<MemSyncState>> => ipcRenderer.invoke('memsync:setConfig', patch),
+    pickFolder: (): Promise<MemSyncResult<{ picked: boolean; state: MemSyncState }>> => ipcRenderer.invoke('memsync:pickFolder'),
     setupRepo: (): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:setupRepo'),
     linkProject: (): Promise<MemSyncResult<{ result: MemSyncLinkResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:linkProject'),
     sync: (pullOnly?: boolean): Promise<MemSyncResult<{ result: MemSyncSyncResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:sync', pullOnly),
-    autoPull: (): Promise<MemSyncResult<MemSyncSyncResult | null>> => ipcRenderer.invoke('memsync:autoPull'),
+    /** 開啟／切換專案時呼叫；記憶同步沒開啟時立刻回 null，不碰網路 */
+    onProjectOpen: (): Promise<MemSyncResult<{ pulled: MemSyncSyncResult | null; linked: MemSyncLinkResult | null } | null>> =>
+      ipcRenderer.invoke('memsync:onProjectOpen'),
     openClone: (): Promise<void> => ipcRenderer.invoke('memsync:openClone')
   },
   // Cowork 多 agent 規劃會議 —— main/ipc/cowork.ts（設計見 cowork.md）
@@ -664,20 +668,32 @@ export interface ConnectionInfo {
 }
 
 // ── 記憶同步（main/memsync/core.ts 的結果型別） ────────────────────────
+/** 記憶放哪裡：GitHub 私人 repo，或由 OneDrive／Google Drive 同步的資料夾 */
+export type MemSyncBackend = 'github' | 'onedrive' | 'gdrive'
 export interface MemSyncConfig {
   /** 使用者同意開啟的時間；null = 未同意 */
   consentAt: number | null
+  backend: MemSyncBackend | null
   /** 私人記憶 repo 名稱（repo 或 owner/repo） */
   repo: string
-  /** 這台電腦上記憶 repo 的 clone 位置 */
+  /** 這台電腦上記憶 repo 的 clone 位置（GitHub 模式） */
   clonePath: string
-  /** 開專案時自動拉取 */
-  autoPull: boolean
   repoFull: string | null
   login: string | null
+  /** 雲端硬碟模式選的資料夾；記憶只存在這裡 */
+  folderPath: string | null
+  /** GitHub 模式：開專案時拉取＋每 10 分鐘背景同步 */
+  autoSync: boolean
+  /** 開專案時把有記憶的專案自動接上 */
+  autoLink: boolean
 }
 export interface MemSyncState {
   config: MemSyncConfig
+  /** 偵測到的雲端硬碟根目錄 */
+  cloudRoots: { onedrive: string[]; gdrive: string[] }
+  /** 目前的記憶根目錄（clone 或資料夾），尚未選擇時為 null */
+  root: string | null
+  rootReady: boolean
   gitMissing: boolean
   gh: { installed: boolean; loggedIn: boolean; login?: string }
   clone: { exists: boolean; origin?: string; ahead?: number; behind?: number; dirty?: boolean }
@@ -686,6 +702,8 @@ export interface MemSyncState {
     target: string
     linked: boolean
     linkedElsewhere: boolean
+    linkedTo?: string
+    linkedToOldStore?: boolean
     hasLocalMemory: boolean
     hasRemoteMemory: boolean
     tracked: string[]
