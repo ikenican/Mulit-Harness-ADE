@@ -1,6 +1,6 @@
 // Token 用量：逐檔解析成「每日桶」，再依 all / 30d / 7d / 1d 加總。
 // 與 Dashboard 的 session 清單分開——清單只掃最近 N 筆，用量要掃全部歷史才不會每次打開都變。
-import { app } from 'electron'
+// 不依賴 Electron：在 dashboardWorker 的 worker thread 裡跑（快取位置由 setUsageDataDir 給）。
 import * as fs from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -61,9 +61,15 @@ interface CacheEntry {
 const CACHE_VERSION = 1
 let cache: Map<string, CacheEntry> | null = null
 let cacheDirty = false
+let dataDir = ''
+
+/** userData 路徑；main 與 worker 各自設定 */
+export function setUsageDataDir(dir: string): void {
+  dataDir = dir
+}
 
 function cachePath(): string {
-  return join(app.getPath('userData'), 'usage-cache.json')
+  return join(dataDir, 'usage-cache.json')
 }
 
 function loadCache(): Map<string, CacheEntry> {
