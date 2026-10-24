@@ -320,6 +320,29 @@ function psWithNpmFallback(scriptUrl: string, npmPackage: string): string {
   )
 }
 
+/**
+ * Codex（Windows）：官方腳本 → winget（OpenAI 自己發佈的 OpenAI.Codex，不需要 Node）→ npm。
+ * 2026-10-24 實測 chatgpt.com/codex/install.ps1、install.sh 與 releases.openai.com/codex 對任何 User-Agent 都回 404，
+ * 而 npm 只有裝了 Node 的電腦才有；winget 是 Windows 10/11 內建的。
+ */
+function psCodexInstall(): string {
+  return (
+    `try { irm https://chatgpt.com/codex/install.ps1 -ErrorAction Stop | iex } ` +
+    `catch { Write-Warning "Official installer failed: $($_.Exception.Message)"; $ok = $false; ` +
+    `if (Get-Command winget -ErrorAction SilentlyContinue) { Write-Host "Trying: winget install --id OpenAI.Codex -e"; winget install --id OpenAI.Codex -e --source winget; $ok = $LASTEXITCODE -eq 0 }; ` +
+    `if (-not $ok) { if (Get-Command npm -ErrorAction SilentlyContinue) { Write-Host "Trying: npm install -g @openai/codex"; npm install -g @openai/codex } ` +
+    `else { Write-Warning "winget and npm are not available. Install Node.js from https://nodejs.org, then run: npm install -g @openai/codex" } } }`
+  )
+}
+
+/** curl … | sh 在 404 時 sh 收到空輸入、照樣 exit 0；先把腳本抓下來，抓不到或跑失敗才改用 npm */
+function shWithNpmFallback(scriptUrl: string, npmPackage: string): string {
+  return (
+    `script="$(curl -fsSL ${scriptUrl})" && printf '%s\\n' "$script" | sh || ` +
+    `{ echo "Official installer failed - falling back to: npm install -g ${npmPackage}"; npm install -g ${npmPackage}; }`
+  )
+}
+
 export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): AgentInstallInfo {
   const isWin = process.platform === 'win32'
   const shell: AgentInstallInfo['shell'] = isWin ? 'powershell' : 'bash'
@@ -356,8 +379,9 @@ export function getAgentInstallInfo(id: 'claude' | 'antigravity' | 'codex'): Age
       name: 'Codex CLI',
       shell,
       command: isWin
-        ? psWithNpmFallback('https://chatgpt.com/codex/install.ps1', '@openai/codex')
-        : 'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
+        ? psCodexInstall()
+        : shWithNpmFallback('https://chatgpt.com/codex/install.sh', '@openai/codex'),
+      // 官方腳本的位置；改走 winget／npm 時會在 WinGet\Links 或 npm 全域目錄，findCli 的候選路徑都有
       targetPath: isWin
         ? path.join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin', 'codex.exe')
         : path.join(H, '.local', 'bin', 'codex')
