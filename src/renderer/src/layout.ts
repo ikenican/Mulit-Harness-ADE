@@ -9,6 +9,8 @@ export interface LayoutState {
   leftCollapsed?: boolean
   /** 開發模式：中央（編輯器／Preview）欄是否收起，預設收起，只留側邊欄＋終端 */
   centerCollapsed?: boolean
+  /** 開發模式：終端排在編輯器前面（右側停靠時在左、底部停靠時在上）；由頂端列拖曳圖示決定 */
+  termFirst?: boolean
 }
 
 export const DEFAULT_LAYOUT: LayoutState = {
@@ -74,7 +76,8 @@ export function loadLayout(mode: 'developer' | 'vibe' = 'developer'): LayoutStat
       termH: typeof p.termH === 'number' ? Math.max(LIMITS.termMin, p.termH) : DEFAULT_LAYOUT.termH,
       dock,
       leftCollapsed: isCollapsed,
-      centerCollapsed: p.centerCollapsed ?? true
+      centerCollapsed: p.centerCollapsed ?? true,
+      termFirst: p.termFirst === true
     }
   } catch {
     return { ...DEFAULT_LAYOUT }

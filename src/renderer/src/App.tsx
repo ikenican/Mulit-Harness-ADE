@@ -22,7 +22,8 @@ import {
   IconMinimize,
   IconClose,
   IconSplitSingle,
-  IconSplitVertical
+  IconSplitVertical,
+  IconTerminalBox
 } from '@/components/Icons'
 import {
   toggleCenterMaximized,
@@ -198,6 +199,21 @@ export default function App(): JSX.Element {
   // 開發模式預設收起中央欄（編輯器／Preview），畫面只剩側邊欄＋終端；聚焦模式下中央欄必定展開
   const isCenterCollapsed = !isVibe && !isCenterMaximized && Boolean(layout.centerCollapsed)
   const expandCenter = (): void => setLayout((l) => ({ ...l, centerCollapsed: false }))
+  // 頂端列拖曳排序：終端圖示排在編輯器組前面 → 終端欄在左（右側停靠）或在上（底部停靠）
+  const termFirst = !isVibe && Boolean(layout.termFirst)
+  const editorGroupRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<'editor' | 'terminal' | null>(null)
+  const onHeaderDragOver = (e: React.DragEvent): void => {
+    if (!dragging) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const box = editorGroupRef.current?.getBoundingClientRect()
+    if (!box) return
+    // 拖曳中即時套用：游標在編輯器組中線左邊 → 被拖的那個排到左邊
+    const leftOfEditor = e.clientX < box.left + box.width / 2
+    const nextTermFirst = dragging === 'terminal' ? leftOfEditor : !leftOfEditor
+    if (nextTermFirst !== termFirst) setLayout((l) => ({ ...l, termFirst: nextTermFirst }))
+  }
 
   // 上限依目前視窗算，避免把中央區擠沒了
   const maxLeft = (): number =>
@@ -219,15 +235,15 @@ export default function App(): JSX.Element {
       }
     })
 
-  // 右欄在右側，往右拖代表把它縮小；Vibe 模式終端在左，方向相反
+  // 右欄在右側，往右拖代表把它縮小；終端在左（Vibe 模式或拖到前面）時方向相反
   const nudgeRight = (dx: number): void =>
     setLayout((l) => ({
       ...l,
-      rightW: clamp(l.rightW + (isVibe ? dx : -dx), LIMITS.rightMin, maxRight())
+      rightW: clamp(l.rightW + (isVibe || termFirst ? dx : -dx), LIMITS.rightMin, maxRight())
     }))
-  // 終端在底部，往下拖代表把它縮小
+  // 終端在底部，往下拖代表把它縮小；終端在上方時方向相反
   const nudgeTerm = (dy: number): void =>
-    setLayout((l) => ({ ...l, termH: clamp(l.termH - dy, LIMITS.termMin, maxTerm()) }))
+    setLayout((l) => ({ ...l, termH: clamp(l.termH + (termFirst ? dy : -dy), LIMITS.termMin, maxTerm()) }))
 
   const setDock = (dock: Dock): void => setLayout((l) => ({ ...l, dock }))
 
@@ -246,11 +262,25 @@ export default function App(): JSX.Element {
         gridTemplateRows: '1fr',
         gridTemplateAreas: `"rail left sp1 term sp2 center"`
       }
+    : isBottom && termFirst
+    ? {
+        gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
+        gridTemplateRows: isCenterCollapsed ? '1fr 0px 0px' : `${layout.termH}px 1px 1fr`,
+        gridTemplateAreas: `"left sp1 term" "left sp1 sp2" "left sp1 center"`
+      }
     : isBottom
     ? {
         gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
         gridTemplateRows: isCenterCollapsed ? '0px 0px 1fr' : `1fr 1px ${layout.termH}px`,
         gridTemplateAreas: `"left sp1 center" "left sp1 sp2" "left sp1 term"`
+      }
+    : termFirst
+    ? {
+        gridTemplateColumns: isCenterCollapsed
+          ? `${effectiveLeftW}px ${sp1W} 1fr 0px 0px`
+          : `${effectiveLeftW}px ${sp1W} ${layout.rightW}px 1px 1fr`,
+        gridTemplateRows: '1fr',
+        gridTemplateAreas: `"left sp1 term sp2 center"`
       }
     : {
         gridTemplateColumns: isCenterCollapsed
@@ -295,29 +325,59 @@ export default function App(): JSX.Element {
           )}
         </div>
 
-        <div className="app-header-center">
+        <div className="app-header-center" onDragOver={onHeaderDragOver} onDrop={(e) => e.preventDefault()}>
           {!isVibe && (
           <>
-          <div className="segmented">
-            {(['editor', 'preview', 'memory', 'browser'] as const).map((tab) => (
-              <button
-                key={tab}
-                className={!isCenterCollapsed && center === tab ? 'on' : ''}
-                onClick={() => {
-                  setCenter(tab)
-                  expandCenter()
-                }}
-              >
-                {t(`header.${tab}`)}
-              </button>
-            ))}
+          {/* 編輯器組與終端圖示可互相拖曳換位；順序就是下方兩欄的左右（或上下）位置 */}
+          <div
+            ref={editorGroupRef}
+            className={`header-drag-item ${dragging === 'editor' ? 'dragging' : ''}`}
+            style={{ order: termFirst ? 2 : 1 }}
+            draggable
+            title={t('header.dragToReorder')}
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', 'editor')
+              setDragging('editor')
+            }}
+            onDragEnd={() => setDragging(null)}
+          >
+            <div className="segmented">
+              {(['editor', 'preview', 'memory', 'browser'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  className={!isCenterCollapsed && center === tab ? 'on' : ''}
+                  onClick={() => {
+                    setCenter(tab)
+                    expandCenter()
+                  }}
+                >
+                  {t(`header.${tab}`)}
+                </button>
+              ))}
+            </div>
+            <button
+              className={`btn-icon ${isCenterCollapsed ? '' : 'active'}`}
+              title={isCenterCollapsed ? t('header.showCenter') : t('header.hideCenter')}
+              onClick={() => setLayout((l) => ({ ...l, centerCollapsed: !l.centerCollapsed }))}
+            >
+              {isCenterCollapsed ? <IconSplitVertical size={14} /> : <IconSplitSingle size={14} />}
+            </button>
           </div>
           <button
-            className={`btn-icon ${isCenterCollapsed ? '' : 'active'}`}
-            title={isCenterCollapsed ? t('header.showCenter') : t('header.hideCenter')}
-            onClick={() => setLayout((l) => ({ ...l, centerCollapsed: !l.centerCollapsed }))}
+            className={`btn-icon header-drag-item header-term-btn ${isCenterCollapsed ? 'active' : ''} ${dragging === 'terminal' ? 'dragging' : ''}`}
+            style={{ order: termFirst ? 1 : 2 }}
+            draggable
+            title={t('header.terminalOnly')}
+            onClick={() => setLayout((l) => ({ ...l, centerCollapsed: true }))}
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', 'terminal')
+              setDragging('terminal')
+            }}
+            onDragEnd={() => setDragging(null)}
           >
-            {isCenterCollapsed ? <IconSplitVertical size={14} /> : <IconSplitSingle size={14} />}
+            <IconTerminalBox size={14} />
           </button>
           </>
           )}
