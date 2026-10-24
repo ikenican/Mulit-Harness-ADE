@@ -36,6 +36,9 @@ nsis:
   perMachine: false
   deleteAppDataOnUninstall: false
   runAfterFinish: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
 
 mac:
   target: [dmg]

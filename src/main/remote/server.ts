@@ -9,6 +9,7 @@ import type { Socket } from 'net'
 import simpleGit from 'simple-git'
 import { WebSocketServer, WebSocket } from 'ws'
 import { getAllProjectWindows, openProjectWindow } from '../index'
+import { appIconPath } from '../appIcon'
 import {
   ptyEvents,
   listPtySessions,
@@ -410,7 +411,7 @@ export class RemoteBridge {
     const { device, token } = addDevice(String(name || 'iPhone'))
     audit('pair.ok', { deviceId: device.id, name: device.name })
     if (Notification.isSupported()) {
-      new Notification({ title: 'Remote control', body: `「${device.name}」已配對，可以遠端操作終端` }).show()
+      new Notification({ icon: appIconPath, title: 'Remote control', body: `「${device.name}」已配對，可以遠端操作終端` }).show()
     }
     this.onStatus()
     return { token, deviceId: device.id }
@@ -624,6 +625,7 @@ export class RemoteBridge {
         // 從手機打開 Bypass 是高風險變更：桌面一定要看得到
         if (enabled && Notification.isSupported()) {
           new Notification({
+            icon: appIconPath,
             title: 'Bypass mode enabled',
             body: `「${c.device?.name}」開啟了 Bypass 模式：之後啟動的 agent 不會再詢問就執行指令`
           }).show()
