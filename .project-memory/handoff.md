@@ -1,43 +1,43 @@
 # Latest Handoff
 
-- Agent: Claude (claude.ai cloud session)
+- Agent: Claude Code (local, user's Windows 11 PC, D:\AI_Project\Mulit-Harness-ADE)
 - Updated: 2026-10-24 Asia/Taipei
-- Branch: improve/accuracy-handoff, based on master b179d70 (v0.1.41 release memory commit). Pushed to origin (ikenican/Mulit-Harness-ADE) as branch improve/accuracy-handoff; not merged into master.
+- Branch: improve/accuracy-handoff; code HEAD 59de84b (+ this memory commit). Local commits 8d8ddba..59de84b are NOT pushed; origin/improve/accuracy-handoff is still ccca94e. Not merged into master.
 
 ## State
-- Commit 245cac4 on the branch: Cowork execution holds out-of-scope changes (task stops as blocked; user reverts, accepts or follows up), skips the node_modules junction when any task scope touches package.json/lockfile/node_modules, passes a structured `cowork-result` handoff plus Git changed-file list to dependent tasks, requires `assignmentReason` on model-generated tasks, and shows the chair's R1 participant assumptions.
-- Memory/docs commit (this handoff): PROTOCOL.md "Handoff format" section; status.sh warns on missing handoff sections or >8000 bytes; cowork.md status banner listing superseded sections; README (EN/zh) and docs/cowork-architecture.md describe the new execution behavior.
-- Commit e35392e: fork builds are versioned `<upstream>-fork.<n>`. Packaged package.json carries `updateRepo` (fork) and `upstreamRepo`; autoUpdater and the API fallback follow the fork, and Settings > About shows a Fork badge plus an upstream notice row (never installs upstream). `src/shared/version.ts` + `scripts/check-version.mts`.
-- `.github/workflows/fork-release.yml`: pushing branch `release/<x.y.z>-fork.<n>` (x.y.z must equal package.json version) builds on windows-latest, runs typecheck/check-cowork/check-version, packages, checks latest.yml and node-pty files, publishes release `v<version>`, deletes the trigger branch. Tags cannot be pushed from the cloud session; branches can.
-- Released v0.1.41-fork.1 from e35392e (run 40011071236, all steps green): setup.exe, blockmap, portable ZIP, latest.yml. Portable ZIP inspected: app-update.yml owner ikenican; package.json updateRepo/upstreamRepo set; win32 conpty .node files unpacked.
-- Commit 3e798ed: Settings > CLI "Install" no longer spawns a hidden `powershell -ExecutionPolicy Bypass -Command "irm … | iex"` (Defender flagged it as Trojan:Win32/Commando.A!ml on the user's PC). It opens a new PowerShell/bash tab, pastes the official command after the shell settles, and the user presses Enter; `ext:installAgent`/`installCodex` IPC and the npm fallback were removed. Released as v0.1.41-fork.2 via `release/0.1.41-fork.2`.
-- Next commit after fork.2: Windows install commands for Claude Code and Codex wrap the official script in try/catch and fall back to `npm install -g` (user got 404 from chatgpt.com/codex/install.ps1 on 2026-10-24). Not released yet; PowerShell syntax not executed (no pwsh in the sandbox).
-- Windows v0.1.41 remains the latest release; nothing was released or version-bumped. apps/linux untouched (DEC-011).
+- 64ac1fe: CLI detection without blocking main. `findCliAsync`/`findAgentCliAsync` (src/main/ext/paths.ts) use execFile + fs.promises with the same selection rules as `findCli`. Async users: Cowork capabilities, ext:agents, Settings CLI test. The Cowork `--help` flag probe is execFile instead of spawnSync, and concurrent calls share one in-flight probe. `resolveCli`/`resolveExecCli` may return a Promise; the executor registers its AbortController before awaiting. Sync `findCli` (terminal spawn) reuses a found path for 5 min after re-checking that it exists; not-found is never cached.
+- d2dff07: dashboard scanning runs in a worker thread. Scanners moved verbatim (only exports changed) from dashboard.ts to `src/main/ipc/sessionScan.ts`; it and `usage.ts` no longer import Electron. `dashboardWorker.ts` (electron-vite `?nodeWorker`) serves `dashboard:data` and `dashboard:usage`; if the worker cannot start or fails, the same functions run on main. State and active PTYs are read after the scan; concurrent non-forced requests share one scan. Archive/delete/unmark use the cached-session snapshot returned by the worker.
+- 9a336a1: Codex install. Windows: official script → `winget install --id OpenAI.Codex -e` → npm → message. macOS/Linux: the script is downloaded first, and npm is used if the download or the script fails (`curl | sh` used to exit 0 on a 404). chatgpt.com/codex/install.ps1, install.sh and releases.openai.com/codex all returned 404 on 2026-10-24, even though the Codex README still lists them.
+- scripts/bench-main-blocking.cjs (8d8ddba, 0cedbb0, 59de84b): measures main-thread blocking as real IPC round trips (see Details).
+- Nothing released; package.json still 0.1.41; apps/linux untouched (DEC-011). package-lock.json was restored after npm 11 rewrote "peer" flags (not committed).
 
 ## Verified
-- `npm run typecheck` -> pass
-- `node --experimental-strip-types scripts/check-cowork.mts` -> pass, including new pure tests and the e2e "scope review, structured handoff and dependency linking" scenario (fake CLIs)
-- `check-portDetect`, `check-usage`, `check-bgTasks`, `check-hosts`, `check-remote`, `check-remote-files` (.mts) -> pass; `node scripts/check-approval.cjs` -> pass
-- `npm run build` -> pass (main, preload, renderer)
+- `npm run typecheck` -> pass (after each change)
+- `node --experimental-strip-types scripts/check-{cowork,version,usage,bgTasks,portDetect,hosts,remote,remote-files}.mts` -> all pass; `node scripts/check-approval.cjs` -> pass; `node scripts/check-custom-agent.cjs` -> pass
+- `node_modules/.bin/electron scripts/check-{cowork-tabs,terminal-ui,remote-cowork,custom-agent-ui}.cjs` -> all pass on Windows (first run on Windows)
+- `npm run build` -> pass; out/main has dashboardWorker-*.js and sessionScan-*.js
+- Bench, worst IPC round trip before -> after: dashboard:data cold 527-535 -> 0.4-1.4 ms, warm 60-72 -> 0.3-1.9 ms; ext:agents 90-102 -> 1-14 ms; cowork:capabilities first 279-293 -> 3-4 ms. Paired runs: dashboard:data/usage output byte-identical (12/12).
+- findCli vs findCliAsync -> identical for 13 cases on this PC
+- Built app packed into an asar, run with Electron, real renderer -> dashboard data correct, worker used (no fallback log)
+- Codex install command: PowerShell 5.1 parse OK; with the real 404 and stubbed winget/npm: winget ok / winget fails → npm / neither → message; sh form in Git Bash: 404 → npm
 
 ## Not verified
-- Electron-based checks (`check-custom-agent.cjs`, `check-cowork-tabs.cjs`, `check-terminal-ui.cjs`, `check-remote-cowork.cjs`, `check-custom-agent-ui.cjs`): the Electron binary could not be installed in the cloud sandbox. The new desktop/phone UI (scope review card, assumptions list, assignment reason, result details) was never rendered.
-- The visible-terminal install flow was not run on Windows (paste timing in a fresh PowerShell, Defender behavior).
-- The installed fork build was not run: the in-app update from one fork release to the next, and the upstream notice, have not been exercised.
-- No real Claude/Codex/Antigravity meeting was run; whether real agents emit the `cowork-result` block and fill `assignmentReason` well is unknown. Missing blocks are tolerated (no result stored); an empty reason triggers one repair call.
-- Windows-specific behavior of `revertFiles` (case-insensitive paths, junctions) not run.
+- `npx electron-builder --dir` failed locally (winCodeSign 7z needs symlink privilege), so an installer-built app was not run; the asar test above stands in. The fork-release workflow (windows-latest) should package normally.
+- Real `winget install OpenAI.Codex` and real npm install were not run (stubbed), to avoid installing Codex on the user's PC.
+- Installed fork in-app update, a real multi-agent meeting, and Windows `revertFiles` behaviour: still not run (see archived handoff).
+- Dashboard with very large real logs (>64 MB) and many Antigravity sessions: only the synthetic fixture was used.
 
 ## Next
-- User installed v0.1.41-fork.2 and the visible-terminal install works. Next fork release: push `release/0.1.41-fork.3` (includes the npm fallback).
-- Next optimization: remove main-process blocking calls (sync `where` in src/main/ext/paths.ts CLI detection; sync readdir/stat scanning in src/main/ipc/dashboard.ts and usage parsing; spawnSync in src/main/ipc/cowork.ts). Stay on Electron (decided 2026-10-24: Tauri would split rendering across WebView2/WKWebView/WebKitGTK).
-- Owner: run the Electron checks on Windows, open one Project meeting and one execution, and look at the new cards.
-- Then plan items not started: agent profile settings (user-written strengths), real SessionStart hooks for Codex (`.codex/hooks.json`) and Antigravity after confirming `agy` supports SessionStart, drag-handoff reading CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view, re-testing planning flags on current CLI versions.
+- Ask the user before pushing improve/accuracy-handoff (8 local commits) and before releasing `release/0.1.41-fork.3` (would include the npm fallback, winget, async CLI detection, scan worker).
+- Remaining performance candidates (listed for the user, not changed): incremental parsing of active session logs (polled every 5 s); usage ignores files >64 MB (accuracy); unmarkDeletedOrArchivedWorkspace scans on main at every workspace open; loadSettings uncached; Cowork writeJsonAtomic fsync + Atomics.wait retry on main; scanBgTasks every 4 s; sync findCli for uninstalled CLIs on tab open. Full list with numbers: archive/2026-10-24-main-thread-perf.md.
+- Then the earlier plan items: agent profile settings, Codex/Antigravity SessionStart hooks, drag-handoff from CLI session logs, per-meeting token totals, unknown-schemaVersion read-only view.
 
 ## Risks / do not
-- A Windows build cannot be made in the Linux cloud sandbox: only the linux-x64 node-pty prebuilt is installed and wine is unavailable; a cross-built installer would ship without the Windows terminal binary.
-- Scope matching is case-insensitive and treats a scope entry without "/" as file or directory; an empty scope flags every change. Tasks the chair scoped too narrowly will now stop more often.
-- Runs saved before this change have no assignmentReason/assumptions/result fields; UI hides them when absent.
-- Do not push or merge without the user's go-ahead.
+- Dashboard session status depends on log age: compare dashboard output only with paired runs on the same fixture mtimes (bench `--touch`, or touch once and alternate WB_BENCH_SRC runs).
+- The worker writes dashboard-cache.json / usage-cache.json in userData; if the worker fails, main writes them instead. Never both at once by design, but a crash mid-scan falls back on main.
+- The dev app adds "-dev" to `--user-data-dir`; without that flag a dev run shares %APPDATA%\agent-workbench with the user's installed app.
+- Do not push, merge, or release without the user's go-ahead. Do not touch apps/linux (DEC-011).
 
 ## Details
-- Previous handoff (v0.1.41 release verification detail): archive/handoff-2026-10-16-v0.1.41-release.md
+- Bench method, raw numbers, remaining-candidate list: archive/2026-10-24-main-thread-perf.md
+- Previous handoff (Cowork scope review, fork.1/fork.2 releases): archive/handoff-2026-10-24-before-main-thread-perf.md
