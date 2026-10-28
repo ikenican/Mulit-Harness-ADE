@@ -19,7 +19,7 @@
     Download the portable package instead of the setup installer (if available).
 
 .EXAMPLE
-    irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
+    irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
 #>
 
 [CmdletBinding()]
@@ -35,7 +35,7 @@ $ErrorActionPreference = "Stop"
 # Enable modern TLS protocols
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
 
-$RepoOwner = "zkylek1212-k"
+$RepoOwner = "ikenican"   # this fork's releases (upstream: zkylek1212-k)
 $RepoName = "Mulit-Harness-ADE"
 
 Write-Host ""

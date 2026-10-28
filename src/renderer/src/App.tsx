@@ -21,8 +21,7 @@ import {
   IconMaximize,
   IconMinimize,
   IconClose,
-  IconSplitSingle,
-  IconSplitVertical
+  IconTerminalBox
 } from '@/components/Icons'
 import {
   toggleCenterMaximized,
@@ -92,6 +91,12 @@ export default function App(): JSX.Element {
       changedFiles: [...agentModifiedFiles]
     })
   }, [workspaceRoot, agentBusy, liveAgentSessionIds, detectedDevUrl, agentModifiedFiles])
+
+  // 記憶同步：開啟／切換專案時自動接上記憶並拉取（main 只在使用者開啟記憶同步時才動作，否則不碰網路）
+  useEffect(() => {
+    if (!workspaceRoot) return
+    window.api.memsync.onProjectOpen().catch(() => {})
+  }, [workspaceRoot])
 
   // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
   // 設定被別處改了（手機遠端切換 Bypass 等）→ 讓各面板重新讀取
@@ -170,6 +175,8 @@ export default function App(): JSX.Element {
   // 監聽跨面板請求開啟/聚焦終端：若指定 ensureRightDock 且目前非右側停靠，自動切換至右側停靠
   useEffect(() => {
     if (!terminalOpenSession || isVibe) return
+    // 終端欄被關掉時，有人要開／聚焦終端（例如從儀表板點會話）就把它打開
+    if (layout.termHidden) setLayout((l) => ({ ...l, termHidden: false }))
     if (terminalOpenSession.ensureRightDock && layout.dock !== 'right') {
       setLayout((l) => ({
         ...l,
@@ -198,13 +205,45 @@ export default function App(): JSX.Element {
   // 開發模式預設收起中央欄（編輯器／Preview），畫面只剩側邊欄＋終端；聚焦模式下中央欄必定展開
   const isCenterCollapsed = !isVibe && !isCenterMaximized && Boolean(layout.centerCollapsed)
   const expandCenter = (): void => setLayout((l) => ({ ...l, centerCollapsed: false }))
+  // 頂端列兩個開關：>_ 開關終端欄，編輯器分頁開關編輯器欄；關掉其中一個時另一個一定開著
+  const isTermHidden = !isVibe && !isCenterMaximized && !isCenterCollapsed && Boolean(layout.termHidden)
+  const toggleTerminal = (): void =>
+    setLayout((l) => (l.termHidden ? { ...l, termHidden: false } : { ...l, termHidden: true, centerCollapsed: false }))
+  const onEditorTab = (tab: CenterTab): void => {
+    if (!isCenterCollapsed && center === tab) {
+      // 再點一次亮著的分頁 → 關掉編輯器欄（終端跟著打開）
+      setLayout((l) => ({ ...l, centerCollapsed: true, termHidden: false }))
+      return
+    }
+    setCenter(tab)
+    expandCenter()
+  }
+  // 頂端列拖曳排序：終端圖示排在編輯器組前面 → 終端欄在左（右側停靠）或在上（底部停靠）
+  const termFirst = !isVibe && Boolean(layout.termFirst)
+  const editorGroupRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<'editor' | 'terminal' | null>(null)
+  const onHeaderDragOver = (e: React.DragEvent): void => {
+    if (!dragging) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const box = editorGroupRef.current?.getBoundingClientRect()
+    if (!box) return
+    // 拖曳中即時套用：游標在編輯器組中線左邊 → 被拖的那個排到左邊
+    const leftOfEditor = e.clientX < box.left + box.width / 2
+    const nextTermFirst = dragging === 'terminal' ? leftOfEditor : !leftOfEditor
+    if (nextTermFirst !== termFirst) setLayout((l) => ({ ...l, termFirst: nextTermFirst }))
+  }
 
   // 上限依目前視窗算，避免把中央區擠沒了
   const maxLeft = (): number =>
     Math.min(LIMITS.leftMax, window.innerWidth - LIMITS.centerMin - (isBottom ? 0 : layout.rightW))
+  // 開發模式：終端可以拖到只替編輯器留 editorMin；Vibe 模式維持原本上限
   const maxRight = (): number =>
-    Math.min(LIMITS.rightMax, window.innerWidth - LIMITS.centerMin - (isLeftCollapsed ? 0 : layout.leftW))
-  const maxTerm = (): number => Math.max(LIMITS.termMin, window.innerHeight - 200)
+    isVibe
+      ? Math.min(LIMITS.rightMax, window.innerWidth - LIMITS.centerMin - (isLeftCollapsed ? 0 : layout.leftW))
+      : Math.max(LIMITS.rightMin, window.innerWidth - LIMITS.editorMin - 1 - (isLeftCollapsed ? 0 : layout.leftW))
+  // 38px 是頂端列
+  const maxTerm = (): number => Math.max(LIMITS.termMin, window.innerHeight - 38 - LIMITS.editorMin - 1)
 
   const nudgeLeft = (dx: number): void =>
     setLayout((l) => {
@@ -219,15 +258,15 @@ export default function App(): JSX.Element {
       }
     })
 
-  // 右欄在右側，往右拖代表把它縮小；Vibe 模式終端在左，方向相反
+  // 右欄在右側，往右拖代表把它縮小；終端在左（Vibe 模式或拖到前面）時方向相反
   const nudgeRight = (dx: number): void =>
     setLayout((l) => ({
       ...l,
-      rightW: clamp(l.rightW + (isVibe ? dx : -dx), LIMITS.rightMin, maxRight())
+      rightW: clamp(l.rightW + (isVibe || termFirst ? dx : -dx), LIMITS.rightMin, maxRight())
     }))
-  // 終端在底部，往下拖代表把它縮小
+  // 終端在底部，往下拖代表把它縮小；終端在上方時方向相反
   const nudgeTerm = (dy: number): void =>
-    setLayout((l) => ({ ...l, termH: clamp(l.termH - dy, LIMITS.termMin, maxTerm()) }))
+    setLayout((l) => ({ ...l, termH: clamp(l.termH + (termFirst ? dy : -dy), LIMITS.termMin, maxTerm()) }))
 
   const setDock = (dock: Dock): void => setLayout((l) => ({ ...l, dock }))
 
@@ -246,11 +285,41 @@ export default function App(): JSX.Element {
         gridTemplateRows: '1fr',
         gridTemplateAreas: `"rail left sp1 term sp2 center"`
       }
+    : isTermHidden
+    ? isBottom
+      ? {
+          gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
+          gridTemplateRows: termFirst ? '0px 0px 1fr' : '1fr 0px 0px',
+          gridTemplateAreas: termFirst
+            ? `"left sp1 term" "left sp1 sp2" "left sp1 center"`
+            : `"left sp1 center" "left sp1 sp2" "left sp1 term"`
+        }
+      : {
+          gridTemplateColumns: termFirst
+            ? `${effectiveLeftW}px ${sp1W} 0px 0px 1fr`
+            : `${effectiveLeftW}px ${sp1W} 1fr 0px 0px`,
+          gridTemplateRows: '1fr',
+          gridTemplateAreas: termFirst ? `"left sp1 term sp2 center"` : `"left sp1 center sp2 term"`
+        }
+    : isBottom && termFirst
+    ? {
+        gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
+        gridTemplateRows: isCenterCollapsed ? '1fr 0px 0px' : `${layout.termH}px 1px 1fr`,
+        gridTemplateAreas: `"left sp1 term" "left sp1 sp2" "left sp1 center"`
+      }
     : isBottom
     ? {
         gridTemplateColumns: `${effectiveLeftW}px ${sp1W} 1fr`,
         gridTemplateRows: isCenterCollapsed ? '0px 0px 1fr' : `1fr 1px ${layout.termH}px`,
         gridTemplateAreas: `"left sp1 center" "left sp1 sp2" "left sp1 term"`
+      }
+    : termFirst
+    ? {
+        gridTemplateColumns: isCenterCollapsed
+          ? `${effectiveLeftW}px ${sp1W} 1fr 0px 0px`
+          : `${effectiveLeftW}px ${sp1W} ${layout.rightW}px 1px 1fr`,
+        gridTemplateRows: '1fr',
+        gridTemplateAreas: `"left sp1 term sp2 center"`
       }
     : {
         gridTemplateColumns: isCenterCollapsed
@@ -295,29 +364,51 @@ export default function App(): JSX.Element {
           )}
         </div>
 
-        <div className="app-header-center">
+        <div className="app-header-center" onDragOver={onHeaderDragOver} onDrop={(e) => e.preventDefault()}>
           {!isVibe && (
           <>
-          <div className="segmented">
-            {(['editor', 'preview', 'memory', 'browser'] as const).map((tab) => (
-              <button
-                key={tab}
-                className={!isCenterCollapsed && center === tab ? 'on' : ''}
-                onClick={() => {
-                  setCenter(tab)
-                  expandCenter()
-                }}
-              >
-                {t(`header.${tab}`)}
-              </button>
-            ))}
+          {/* 編輯器組與終端圖示可互相拖曳換位；順序就是下方兩欄的左右（或上下）位置 */}
+          <div
+            ref={editorGroupRef}
+            className={`header-drag-item ${dragging === 'editor' ? 'dragging' : ''}`}
+            style={{ order: termFirst ? 2 : 1 }}
+            draggable
+            title={t('header.dragToReorder')}
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', 'editor')
+              setDragging('editor')
+            }}
+            onDragEnd={() => setDragging(null)}
+          >
+            <div className="segmented">
+              {(['editor', 'preview', 'memory', 'browser'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  className={!isCenterCollapsed && center === tab ? 'on' : ''}
+                  title={!isCenterCollapsed && center === tab ? t('header.hideEditor') : undefined}
+                  onClick={() => onEditorTab(tab)}
+                >
+                  {t(`header.${tab}`)}
+                </button>
+              ))}
+            </div>
           </div>
           <button
-            className={`btn-icon ${isCenterCollapsed ? '' : 'active'}`}
-            title={isCenterCollapsed ? t('header.showCenter') : t('header.hideCenter')}
-            onClick={() => setLayout((l) => ({ ...l, centerCollapsed: !l.centerCollapsed }))}
+            className={`btn-icon header-drag-item header-term-btn ${isTermHidden ? '' : 'active'} ${dragging === 'terminal' ? 'dragging' : ''}`}
+            style={{ order: termFirst ? 1 : 2 }}
+            draggable
+            aria-pressed={!isTermHidden}
+            title={isTermHidden ? t('header.showTerminal') : t('header.hideTerminal')}
+            onClick={toggleTerminal}
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', 'terminal')
+              setDragging('terminal')
+            }}
+            onDragEnd={() => setDragging(null)}
           >
-            {isCenterCollapsed ? <IconSplitVertical size={14} /> : <IconSplitSingle size={14} />}
+            <IconTerminalBox size={14} />
           </button>
           </>
           )}
@@ -490,7 +581,7 @@ export default function App(): JSX.Element {
           </div>
         </main>
 
-        {!isCenterMaximized && !isCenterCollapsed && (
+        {!isCenterMaximized && !isCenterCollapsed && !isTermHidden && (
           <Splitter
             axis={isBottom ? 'horizontal' : 'vertical'}
             label={isBottom ? 'Terminal height' : 'Terminal width'}
@@ -510,7 +601,7 @@ export default function App(): JSX.Element {
           className={`col col-term ${isVibe && agentBusy ? 'agent-busy' : ''}`}
           style={{
             gridArea: 'term',
-            display: isCenterMaximized ? 'none' : 'flex',
+            display: isCenterMaximized || isTermHidden ? 'none' : 'flex',
             minWidth: !isBottom ? LIMITS.rightMin : 0
           }}
         >

@@ -1,0 +1,128 @@
+name: Fork Windows Release
+
+# Builds the Windows installer and portable ZIP on a real Windows runner and publishes them as a
+# release of this repository.
+#
+# Trigger: push a branch named release/<version>, e.g. release/0.1.41-fork.2, or run manually.
+# The version must be "<upstream version>-fork.<n>" where <upstream version> is the version in
+# package.json (the upstream release this code is based on). After a successful release the
+# trigger branch is deleted; the release tag v<version> marks the commit.
+#
+# Two update checks in the installed app:
+#   - its own channel: this repository (publish owner/repo and updateRepo point here), installed
+#     through the app's normal update flow;
+#   - upstream: zkylek1212-k/Mulit-Harness-ADE, shown as a notice only, never installed over the
+#     fork build.
+
+on:
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version, e.g. 0.1.41-fork.2 (<package.json version>-fork.<n>)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_REPO: zkylek1212-k/Mulit-Harness-ADE
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Resolve and validate version
+        id: v
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#release/}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          BASE=$(node -p "require('./package.json').version")
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-fork\.[0-9]+$'; then
+            echo "::error::Version must look like <x.y.z>-fork.<n>, got: $VERSION"
+            exit 1
+          fi
+          if [ "${VERSION%-fork.*}" != "$BASE" ]; then
+            echo "::error::Version $VERSION is not based on package.json version $BASE"
+            exit 1
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release v$VERSION already exists"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - name: Checks
+        run: |
+          node --experimental-strip-types scripts/check-cowork.mts
+          node --experimental-strip-types scripts/check-version.mts
+
+      - run: npm run build
+
+      - name: Package installer
+        shell: bash
+        run: >
+          npx electron-builder --win --x64 --publish never
+          -c.extraMetadata.version=${{ steps.v.outputs.version }}
+          -c.extraMetadata.updateRepo=${{ github.repository }}
+          -c.extraMetadata.upstreamRepo=${{ env.UPSTREAM_REPO }}
+          -c.publish.owner=${{ github.repository_owner }}
+          -c.publish.repo=${{ github.event.repository.name }}
+
+      - name: Portable ZIP and file check
+        shell: pwsh
+        run: |
+          $v = '${{ steps.v.outputs.version }}'
+          Compress-Archive -Path release/win-unpacked/* -DestinationPath "release/Agent-Workbench-$v-portable.zip"
+          Get-ChildItem release -File | Format-Table Name, Length
+          # Update manifest: latest.yml. The app's updater reads latest.yml from the newest release whose
+          # tag carries the same prerelease channel as the installed version ("fork"), so upstream tags never match.
+          $yml = Get-ChildItem release -Filter *.yml | Where-Object { $_.Name -ne 'builder-debug.yml' }
+          if (-not $yml) { throw 'No update manifest (*.yml) was produced' }
+          foreach ($f in $yml) { if (-not (Select-String -Path $f.FullName -Pattern "version: $v" -SimpleMatch -Quiet)) { throw "$($f.Name) does not name version $v" } }
+          if (-not (Test-Path "release/win-unpacked/resources/app.asar.unpacked/node_modules/@lydell")) { throw 'node-pty native files are missing from the package' }
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V='${{ steps.v.outputs.version }}'
+          BASE='${{ steps.v.outputs.base }}'
+          cat > notes.md <<EOF
+          Fork build of \`${GITHUB_SHA::7}\`, based on upstream v${BASE} (${UPSTREAM_REPO}).
+
+          Not an official Agent Workbench release. Built on GitHub Actions (windows-latest); the installer is not code-signed, so Windows SmartScreen may warn on first run.
+
+          The app checks this repository for its own updates and only shows a notice when upstream has a newer version.
+          EOF
+          YML=$(ls release/*.yml | grep -v builder-debug)
+          gh release create "v$V" --target "$GITHUB_SHA" --latest --title "Agent Workbench $V" --notes-file notes.md \
+            "release/Agent-Workbench-$V-setup.exe" \
+            "release/Agent-Workbench-$V-setup.exe.blockmap" \
+            "release/Agent-Workbench-$V-portable.zip" \
+            $YML
+
+      - name: Delete the trigger branch
+        if: github.event_name == 'push'
+        shell: bash
+        run: git push origin --delete "$GITHUB_REF_NAME"

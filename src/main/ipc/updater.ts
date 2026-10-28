@@ -3,7 +3,29 @@ import { autoUpdater, UpdateInfo as ElectronUpdateInfo, ProgressInfo } from 'ele
 import * as fs from 'fs'
 import { join, dirname } from 'path'
 import { loadSettings } from './settings'
-import type { UpdaterStatus, UpdateInfo } from '../../preload/index'
+import type { UpdaterStatus, UpdateInfo, UpstreamStatus } from '../../preload/index'
+import { UPSTREAM_REPO, compareVersions, isRepoSlug, isValidVersion, upstreamBaseOf } from '../../shared/version'
+
+/**
+ * 這個版本的更新來源。fork 版打包時以 extraMetadata 寫進 package.json：
+ * updateRepo = fork 自己（autoUpdater 也指向它），upstreamRepo = 原作者。官方版兩者相同，行為和以前一樣。
+ */
+function readBuildChannel(): { updateRepo: string; upstreamRepo: string; upstreamBase: string | null } {
+  let pkg: Record<string, unknown> = {}
+  try {
+    pkg = JSON.parse(fs.readFileSync(join(app.getAppPath(), 'package.json'), 'utf8'))
+  } catch {
+    /* 開發環境或讀不到：當成官方版 */
+  }
+  const updateRepo = isRepoSlug(pkg.updateRepo) ? pkg.updateRepo : UPSTREAM_REPO
+  const upstreamRepo = isRepoSlug(pkg.upstreamRepo) ? pkg.upstreamRepo : UPSTREAM_REPO
+  const declared = typeof pkg.upstreamVersion === 'string' && isValidVersion(pkg.upstreamVersion) ? pkg.upstreamVersion : null
+  return { updateRepo, upstreamRepo, upstreamBase: upstreamBaseOf(app.getVersion()) || declared }
+}
+
+const channel = readBuildChannel()
+const isFork = channel.updateRepo.toLowerCase() !== channel.upstreamRepo.toLowerCase()
+const releasesUrl = (repo: string): string => `https://github.com/${repo}/releases`
 
 let updaterStatus: UpdaterStatus = {
   currentVersion: app.getVersion() || '0.1.12',
@@ -12,7 +34,9 @@ let updaterStatus: UpdaterStatus = {
   checking: false,
   updateAvailable: false,
   updateDownloaded: false,
-  isDownloading: false
+  isDownloading: false,
+  channelRepo: channel.updateRepo,
+  ...(isFork ? { upstream: { repo: channel.upstreamRepo, baseVersion: channel.upstreamBase || '', newer: false } } : {})
 }
 
 /**
@@ -47,43 +71,54 @@ function broadcastStatus(): void {
 }
 
 /**
- * 從 GitHub API 直接查詢最新 Release（適用於免安裝版、非打包環境或備援）
+ * 從 GitHub API 直接查詢某個 repo 的最新 Release（免安裝版、非打包環境、autoUpdater 失敗時的備援，以及原作者版本的提示）。
+ * 版本號帶 prerelease 尾碼（fork 版 0.1.41-fork.2）時，releases/latest 不一定是最大的版本，所以列出最近幾筆自己比。
  */
-async function fetchLatestFromGitHub(): Promise<UpdateInfo | null> {
+async function fetchLatestFromGitHub(repo: string): Promise<UpdateInfo | null> {
   try {
-    const res = await fetch('https://api.github.com/repos/zkylek1212-k/Mulit-Harness-ADE/releases/latest', {
-      headers: {
-        'User-Agent': 'Agent-Workbench-Updater'
-      }
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`, {
+      headers: { 'User-Agent': 'Agent-Workbench-Updater', Accept: 'application/vnd.github+json' }
     })
     if (!res.ok) return null
-    const data: any = await res.json()
-    const tagName = (data.tag_name || '').replace(/^v/, '')
-    const body = data.body || ''
-    const htmlUrl = data.html_url || 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
+    const list: any[] = await res.json()
+    let best: any = null
+    for (const r of Array.isArray(list) ? list : []) {
+      const v = String(r?.tag_name || '').replace(/^v/, '')
+      if (r?.draft || !isValidVersion(v)) continue
+      if (!best || compareVersions(String(best.tag_name).replace(/^v/, ''), v) < 0) best = r
+    }
+    if (!best) return null
+    const version = String(best.tag_name).replace(/^v/, '')
     return {
-      version: tagName,
-      releaseName: data.name || `Version ${tagName}`,
-      releaseNotes: body,
-      releaseDate: data.published_at,
-      downloadUrl: htmlUrl
+      version,
+      releaseName: best.name || `Version ${version}`,
+      releaseNotes: best.body || '',
+      releaseDate: best.published_at,
+      downloadUrl: best.html_url || releasesUrl(repo)
     }
   } catch (e) {
-    console.warn('[Updater] Failed to fetch latest from GitHub API:', e)
+    console.warn(`[Updater] Failed to fetch releases of ${repo}:`, e)
     return null
   }
 }
 
-function compareSemver(current: string, target: string): number {
-  const cParts = current.replace(/^v/, '').split('.').map((p) => parseInt(p, 10) || 0)
-  const tParts = target.replace(/^v/, '').split('.').map((p) => parseInt(p, 10) || 0)
-  for (let i = 0; i < Math.max(cParts.length, tParts.length); i++) {
-    const c = cParts[i] || 0
-    const t = tParts[i] || 0
-    if (c < t) return -1
-    if (c > t) return 1
+/** fork 版：查原作者有沒有比這個 fork 所基於的版本更新的 release。只提示，不下載也不安裝 */
+async function checkUpstream(): Promise<void> {
+  const up = updaterStatus.upstream
+  if (!up) return
+  const latest = await fetchLatestFromGitHub(up.repo)
+  const next: UpstreamStatus = { ...up, checkedAt: Date.now() }
+  if (!latest) {
+    next.error = 'Could not reach the upstream releases.'
+  } else {
+    next.error = undefined
+    next.latestVersion = latest.version
+    next.latestReleaseDate = latest.releaseDate
+    next.latestUrl = latest.downloadUrl
+    next.newer = !!up.baseVersion && compareVersions(up.baseVersion, latest.version) < 0
   }
-  return 0
+  updaterStatus.upstream = next
+  broadcastStatus()
 }
 
 export function registerUpdaterHandlers(): void {
@@ -110,7 +145,7 @@ export function registerUpdaterHandlers(): void {
       releaseDate: info.releaseDate,
       releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined,
       releaseName: info.releaseName ?? undefined,
-      downloadUrl: 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
+      downloadUrl: releasesUrl(channel.updateRepo)
     }
     broadcastStatus()
   })
@@ -142,7 +177,7 @@ export function registerUpdaterHandlers(): void {
       releaseDate: info.releaseDate,
       releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined,
       releaseName: info.releaseName ?? undefined,
-      downloadUrl: 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
+      downloadUrl: releasesUrl(channel.updateRepo)
     }
     broadcastStatus()
   })
@@ -174,6 +209,8 @@ function formatUpdaterError(msg: string): string {
   })
 
   const performCheck = async (): Promise<UpdaterStatus> => {
+    // 原作者版本的提示與自己的更新檢查互不影響；不等它，各自廣播
+    if (isFork) void checkUpstream()
     updaterStatus.checking = true
     updaterStatus.error = undefined
     updaterStatus.isInstalled = isInstalledApp()
@@ -198,12 +235,12 @@ function formatUpdaterError(msg: string): string {
 
     // 2. 免安裝版、開發環境或 autoUpdater 失敗（如線上缺少 latest.yml 404）時，走 GitHub Releases API 備援查詢
     try {
-      const ghRelease = await fetchLatestFromGitHub()
+      const ghRelease = await fetchLatestFromGitHub(channel.updateRepo)
       updaterStatus.checking = false
       if (ghRelease) {
         // 備援查詢成功，清除 autoUpdater 的 404 報錯
         updaterStatus.error = undefined
-        if (compareSemver(updaterStatus.currentVersion, ghRelease.version) < 0) {
+        if (compareVersions(updaterStatus.currentVersion, ghRelease.version) < 0) {
           updaterStatus.updateAvailable = true
           updaterStatus.updateInfo = ghRelease
         } else {
@@ -231,7 +268,7 @@ function formatUpdaterError(msg: string): string {
   ipcMain.handle('updater:download', async (): Promise<boolean> => {
     if (!updaterStatus.isInstalled) {
       // 免安裝版直接引導至 GitHub Release 下載
-      await shell.openExternal(updaterStatus.updateInfo?.downloadUrl || 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases')
+      await shell.openExternal(updaterStatus.updateInfo?.downloadUrl || releasesUrl(channel.updateRepo))
       return true
     }
 
@@ -258,7 +295,7 @@ function formatUpdaterError(msg: string): string {
   })
 
   ipcMain.handle('updater:openRelease', async (_e, customUrl?: string): Promise<void> => {
-    const fallback = 'https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases'
+    const fallback = releasesUrl(channel.updateRepo)
     const url = customUrl || updaterStatus.updateInfo?.downloadUrl || fallback
     // 只開 http(s)：openExternal 會把 file: 或自訂 scheme 交給作業系統處理
     const ok = /^https?:\/\//i.test(url)

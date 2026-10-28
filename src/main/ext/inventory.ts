@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import { join } from 'path'
 import * as yaml from 'js-yaml'
-import { AGENT_PATHS, findCli, findAgentCli } from './paths'
+import { AGENT_PATHS, findAgentCliAsync } from './paths'
 import type {
   AgentId,
   AgentStatus,
@@ -499,10 +499,11 @@ export function buildInventory(workspaceRoot: string, managedIds: Set<string>): 
   )
 }
 
-export function buildAgentStatus(workspaceRoot: string, items: ExtItem[]): AgentStatus[] {
-  return AGENTS.map((id) => {
+export async function buildAgentStatus(workspaceRoot: string, items: ExtItem[]): Promise<AgentStatus[]> {
+  const cliPaths = await Promise.all(AGENTS.map((id) => findAgentCliAsync(id)))
+  return AGENTS.map((id, i) => {
     const P = AGENT_PATHS[id]
-    const cliPath = findAgentCli(id)
+    const cliPath = cliPaths[i]
     const notes: string[] = []
 
     const counts = { skill: 0, mcp: 0, plugin: 0 }

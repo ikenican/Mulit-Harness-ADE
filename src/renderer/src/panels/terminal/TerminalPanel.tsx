@@ -61,6 +61,8 @@ interface TerminalSession {
   needsApproval: boolean
   associatedSessionId?: string
   cwd?: string
+  /** 開分頁當下所屬的工作區（cwd 有指定時就是 cwd）：切換工作區時找回該專案最後用的分頁 */
+  workspace?: string
   /**
    * 是否已經 spawn 過 pty 並掛上輸入／輸出 handler。
    * 這個旗標必須放在 session 物件上，不能放元件的 ref：TermInstance 一旦 remount
@@ -156,6 +158,11 @@ const SHELL_IDS = BUILTIN_SHELLS.map((s) => s.id)
 /** 直接以指令啟動（非 launcher yaml）的項目 */
 const DIRECT_IDS: string[] = [...AGENT_IDS, ...SHELL_IDS]
 
+/** 比對工作區路徑用：不分大小寫、斜線統一、去掉結尾斜線（Windows 路徑大小寫不敏感） */
+function normPath(p?: string | null): string {
+  return (p || '').replace(/\\+/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
 /**
  * 以 bracketed paste 包裝：終端與 readline 會把中間內容當成「貼上」，
  * 換行不會被解讀成 Enter。少了這層，多行內容會被一行一行送出去執行。
@@ -189,7 +196,9 @@ type SplitMode = (typeof SPLIT_MODES)[number]['id']
 
 export default function TerminalPanel(): JSX.Element {
   const { t } = useTranslation()
-  const { theme, terminalDispatch, terminalOpenSession, settingsTick } = useWorkbench()
+  const { theme, terminalDispatch, terminalOpenSession, settingsTick, workspaceRoot } = useWorkbench()
+  const workspaceRootRef = useRef(workspaceRoot)
+  workspaceRootRef.current = workspaceRoot
   const [settings, setSettings] = useState<WorkbenchSettings>({
     cliPaths: {},
     cliEnabled: {}
@@ -652,6 +661,7 @@ export default function TerminalPanel(): JSX.Element {
           needsApproval: false,
           associatedSessionId,
           cwd,
+          workspace: cwd || workspaceRootRef.current || undefined,
           attachPtyId
         }
       ])
@@ -715,6 +725,60 @@ export default function TerminalPanel(): JSX.Element {
     },
     [handleNewTerminal, selectSession]
   )
+
+  // ── 切換工作區 → 切到該專案最後用的 CLI ─────────────────────────────
+  // 有開著的分頁：切到該專案最近用過的那個。沒有：從儀表板紀錄找該專案最後一次的
+  // Claude／Codex／Antigravity 會話並接續（openOrResumeSession）。啟動時第一次設定工作區不算切換。
+  const mruRef = useRef<string[]>([])
+  mruRef.current = mru
+  const prevWorkspaceRef = useRef(workspaceRoot)
+  useEffect(() => {
+    const prev = prevWorkspaceRef.current
+    prevWorkspaceRef.current = workspaceRoot
+    if (!prev || !workspaceRoot || isDetached || normPath(prev) === normPath(workspaceRoot)) return
+    const root = normPath(workspaceRoot)
+    const inWorkspace = (p?: string): boolean => {
+      const n = normPath(p)
+      return !!n && (n === root || n.startsWith(root + '/'))
+    }
+    const lastOpenTab = (): TerminalSession | undefined => {
+      const mine = sessionsRef.current.filter((s) => !s.isExited && inWorkspace(s.workspace))
+      if (!mine.length) return undefined
+      const rank = (s: TerminalSession): number => {
+        const i = mruRef.current.indexOf(s.id)
+        return i === -1 ? Number.MAX_SAFE_INTEGER : i
+      }
+      return [...mine].sort((a, b) => rank(a) - rank(b))[0]
+    }
+    const open = lastOpenTab()
+    if (open) {
+      selectSession(open.id)
+      setTimeout(() => focusTerm(open.term), 60)
+      return
+    }
+    let cancelled = false
+    window.api.dashboard
+      .data(false)
+      .then((data) => {
+        // 等資料的期間使用者又切走了，或已經有該專案的分頁（例如從儀表板點會話開的）→ 不再自動開
+        if (cancelled || normPath(workspaceRootRef.current) !== root || lastOpenTab()) return
+        const last = data.sessions
+          .filter(
+            (s) =>
+              inWorkspace(s.workspacePath) &&
+              !s.isArchived &&
+              ['claude', 'codex', 'antigravity'].includes(s.agent) &&
+              isCliEnabled(s.agent)
+          )
+          .sort((a, b) => new Date(b.lastActiveTime).getTime() - new Date(a.lastActiveTime).getTime())[0]
+        if (!last) return
+        openOrResumeSession({ id: last.id, agent: last.agent, title: last.title, status: last.status, workspacePath: workspaceRoot })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceRoot])
 
   /** 將 Session 資料轉化為跨 Agent Handoff 提示詞並送入目標終端 */
   const handleHandoffFromSession = useCallback(
@@ -850,6 +914,14 @@ export default function TerminalPanel(): JSX.Element {
 
     if (terminalDispatch.target === 'active' && activeSessionId) {
       sendToSession(activeSessionId, terminalDispatch.text)
+      return
+    }
+    if (terminalDispatch.newShell) {
+      // 只接受內建 shell；剛開的 shell 還在載入設定檔，等輸出靜止再貼，免得開頭被吃掉
+      const key = SHELL_IDS.includes(terminalDispatch.newShell) ? terminalDispatch.newShell : enabledShells[0]?.id || BUILTIN_SHELLS[0].id
+      const fresh = handleNewTerminal(key)
+      selectSession(fresh)
+      pasteWhenReady(fresh, terminalDispatch.text)
       return
     }
     // target 'shell' 就要真的是 shell：先前是「任何還活著的分頁」，

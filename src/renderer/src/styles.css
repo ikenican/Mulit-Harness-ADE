@@ -310,6 +310,23 @@ pre {
   min-width: 0;
 }
 
+/* 頂端列可拖曳換位的區塊（編輯器組、終端圖示）：不能落在視窗拖曳區裡，否則按住會拖動整個視窗 */
+.app-unified-header .header-drag-item {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  border-radius: 8px;
+  transition: opacity 0.12s ease;
+}
+.app-unified-header .header-drag-item:active {
+  cursor: grabbing;
+}
+.app-unified-header .header-drag-item.dragging {
+  opacity: 0.45;
+}
+
 .app-header-right {
   display: flex;
   align-items: center;

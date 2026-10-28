@@ -295,6 +295,8 @@ export interface CoworkTask {
   scope: string[]
   dependsOn: string[]
   assignee: CoworkAgent
+  /** 主席為什麼指派給這家；模型產生的任務必填，使用者改板時可以留空（舊紀錄沒有這個欄位） */
+  assignmentReason?: string
   acceptance: string[]
   resources: string[]
 }
@@ -302,6 +304,8 @@ export interface CoworkTask {
 export interface R1Output {
   summary: string
   framing: string
+  /** 主席對各參與者能力的假設（攤開來讓覆核者與使用者檢查；舊紀錄沒有） */
+  assumptions?: { agent: CoworkAgent; text: string }[]
   tasks: CoworkTask[]
   questions: { id: string; text: string }[]
   risks: string[]
@@ -395,6 +399,8 @@ export type CoworkLogEntry =
   | { t: 'task-start'; taskId: string; agent: CoworkAgent; followUp: boolean; at: number }
   | { t: 'task-done'; taskId: string; commit: string | null; at: number }
   | { t: 'task-failed'; taskId: string; message: string; at: number }
+  | { t: 'task-scope'; taskId: string; files: string[]; at: number }
+  | { t: 'task-scope-resolved'; taskId: string; action: 'accept' | 'revert'; files: string[]; at: number }
   | { t: 'exec-paused'; reason: string; at: number }
   | { t: 'exec-resumed'; at: number }
   | { t: 'integrated'; ok: boolean; message: string; at: number }
@@ -511,11 +517,27 @@ export interface CoworkTaskExec {
   startedAt?: number
   endedAt?: number
   usage?: CallUsage
+  /** 這一輪改到 scope 以外的檔：先不 commit，等使用者選擇接受或還原 */
+  scopeReview?: { files: string[]; followUp: boolean }
+  /** 各輪實際 commit 進去的檔（以 git 為準，不是 agent 自述） */
+  changedFiles?: string[]
+  /** agent 回報的結構化結果（最後一輪的 cowork-result 區塊） */
+  result?: ExecResult
+}
+
+/** agent 完成時在回覆最後附上的結構化結果；檔案清單另外以 git 為準 */
+export interface ExecResult {
+  interfaces: string[]
+  verified: string[]
+  unverified: string[]
+  notes: string
 }
 
 export interface CoworkWorktree {
   path: string
   branch: string
+  /** node_modules 有沒有連到主工作區；沒連時 agent 要自己安裝 */
+  depsLinked?: boolean
 }
 
 export interface CoworkExecution {
@@ -524,6 +546,8 @@ export interface CoworkExecution {
   /** 開始時的 Bypass 設定（照使用者設定帶略過審批參數） */
   bypass: boolean
   linkDeps: boolean
+  /** 使用者選了共用 node_modules，但這些任務會改依賴，所以整場都不連（避免改到主工作區、也避免下游用到舊依賴） */
+  depsLinkSkippedFor?: string[]
   /** <repo>/.cowork/<runId> */
   root: string
   /** 依序：main；同時：每家 agent 一個 */
@@ -634,6 +658,7 @@ function taskSchema(assignable: CoworkAgent[]): Record<string, unknown> {
     scope: strArr,
     dependsOn: strArr,
     assignee: { type: 'string', enum: assignable },
+    assignmentReason: str,
     acceptance: strArr,
     resources: strArr
   })
@@ -643,6 +668,7 @@ export function r1Schema(assignable: CoworkAgent[]): Record<string, unknown> {
   return obj({
     summary: str,
     framing: str,
+    assumptions: { type: 'array', items: obj({ agent: { type: 'string', enum: [...COWORK_AGENTS] }, text: str }) },
     tasks: { type: 'array', items: taskSchema(assignable) },
     questions: { type: 'array', items: obj({ id: str, text: str }) },
     risks: strArr
@@ -713,7 +739,7 @@ export function normalizeScopePath(raw: string): { ok: true; path: string } | { 
 }
 
 /** 驗證並正規化任務清單（DAG、assignee、路徑、數量）。回傳正規化後的任務 */
-export function checkTasks(raw: unknown, ctx: { assignable: CoworkAgent[]; maxTasks: number }): Check<CoworkTask[]> {
+export function checkTasks(raw: unknown, ctx: { assignable: CoworkAgent[]; maxTasks: number; requireReason?: boolean }): Check<CoworkTask[]> {
   const errors: string[] = []
   if (!Array.isArray(raw)) return { ok: false, errors: ['tasks must be an array'] }
   if (raw.length === 0) errors.push('tasks must not be empty')
@@ -733,6 +759,10 @@ export function checkTasks(raw: unknown, ctx: { assignable: CoworkAgent[]; maxTa
     need(t, 'dependsOn', isStrArr, where, errors)
     need(t, 'acceptance', isStrArr, where, errors)
     if (t.resources !== undefined && !isStrArr(t.resources)) errors.push(`${where}.resources wrong type`)
+    if (t.assignmentReason !== undefined && !isStr(t.assignmentReason)) errors.push(`${where}.assignmentReason wrong type`)
+    else if (ctx.requireReason && !(isStr(t.assignmentReason) && t.assignmentReason.trim())) {
+      errors.push(`${where}.assignmentReason is empty: explain why this assignee fits this task`)
+    }
     if (!isStr(t.id) || !isStr(t.title) || !isStr(t.detail) || !isStrArr(t.scope) || !isStrArr(t.dependsOn) || !isStrArr(t.acceptance)) return
     const id = t.id.trim()
     if (!TASK_ID.test(id)) errors.push(`${where}.id "${t.id}" must match ${TASK_ID}`)
@@ -755,6 +785,7 @@ export function checkTasks(raw: unknown, ctx: { assignable: CoworkAgent[]; maxTa
       scope,
       dependsOn: [...new Set(t.dependsOn.map((d) => d.trim()))],
       assignee: t.assignee as CoworkAgent,
+      ...(isStr(t.assignmentReason) && t.assignmentReason.trim() ? { assignmentReason: t.assignmentReason.trim().slice(0, 2000) } : {}),
       acceptance: t.acceptance.map((a) => a.trim()).filter(Boolean),
       resources: isStrArr(t.resources) ? [...new Set(t.resources.map((r) => r.trim()).filter(Boolean))] : []
     })
@@ -815,8 +846,15 @@ export function checkR1(raw: unknown, ctx: { assignable: CoworkAgent[]; maxTasks
   need(raw, 'framing', isStr, 'r1', errors)
   need(raw, 'risks', isStrArr, 'r1', errors)
   if (!Array.isArray(raw.questions)) errors.push('r1.questions must be an array')
-  const tasks = checkTasks(raw.tasks, ctx)
+  const tasks = checkTasks(raw.tasks, { ...ctx, requireReason: true })
   if (!tasks.ok) errors.push(...tasks.errors)
+  // 假設欄位不完整不讓整次規劃失敗（多一次修正呼叫不值得），只收合法的項目
+  const assumptions: { agent: CoworkAgent; text: string }[] = []
+  if (Array.isArray(raw.assumptions)) {
+    for (const a of raw.assumptions) {
+      if (isObj(a) && isAgent(a.agent) && isStr(a.text) && a.text.trim()) assumptions.push({ agent: a.agent as CoworkAgent, text: a.text.trim().slice(0, 1000) })
+    }
+  }
   const questions: { id: string; text: string }[] = []
   if (Array.isArray(raw.questions)) {
     raw.questions.forEach((q, i) => {
@@ -831,6 +869,7 @@ export function checkR1(raw: unknown, ctx: { assignable: CoworkAgent[]; maxTasks
     value: {
       summary: String(raw.summary).trim(),
       framing: String(raw.framing).trim(),
+      ...(assumptions.length ? { assumptions } : {}),
       tasks: tasks.value,
       questions,
       risks: (raw.risks as string[]).map((r) => r.trim()).filter(Boolean)
@@ -921,7 +960,7 @@ export function checkResolution(
 ): Check<Resolution> {
   if (!isObj(raw)) return { ok: false, errors: ['output must be a JSON object'] }
   const errors: string[] = []
-  const tasks = checkTasks(raw.tasks, ctx)
+  const tasks = checkTasks(raw.tasks, { ...ctx, requireReason: true })
   if (!tasks.ok) errors.push(...tasks.errors)
   if (!Array.isArray(raw.decisions)) errors.push('decisions must be an array')
   if (!Array.isArray(raw.unresolved)) errors.push('unresolved must be an array')
@@ -1134,6 +1173,7 @@ function taskRules(ctx: PromptCtx): string {
     '- Tasks that can run independently must not have overlapping scopes. If two tasks touch the same file or interface, add a dependency between them.',
     '- dependsOn: ids of tasks that must be finished first. No cycles.',
     `- assignee: one of ${assignable.join(', ')}.${r.chairExecutes ? '' : ` The chair (${r.chair}) does not execute tasks.`}`,
+    '- assignmentReason: why this assignee fits this task, based on the task content and the stated assumptions. Name the deciding factor; do not rely on vendor reputation alone.',
     '- acceptance: concrete, checkable conditions (commands to run, behaviour to observe).',
     '- resources: shared resources the task needs exclusively, e.g. "port:5173", "device:usb-1". Empty if none.',
     `- At most ${r.limits.maxTasks} tasks. Prefer fewer, well-bounded tasks.`
@@ -1153,6 +1193,7 @@ export function buildR1Prompt(ctx: PromptCtx & { notes: string[] }): string {
     'You are the CHAIR. Open the meeting with a proposal:',
     '- summary: one or two sentences.',
     '- framing: what the request involves, the key interfaces/contracts, and your assumptions.',
+    '- assumptions: for each participant (including yourself), what you assume it is good or weak at, as {agent, text}. These drive your assignments; reviewers and the user will check them.',
     '- tasks: a draft split of the work with draft assignees.',
     '- questions: the points you are NOT sure about, for reviewers to challenge. Be honest; an empty list is rarely right.',
     '- risks: what could go wrong.',
@@ -1181,6 +1222,7 @@ export function buildR2Prompt(ctx: PromptCtx & { reviewer: CoworkAgent; r1: R1Ou
     '- objections: each with id (o1, o2, ...), target (a task id, or "framing"), reason, and a concrete alternative.',
     '- missing: work the plan forgot, each with id (m1, ...), title and why.',
     `- claims: ids of tasks you (${ctx.reviewer}) would like to take. A preference only.`,
+    '- If an assumption about a participant (including you) is wrong and it affects an assignment, raise it as an objection with target "framing".',
     '- answers: answers to the chair\'s questions (questionId such as q1, answer).',
     'Do not invent objections to look busy; do not agree just to be polite.',
     '',
@@ -1224,6 +1266,7 @@ export function buildR34Prompt(
     'For your own questions, "accept" means resolved: state the answer in the reason.',
     'If you genuinely cannot decide an issue, put it in unresolved {issueId, text} instead; the user will decide.',
     'Then output the final task list. Treat claims as preferences that still have to respect capability, resources and dependencies.',
+    'If you accepted a challenge to an assumption about a participant, update the affected assignees and their assignmentReason.',
     '',
     taskRules(ctx),
     '',
@@ -1788,6 +1831,50 @@ export function parseExecLine(agent: CoworkAgent, line: string, cwd: string): Ex
   return null
 }
 
+/**
+ * 改動中不在 scope 內的檔。scope 以 "/" 結尾是目錄；沒有 "/" 的項目可能是檔也可能是目錄，兩種都算。
+ * scope 為空（未指定）時，任何改動都算越界：沒宣告要改檔的任務就不該改檔。
+ * 比對不分大小寫，和 checkTasks 的重疊檢查一致（Windows 路徑不分大小寫）。
+ */
+export function filesOutsideScope(scope: string[], files: string[]): string[] {
+  const entries = scope.map((s) => s.replace(/\\/g, '/').toLowerCase())
+  return files.filter((f) => {
+    const p = f.replace(/\\/g, '/').toLowerCase()
+    return !entries.some((e) => (e.endsWith('/') ? p.startsWith(e) : p === e || p.startsWith(e + '/')))
+  })
+}
+
+/** 會改到依賴宣告或 lockfile 的檔名；這類任務不能共用主工作區的 node_modules */
+export const DEPENDENCY_FILES = ['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', '.npmrc']
+
+/** 任務的 scope 是否會改到依賴（含目錄 scope 涵蓋 repo 根目錄的依賴檔） */
+export function touchesDependencies(scope: string[]): boolean {
+  return scope.some((raw) => {
+    const s = raw.replace(/\\/g, '/').toLowerCase()
+    const name = s.replace(/\/$/, '').split('/').pop() || ''
+    if (DEPENDENCY_FILES.includes(name)) return true
+    // 根目錄或 node_modules 本身
+    return s === './' || s === '/' || name === 'node_modules'
+  })
+}
+
+const RESULT_FENCE = /```cowork-result\s*\n([\s\S]*?)\n```/g
+
+/** 從 agent 的回覆取出最後一個 cowork-result 區塊；格式不對就回 undefined（不讓任務失敗） */
+export function parseExecResult(text: string): ExecResult | undefined {
+  let last: string | undefined
+  for (const m of text.matchAll(RESULT_FENCE)) last = m[1]
+  if (!last) return undefined
+  try {
+    const v = JSON.parse(last)
+    if (!isObj(v)) return undefined
+    const arr = (x: unknown): string[] => (isStrArr(x) ? x.map((s) => s.trim()).filter(Boolean).slice(0, 50).map((s) => s.slice(0, 1000)) : [])
+    return { interfaces: arr(v.interfaces), verified: arr(v.verified), unverified: arr(v.unverified), notes: isStr(v.notes) ? v.notes.trim().slice(0, 4000) : '' }
+  } catch {
+    return undefined
+  }
+}
+
 /** 依依賴排出執行順序（同一層維持任務板上的順序）；有環時回 null */
 export function topoOrder(tasks: Pick<CoworkTask, 'id' | 'dependsOn'>[]): string[] | null {
   if (findCycle(tasks)) return null
@@ -1802,11 +1889,35 @@ export function topoOrder(tasks: Pick<CoworkTask, 'id' | 'dependsOn'>[]): string
   return order
 }
 
+/** 前置任務的交接：結構化欄位完整給（以 git 為準的檔案清單 + agent 回報），文字摘要只當補充 */
+function depLines(d: { id: string; title: string; summary: string; changedFiles?: string[]; result?: ExecResult }): string[] {
+  const out = [`- ${d.id} (${d.title})`]
+  if (d.changedFiles?.length) out.push(`  changed files (from git): ${d.changedFiles.join(', ')}`)
+  if (d.result) {
+    if (d.result.interfaces.length) out.push('  interfaces:', ...d.result.interfaces.map((x) => `    - ${x}`))
+    if (d.result.verified.length) out.push('  verified:', ...d.result.verified.map((x) => `    - ${x}`))
+    if (d.result.unverified.length) out.push('  NOT verified:', ...d.result.unverified.map((x) => `    - ${x}`))
+    if (d.result.notes) out.push(`  notes: ${d.result.notes}`)
+  }
+  if (d.summary) out.push(`  reply excerpt: ${stripResultBlock(d.summary).slice(0, d.result ? 800 : 1500)}`)
+  return out
+}
+
+/** 去掉回覆裡的 cowork-result 區塊（已經結構化附上，不重複） */
+export function stripResultBlock(text: string): string {
+  return text.replace(RESULT_FENCE, '').trim()
+}
+
 /** 交辦給背景 agent 的第一輪 prompt */
 export function buildExecPrompt(
   run: CoworkRun,
   task: CoworkTask,
-  o: { branch: string; deps: { id: string; title: string; summary: string }[] }
+  o: {
+    branch: string
+    deps: { id: string; title: string; summary: string; changedFiles?: string[]; result?: ExecResult }[]
+    /** node_modules 沒有連到主工作區（任務會改依賴，或使用者沒選）；undefined = 不提 */
+    depsLinked?: boolean
+  }
 ): string {
   const zh = run.language === 'zh-TW'
   return [
@@ -1816,10 +1927,18 @@ export function buildExecPrompt(
     '- Do not commit, merge, rebase, switch branches, push, or create or remove git worktrees.',
     '- Stay within the task scope unless a change elsewhere is required to complete it; say so if you make one.',
     '- Run the acceptance checks you can run here and report the results honestly, including failures.',
+    'Cowork checks the changed files against the task scope before recording them; changes outside the scope are held for the user to accept or revert.',
+    ...(o.depsLinked === false
+      ? ['Dependencies (node_modules) are NOT installed in this worktree. Install them yourself if the task or its acceptance checks need them.']
+      : []),
     'When you are done, reply with what you changed (files), the acceptance results, and anything left undone.',
-    zh ? 'Write your reply in Traditional Chinese (zh-TW).' : 'Write your reply in English.',
+    'End the reply with exactly one fenced block tagged cowork-result containing JSON, for the tasks that build on yours:',
+    '```cowork-result',
+    '{"interfaces": ["contracts other code relies on: exported names, signatures, file formats, routes"], "verified": ["check you ran -> result"], "unverified": ["what you did not or could not verify"], "notes": "anything the next agent must know"}',
+    '```',
+    zh ? 'Write your reply in Traditional Chinese (zh-TW); keep the JSON keys in English.' : 'Write your reply in English.',
     ...(o.deps.length
-      ? ['', 'Prerequisite tasks already completed (their changes are already in this worktree):', ...o.deps.map((d) => `- ${d.id} (${d.title}): ${d.summary.slice(0, 1500)}`)]
+      ? ['', 'Prerequisite tasks already completed (their changes are already in this worktree):', ...o.deps.flatMap((d) => depLines(d))]
       : []),
     '',
     taskDispatchText(run, task)

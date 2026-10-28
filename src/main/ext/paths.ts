@@ -1,7 +1,7 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import { existsSync } from 'fs'
-import { execFileSync } from 'child_process'
+import { existsSync, promises as fsp } from 'fs'
+import { execFile, execFileSync } from 'child_process'
 import type { AgentId } from '../../preload/index'
 import { getCustomCliPath } from '../ipc/settings'
 
@@ -67,46 +67,32 @@ export function antigravitySkillDir(pluginName: string): string {
   return join(AGENT_PATHS.antigravity.pluginsDir!, pluginName, 'skills')
 }
 
-/** 在 PATH 上找執行檔；找不到回 null。Windows 用 where、其餘用 which，若仍未找到則遍歷標準候選安裝路徑。 */
-export function findCli(cmd: string): string | null {
-  const isWin = process.platform === 'win32'
-  try {
-    const finder = isWin ? 'where' : 'which'
-    const out = execFileSync(finder, [cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    const lines = out
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && existsSync(l))
+const isWin = process.platform === 'win32'
 
-    if (lines.length > 0) {
-      if (!isWin) return lines[0]
+/** where/which 的輸出 → 實際要用的路徑（exists 已過濾掉不存在的行） */
+function pickFinderResult(out: string, exists: (p: string) => boolean): string | null {
+  const lines = out
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && exists(l))
+  if (lines.length === 0) return null
+  if (!isWin) return lines[0]
 
-      // Windows 平台：必須優先選擇可被 CreateProcess 執行的檔案類型 (.exe, .cmd, .bat, .ps1)
-      const exe = lines.find((l) => l.toLowerCase().endsWith('.exe'))
-      if (exe) return exe
-
-      const cmdScript = lines.find((l) => l.toLowerCase().endsWith('.cmd'))
-      if (cmdScript) return cmdScript
-
-      const bat = lines.find((l) => l.toLowerCase().endsWith('.bat'))
-      if (bat) return bat
-
-      const ps1 = lines.find((l) => l.toLowerCase().endsWith('.ps1'))
-      if (ps1) return ps1
-
-      for (const l of lines) {
-        if (existsSync(`${l}.cmd`)) return `${l}.cmd`
-        if (existsSync(`${l}.exe`)) return `${l}.exe`
-        if (existsSync(`${l}.bat`)) return `${l}.bat`
-        if (existsSync(`${l}.ps1`)) return `${l}.ps1`
-      }
-      return lines[0]
-    }
-  } catch {
-    /* where 找不到或執行失敗時繼續 fallback 搜尋候選路徑 */
+  // Windows 平台：必須優先選擇可被 CreateProcess 執行的檔案類型 (.exe, .cmd, .bat, .ps1)
+  for (const ext of ['.exe', '.cmd', '.bat', '.ps1']) {
+    const hit = lines.find((l) => l.toLowerCase().endsWith(ext))
+    if (hit) return hit
   }
+  for (const l of lines) {
+    for (const ext of ['.cmd', '.exe', '.bat', '.ps1']) {
+      if (exists(`${l}${ext}`)) return `${l}${ext}`
+    }
+  }
+  return lines[0]
+}
 
-  // Windows 平台候選目錄搜尋（解決 Electron GUI 進程環境 PATH 可能未更新的問題）
+/** PATH 找不到時依序檢查的標準安裝位置（解決 Electron GUI 進程環境 PATH 可能未更新的問題） */
+function candidatePaths(cmd: string): string[] {
   if (isWin) {
     const localAppData = process.env['LOCALAPPDATA'] || join(H, 'AppData', 'Local')
     const appData = process.env['APPDATA'] || join(H, 'AppData', 'Roaming')
@@ -171,23 +157,75 @@ export function findCli(cmd: string): string | null {
         join(localAppData, 'pnpm', 'codex.cmd')
       )
     }
-    for (const c of candidates) {
-      if (c && existsSync(c)) return c
+    // 記憶同步用：winget 裝的 Git／GitHub CLI 在 App 啟動後才裝好時，App 的 PATH 還沒有它們
+    const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files'
+    if (cmd === 'git') {
+      candidates.unshift(join(programFiles, 'Git', 'cmd', 'git.exe'), join(localAppData, 'Programs', 'Git', 'cmd', 'git.exe'))
     }
-  } else {
-    // 非 Windows 平台候補路徑（當 Electron 未繼承終端 shell PATH 時之安全防護）
-    const unixCandidates: string[] = [
-      join(H, '.local', 'bin', cmd),
-      join(H, '.npm-global', 'bin', cmd),
-      join('/usr', 'local', 'bin', cmd),
-      join('/opt', 'homebrew', 'bin', cmd)
-    ]
-    for (const u of unixCandidates) {
-      if (u && existsSync(u)) return u
+    if (cmd === 'gh') {
+      candidates.unshift(join(programFiles, 'GitHub CLI', 'gh.exe'), join(localAppData, 'Programs', 'GitHub CLI', 'gh.exe'))
     }
+    return candidates
   }
+  // 非 Windows 平台候補路徑（當 Electron 未繼承終端 shell PATH 時之安全防護）
+  return [
+    join(H, '.local', 'bin', cmd),
+    join(H, '.npm-global', 'bin', cmd),
+    join('/usr', 'local', 'bin', cmd),
+    join('/opt', 'homebrew', 'bin', cmd)
+  ]
+}
 
-  return null
+/**
+ * 找到的路徑記一份給同步呼叫用（開終端分頁時 resolveCommand 不能等）。只記「找到」：
+ * 剛裝好的 CLI 不會被舊的「找不到」擋住；用之前一定再確認檔案還在，最多沿用 5 分鐘。
+ * 非同步版本永遠重新查，查完順便更新這份。
+ */
+const FOUND_TTL_MS = 5 * 60 * 1000
+const foundCache = new Map<string, { path: string; at: number }>()
+
+function remember(cmd: string, found: string | null): string | null {
+  if (found) foundCache.set(cmd, { path: found, at: Date.now() })
+  else foundCache.delete(cmd)
+  return found
+}
+
+/**
+ * 在 PATH 上找執行檔；找不到回 null。Windows 用 where、其餘用 which，若仍未找到則遍歷標準候選安裝路徑。
+ * 同步版：會擋住 main process（where 要開一個行程），能用 findCliAsync 就用它。
+ */
+export function findCli(cmd: string): string | null {
+  const hit = foundCache.get(cmd)
+  if (hit && Date.now() - hit.at < FOUND_TTL_MS && existsSync(hit.path)) return hit.path
+  try {
+    const out = execFileSync(isWin ? 'where' : 'which', [cmd], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const found = pickFinderResult(out, existsSync)
+    if (found) return remember(cmd, found)
+  } catch {
+    /* where 找不到或執行失敗時繼續 fallback 搜尋候選路徑 */
+  }
+  return remember(cmd, candidatePaths(cmd).find((c) => c && existsSync(c)) || null)
+}
+
+const exists = (p: string): Promise<boolean> => fsp.access(p).then(() => true, () => false)
+
+/** findCli 的非同步版：結果相同，但 where/which 與檔案檢查都不擋 main process */
+export async function findCliAsync(cmd: string): Promise<string | null> {
+  const out = await new Promise<string>((resolve) => {
+    execFile(isWin ? 'where' : 'which', [cmd], { encoding: 'utf8', windowsHide: true }, (err, stdout) => resolve(err ? '' : stdout))
+  })
+  if (out) {
+    // pickFinderResult 要同步的 exists：先把可能用到的路徑一次查好
+    const lines = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    const probe = isWin ? lines.flatMap((l) => [l, ...['.cmd', '.exe', '.bat', '.ps1'].map((e) => `${l}${e}`)]) : lines
+    const present = new Set((await Promise.all(probe.map(async (p) => ((await exists(p)) ? p : null)))).filter((p): p is string => !!p))
+    const found = pickFinderResult(out, (p) => present.has(p))
+    if (found) return remember(cmd, found)
+  }
+  for (const c of candidatePaths(cmd)) {
+    if (c && (await exists(c))) return remember(cmd, c)
+  }
+  return remember(cmd, null)
 }
 
 /**
@@ -200,4 +238,10 @@ export function findAgentCli(agent: AgentId): string | null {
   }
   const defaultCmd = AGENT_PATHS[agent]?.cli || agent
   return findCli(defaultCmd)
+}
+
+export async function findAgentCliAsync(agent: AgentId): Promise<string | null> {
+  const custom = getCustomCliPath(agent)
+  if (custom && (await exists(custom))) return custom
+  return findCliAsync(AGENT_PATHS[agent]?.cli || agent)
 }

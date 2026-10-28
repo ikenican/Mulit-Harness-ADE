@@ -4,12 +4,12 @@ import { app, ipcMain, BrowserWindow } from 'electron'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { spawnSync, execFile } from 'child_process'
+import { execFile } from 'child_process'
 import { EventEmitter } from 'events'
 import { CoworkService, CoworkError, type ResolvedCli } from '../cowork/orchestrator'
 import { readBaseline } from '../cowork/git'
 import { launchPlan, runProcess } from '../cowork/runner'
-import { findAgentCli } from '../ext/paths'
+import { findAgentCliAsync } from '../ext/paths'
 import { loadSettings, saveSettings, isCliBypassPermissions } from './settings'
 import { buildInventory } from '../ext/inventory'
 import type { ExecCli } from '../cowork/executor'
@@ -38,37 +38,38 @@ const REQUIRED_FLAGS: Partial<Record<CoworkAgent, { args: string[]; flags: strin
   antigravity: { args: ['--help'], flags: ['--input-format', '--json-schema', '--sandbox', '--effort'] }
 }
 
-const helpCache = new Map<string, boolean>()
+// 同一個執行檔（路徑＋mtime）只問一次 --help；進行中的也共用，不會同時開兩個
+const helpCache = new Map<string, Promise<boolean>>()
 
-function supportsFlags(cliPath: string, agent: CoworkAgent): boolean {
+async function supportsFlags(cliPath: string, agent: CoworkAgent): Promise<boolean> {
   const req = REQUIRED_FLAGS[agent]
   if (!req) return false
   let key = cliPath
   try {
-    key += `:${fs.statSync(cliPath).mtimeMs}`
+    key += `:${(await fs.promises.stat(cliPath)).mtimeMs}`
   } catch {
     /* 純指令名稱 */
   }
   const hit = helpCache.get(key)
-  if (hit !== undefined) return hit
-  let ok = false
-  try {
+  if (hit) return hit
+  const probe = new Promise<boolean>((resolve) => {
     const plan = launchPlan(cliPath, req.args)
-    if (!('error' in plan)) {
-      const r = spawnSync(plan.file, plan.args, {
-        encoding: 'utf8',
-        timeout: 20000,
-        windowsHide: true,
-        windowsVerbatimArguments: plan.verbatim,
-        stdio: ['ignore', 'pipe', 'pipe']
-      })
-      ok = r.status === 0 && req.flags.every((f) => `${r.stdout}${r.stderr}`.includes(f))
+    if ('error' in plan) return resolve(false)
+    try {
+      // exit code 非 0（含逾時被砍）時 err 有值 → 不支援
+      const child = execFile(
+        plan.file,
+        plan.args,
+        { encoding: 'utf8', timeout: 20000, maxBuffer: 8 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: plan.verbatim },
+        (err, stdout, stderr) => resolve(!err && req.flags.every((f) => `${stdout}${stderr}`.includes(f)))
+      )
+      child.stdin?.end()
+    } catch {
+      resolve(false)
     }
-  } catch {
-    ok = false
-  }
-  helpCache.set(key, ok)
-  return ok
+  })
+  helpCache.set(key, probe)
+  return probe
 }
 
 /**
@@ -152,7 +153,7 @@ function readClaudeUserModel(): string {
 }
 
 async function loadCatalog(agent: CoworkAgent): Promise<CoworkModelCatalog> {
-  const cap = capabilities().find((c) => c.agent === agent)
+  const cap = (await capabilities()).find((c) => c.agent === agent)
   if (agent === 'claude') {
     const user = readClaudeUserModel()
     const fallback = { model: user, effort: '', source: user ? ('user-config' as const) : ('cli-default' as const) }
@@ -225,28 +226,32 @@ function modelCatalog(agent: CoworkAgent, force: boolean): Promise<CoworkModelCa
   return value
 }
 
-let capCache: { at: number; caps: CoworkCapability[] } | null = null
+// 進行中的檢查也放進快取：同時來的呼叫共用同一次 where／--help
+let capCache: { at: number; caps: Promise<CoworkCapability[]> } | null = null
 const CAP_TTL_MS = 15000
 
-function capabilities(force = false): CoworkCapability[] {
+function capabilities(force = false): Promise<CoworkCapability[]> {
   if (!force && capCache && Date.now() - capCache.at < CAP_TTL_MS) return capCache.caps
   const settings = loadSettings()
-  const caps = COWORK_AGENTS.map((agent): CoworkCapability => {
+  const caps = Promise.all(COWORK_AGENTS.map(async (agent): Promise<CoworkCapability> => {
     const enabled = settings.cliEnabled?.[agent] !== false
-    const cliPath = findAgentCli(agent)
+    const cliPath = await findAgentCliAsync(agent)
     if (!cliPath) return { agent, enabled, path: null, planning: false, reason: 'not-installed' }
-    if (!supportsFlags(cliPath, agent)) return { agent, enabled, path: cliPath, planning: false, reason: 'cli-too-old' }
+    if (!(await supportsFlags(cliPath, agent))) return { agent, enabled, path: cliPath, planning: false, reason: 'cli-too-old' }
     if (agent === 'codex' && process.platform === 'win32' && !readCodexWindowsSandbox()) {
       return { agent, enabled, path: cliPath, planning: false, reason: 'codex-no-windows-sandbox' }
     }
     return { agent, enabled, path: cliPath, planning: true }
-  })
-  capCache = { at: Date.now(), caps }
+  }))
+  const entry = { at: Date.now(), caps }
+  capCache = entry
+  // TTL 從檢查完成起算（與改成非同步前相同）；失敗就不留
+  caps.then(() => { entry.at = Date.now() }, () => { if (capCache === entry) capCache = null })
   return caps
 }
 
-function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
-  const cap = capabilities().find((c) => c.agent === agent)
+async function resolveCli(agent: CoworkAgent): Promise<ResolvedCli | { error: string }> {
+  const cap = (await capabilities()).find((c) => c.agent === agent)
   if (!cap) return { error: 'unknown agent' }
   if (!cap.enabled) return { error: 'disabled in Settings' }
   if (!cap.planning || !cap.path) return { error: cap.reason || 'not available' }
@@ -273,8 +278,8 @@ function resolveCli(agent: CoworkAgent): ResolvedCli | { error: string } {
 }
 
 /** 背景執行：使用者平常的 CLI 與完整設定（MCP／skill／外掛／hook 照常載入），不用規劃時的隔離家目錄 */
-function resolveExecCli(agent: CoworkAgent): ExecCli | { error: string } {
-  const cap = capabilities().find((c) => c.agent === agent)
+async function resolveExecCli(agent: CoworkAgent): Promise<ExecCli | { error: string }> {
+  const cap = (await capabilities()).find((c) => c.agent === agent)
   if (!cap) return { error: 'unknown agent' }
   if (!cap.enabled) return { error: 'disabled in Settings' }
   if (!cap.path) return { error: cap.reason || 'not installed' }
@@ -439,7 +444,7 @@ const ops: Record<string, (workspace: string, ...args: any[]) => unknown> = {
     const cw = sanitizeCoworkSettings(loadSettings().cowork)
     // defaults 給手機開會表單：與桌面表單讀設定得到的預設值相同
     return {
-      agents: capabilities(!!force),
+      agents: await capabilities(!!force),
       baseline: await baselineInfo(workspace),
       defaults: { chair: cw.chair, participants: cw.participants, models: cw.models, summarizer: cw.summarizer, summarizeEachRound: cw.summarizeEachRound, limits: cw.limits }
     }
@@ -475,6 +480,8 @@ const ops: Record<string, (workspace: string, ...args: any[]) => unknown> = {
     }),
   execMessage: (_w, runId: string, taskId: string, text: string) => svc().execMessage(String(runId), String(taskId), String(text ?? '')),
   execRetry: (_w, runId: string, taskId: string) => svc().execRetry(String(runId), String(taskId)),
+  execAcceptScope: (_w, runId: string, taskId: string) => svc().execAcceptScope(String(runId), String(taskId)),
+  execRevertScope: (_w, runId: string, taskId: string) => svc().execRevertScope(String(runId), String(taskId)),
   execPause: (_w, runId: string) => svc().execPause(String(runId)),
   execResume: (_w, runId: string) => svc().execResume(String(runId)),
   execMerge: (_w, runId: string) => svc().execMerge(String(runId)),

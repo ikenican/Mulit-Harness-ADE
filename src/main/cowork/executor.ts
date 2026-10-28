@@ -7,6 +7,7 @@ import * as path from 'node:path'
 import { runProcess } from './runner'
 import {
   addWorktree,
+  changedFiles,
   cherryPickAll,
   commitAll,
   diffStat,
@@ -14,14 +15,19 @@ import {
   git,
   linkNodeModules,
   mergeBranch,
-  removeWorktrees
+  removeWorktrees,
+  revertFiles
 } from './git'
 import {
   buildExecPrompt,
   currentBoard,
   execInvocation,
+  filesOutsideScope,
   parseExecLine,
+  parseExecResult,
   topoOrder,
+  touchesDependencies,
+  type ExecResult,
   type CoworkAgent,
   type CoworkExecMode,
   type CoworkExecution,
@@ -42,7 +48,7 @@ export interface ExecHost {
   dirOf(run: CoworkRun): string
   save(run: CoworkRun): void
   emit(run: CoworkRun): void
-  resolveExecCli(agent: CoworkAgent): ExecCli | { error: string }
+  resolveExecCli(agent: CoworkAgent): ExecCli | { error: string } | Promise<ExecCli | { error: string }>
   /** Same-repo execution stays exclusive until its worktrees are merged or cleaned; planning may run concurrently. */
   otherActiveRun(run: CoworkRun): CoworkRun | undefined
   now(): number
@@ -91,13 +97,17 @@ export class CoworkExecutor {
     const worktrees: CoworkExecution['worktrees'] = {}
     for (const k of keys) worktrees[k] = { path: path.join(root, k), branch: `cowork/${run.id}/${k}` }
 
+    // 有任務會改依賴時整場都不共用 node_modules：junction 指向主工作區，安裝會直接改到使用者的環境，
+    // 平行任務也會互相干擾；下游任務還會用到舊的依賴。代價是 agent 要自己安裝。
+    const depTasks = board.tasks.filter((t) => touchesDependencies(t.scope)).map((t) => t.id)
+    const link = o.linkDeps && depTasks.length === 0
     excludeCoworkDir(run.repo.commonDir)
     const created: string[] = []
     try {
       for (const k of keys) {
         await addWorktree(run.repo.root, worktrees[k].path, worktrees[k].branch, run.repo.baseCommit)
         created.push(worktrees[k].path)
-        if (o.linkDeps) await linkNodeModules(run.repo.root, worktrees[k].path)
+        worktrees[k].depsLinked = link ? await linkNodeModules(run.repo.root, worktrees[k].path) : false
       }
     } catch (e) {
       // 建到一半失敗：收掉已建的 worktree 與分支，run 維持在已核准
@@ -115,6 +125,7 @@ export class CoworkExecutor {
       startedAt: this.host.now(),
       bypass: o.bypass,
       linkDeps: o.linkDeps,
+      ...(o.linkDeps && depTasks.length ? { depsLinkSkippedFor: depTasks } : {}),
       root,
       worktrees,
       tasks,
@@ -175,6 +186,7 @@ export class CoworkExecutor {
     // 同步設成 running，排程才不會重複啟動同一個任務
     te.status = 'running'
     te.error = undefined
+    te.scopeReview = undefined
     te.startedAt = this.host.now()
     if (o.fresh) te.sessionId = undefined
     const followUp = !!o.message && !!te.sessionId
@@ -212,12 +224,12 @@ export class CoworkExecutor {
     const depSummaries = task.dependsOn.map((d) => {
       const dt = board.tasks.find((t) => t.id === d)
       const last = [...(ex.tasks[d]?.turns || [])].reverse().find((t) => t.role === 'agent' && t.text)
-      return { id: d, title: dt?.title || d, summary: last?.text || '' }
+      return { id: d, title: dt?.title || d, summary: last?.text || '', changedFiles: ex.tasks[d]?.changedFiles, result: ex.tasks[d]?.result }
     })
     // 接續 session 只送使用者的話；沒有 session（例如上次沒能啟動）就重新交辦並附上這段話
     const prompt = followUp
       ? o.message!
-      : buildExecPrompt(run, task, { branch: wt.branch, deps: depSummaries }) +
+      : buildExecPrompt(run, task, { branch: wt.branch, deps: depSummaries, depsLinked: wt.depsLinked }) +
         (o.message ? `\n\nAdditional instructions from the user:\n${o.message}` : '')
     const userTurn: CoworkTurn = { role: o.message ? 'user' : 'cowork', text: (o.message || prompt).slice(0, 8000), at: this.host.now() }
     const agentTurn: CoworkTurn = { role: 'agent', text: '', at: this.host.now(), progress: [], running: true }
@@ -225,8 +237,16 @@ export class CoworkExecutor {
     run.log.push({ t: 'task-start', taskId, agent: te.agent, followUp: !!o.message, at: this.host.now() })
     this.host.save(run)
 
-    const cli = this.host.resolveExecCli(te.agent)
-    if ('error' in cli) return this.endTurn(run, taskId, agentTurn, { ok: false, error: `${te.agent} is not available: ${cli.error}` })
+    // 先登記 controller 再等 resolveExecCli（可能要跑 where）：等待中按停止也會讓下面的 runProcess 立刻收掉
+    const ac = new AbortController()
+    const set = this.controllers.get(run.id) || new Set()
+    set.add(ac)
+    this.controllers.set(run.id, set)
+    const cli = await this.host.resolveExecCli(te.agent)
+    if ('error' in cli) {
+      set.delete(ac)
+      return this.endTurn(run, taskId, agentTurn, { ok: false, error: `${te.agent} is not available: ${cli.error}` })
+    }
 
     const n = te.turns.length
     const outFile = path.join(this.host.dirOf(run), 'exec', `${taskId}-${n}.last.txt`)
@@ -243,10 +263,6 @@ export class CoworkExecutor {
 
     let final: { ok: boolean; text: string; error?: string } | null = null
     let lastText = ''
-    const ac = new AbortController()
-    const set = this.controllers.get(run.id) || new Set()
-    set.add(ac)
-    this.controllers.set(run.id, set)
     this.clockStart(run)
     let result
     try {
@@ -291,8 +307,10 @@ export class CoworkExecutor {
     const f = final as { ok: boolean; text: string; error?: string } | null
     if (f && f.ok && result.code === 0) {
       const outText = inv.outFile && fs.existsSync(inv.outFile) ? fs.readFileSync(inv.outFile, 'utf8') : ''
-      agentTurn.text = (f.text || lastText || outText || agentTurn.text).slice(0, MAX_TEXT)
-      return this.endTurn(run, taskId, agentTurn, { ok: true, followUp: !!o.message })
+      const full = f.text || lastText || outText || agentTurn.text
+      agentTurn.text = full.slice(0, MAX_TEXT)
+      // 結構化結果在回覆最後；從完整文字取，不受顯示用的截斷影響
+      return this.endTurn(run, taskId, agentTurn, { ok: true, followUp: !!o.message, result: parseExecResult(full) })
     }
     const why = f?.error || (result.code !== 0 ? `exit ${result.code}: ${result.stderr.trim().slice(-400)}` : 'no result')
     return this.endTurn(run, taskId, agentTurn, { ok: false, error: why })
@@ -302,7 +320,7 @@ export class CoworkExecutor {
     run: CoworkRun,
     taskId: string,
     agentTurn: CoworkTurn,
-    r: { ok: boolean; error?: string; cancelled?: boolean; followUp?: boolean }
+    r: { ok: boolean; error?: string; cancelled?: boolean; followUp?: boolean; result?: ExecResult }
   ): Promise<void> {
     const ex = run.execution!
     const te = ex.tasks[taskId]
@@ -310,22 +328,26 @@ export class CoworkExecutor {
     agentTurn.running = false
     te.endedAt = this.host.now()
     if (r.ok) {
-      let commit: string | null = null
+      // 追問那一輪沒附結果區塊時，保留上一輪的
+      if (r.result) te.result = r.result
+      let files: string[]
       try {
-        const msg = `cowork(${run.id}): ${task.id} ${task.title}${r.followUp ? ' (follow-up)' : ''}`
-        commit = await commitAll(ex.worktrees[te.worktree].path, msg)
+        files = await changedFiles(ex.worktrees[te.worktree].path)
       } catch (e) {
-        agentTurn.error = `Could not commit: ${(e as Error).message}`
-        te.status = 'failed'
-        te.error = agentTurn.error
-        run.log.push({ t: 'task-failed', taskId, message: te.error, at: this.host.now() })
+        return this.failTask(run, taskId, agentTurn, `Could not read the changes: ${(e as Error).message}`)
+      }
+      const outside = filesOutsideScope(task.scope, files)
+      if (outside.length) {
+        // 越界的改動先不 commit：使用者決定接受、還原，或追問 agent 自己收拾
+        te.status = 'blocked'
+        te.scopeReview = { files: outside, followUp: !!r.followUp }
+        te.error = `Changed ${outside.length} file(s) outside the task scope: ${outside.slice(0, 10).join(', ')}${outside.length > 10 ? ', …' : ''}`
+        run.log.push({ t: 'task-scope', taskId, files: outside, at: this.host.now() })
         this.host.save(run)
         this.schedule(run)
         return
       }
-      if (commit) te.commits.push(commit)
-      te.status = 'done'
-      run.log.push({ t: 'task-done', taskId, commit, at: this.host.now() })
+      return this.commitTask(run, taskId, agentTurn, !!r.followUp)
     } else {
       agentTurn.error = r.error
       te.status = r.cancelled ? 'cancelled' : 'failed'
@@ -334,6 +356,71 @@ export class CoworkExecutor {
     }
     this.host.save(run)
     this.schedule(run)
+  }
+
+  /** commit 這個任務 worktree 裡的改動並標成完成 */
+  private async commitTask(run: CoworkRun, taskId: string, agentTurn: CoworkTurn | null, followUp: boolean): Promise<void> {
+    const ex = run.execution!
+    const te = ex.tasks[taskId]
+    const task = currentBoard(run)!.tasks.find((t) => t.id === taskId)!
+    const dir = ex.worktrees[te.worktree].path
+    let commit: string | null = null
+    try {
+      const files = await changedFiles(dir)
+      const msg = `cowork(${run.id}): ${task.id} ${task.title}${followUp ? ' (follow-up)' : ''}`
+      commit = await commitAll(dir, msg)
+      if (commit) te.changedFiles = [...new Set([...(te.changedFiles || []), ...files])]
+    } catch (e) {
+      return this.failTask(run, taskId, agentTurn, `Could not commit: ${(e as Error).message}`)
+    }
+    if (commit) te.commits.push(commit)
+    te.status = 'done'
+    te.error = undefined
+    te.scopeReview = undefined
+    run.log.push({ t: 'task-done', taskId, commit, at: this.host.now() })
+    this.host.save(run)
+    this.schedule(run)
+  }
+
+  private failTask(run: CoworkRun, taskId: string, agentTurn: CoworkTurn | null, message: string): void {
+    const te = run.execution!.tasks[taskId]
+    if (agentTurn) agentTurn.error = message
+    te.status = 'failed'
+    te.error = message
+    run.log.push({ t: 'task-failed', taskId, message, at: this.host.now() })
+    this.host.save(run)
+    this.schedule(run)
+  }
+
+  // ── 越界改動：使用者接受或還原 ──────────────────────────────────────
+
+  private scopeTask(run: CoworkRun, taskId: string): { te: CoworkTaskExec; review: NonNullable<CoworkTaskExec['scopeReview']> } {
+    const ex = run.execution
+    const te = ex?.tasks[taskId]
+    if (!ex || !te) throw new ExecError('task-not-found')
+    if (ex.cleaned || te.status !== 'blocked' || !te.scopeReview) throw new ExecError('not-allowed')
+    if (Object.values(ex.tasks).some((x) => x.status === 'running' && x.worktree === te.worktree)) throw new ExecError('busy')
+    return { te, review: te.scopeReview }
+  }
+
+  /** 接受越界的改動：照原樣 commit */
+  async acceptScope(run: CoworkRun, taskId: string): Promise<void> {
+    const { review } = this.scopeTask(run, taskId)
+    run.log.push({ t: 'task-scope-resolved', taskId, action: 'accept', files: review.files, at: this.host.now() })
+    await this.commitTask(run, taskId, null, review.followUp)
+  }
+
+  /** 還原越界的改動（回到 HEAD；新增的檔刪掉），scope 內的改動照常 commit */
+  async revertScope(run: CoworkRun, taskId: string): Promise<void> {
+    const { te, review } = this.scopeTask(run, taskId)
+    const dir = run.execution!.worktrees[te.worktree].path
+    try {
+      await revertFiles(dir, review.files)
+    } catch (e) {
+      throw new ExecError('revert-failed', (e as Error).message)
+    }
+    run.log.push({ t: 'task-scope-resolved', taskId, action: 'revert', files: review.files, at: this.host.now() })
+    await this.commitTask(run, taskId, null, review.followUp)
   }
 
   // ── 收尾：整合成一條分支，給使用者看 diff ─────────────────────────────
@@ -408,6 +495,7 @@ export class CoworkExecutor {
     te.status = 'pending'
     te.sessionId = undefined
     te.error = undefined
+    te.scopeReview = undefined
     if (run.phase === 'review') run.phase = 'executing'
     this.host.save(run)
     this.schedule(run)

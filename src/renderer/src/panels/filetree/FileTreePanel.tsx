@@ -1,7 +1,7 @@
 /// <reference path="../../../../preload/index.d.ts" />
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { openFile, useWorkbench, setWorkspaceRoot as setGlobalWorkspaceRoot, bumpGit } from '@/store'
-import { IconFolder } from '@/components/Icons'
+import { IconFolder, IconExternalLink } from '@/components/Icons'
 import { useTranslation } from '@/i18n'
 import './FileTreePanel.css'
 
@@ -386,6 +386,19 @@ export default function FileTreePanel(): JSX.Element {
             <OpenFolderIcon />
             <span>{t('fileTree.openFolder')}</span>
           </button>
+          {workspaceRoot && (
+            <button
+              className="filetree-btn filetree-btn-icon"
+              onClick={() => {
+                window.api.files.revealWorkspace().then((r) => {
+                  if (!r.ok) console.error('Failed to open project folder:', r.error)
+                })
+              }}
+              title={t('fileTree.revealFolder')}
+            >
+              <IconExternalLink size={13} />
+            </button>
+          )}
           <button
             className="filetree-btn filetree-btn-icon"
             onClick={() => refreshTree(workspaceRoot, true)}
