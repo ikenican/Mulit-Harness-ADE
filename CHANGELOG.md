@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.1.42] - 2026-10-28
+
+### Added / 新增
+- **記憶同步**：設定 → 記憶同步，可把 `.project-memory/`（AI 交接筆記）放在私人 GitHub repo、OneDrive 或 Google Drive，在多台電腦間同步，不會進入公開的專案 repo。預設關閉；關閉時不同步也不連網。公開 repo 一律拒絕。（PR #48，原 #47）
+- **Memory sync**: Settings → Memory sync keeps `.project-memory/` in a private GitHub repository or a OneDrive / Google Drive folder across computers, never in the public project repository. Off by default and offline while off; public repositories are refused.
+- 拖曳標題列的終端／編輯器圖示可交換左右位置，並可各自開關；檔案樹新增「在檔案總管開啟專案資料夾」；切換工作區時選取該專案最近使用的 CLI。
+- Drag the terminal/editor icons to swap sides and toggle each pane; open the project folder from the file tree; switching workspace selects that project's last CLI.
+- Cowork：任務會顯示主席的指派理由；agent 改到任務範圍外的檔案時不會 commit，任務會停下讓你處理；下游任務會收到前置任務的改動清單與交接內容。
+- Cowork shows each task's assignment reason, holds out-of-scope changes for review, and passes structured handoffs to dependent tasks.
+
+### Changed / 變更
+- 儀表板的會話紀錄與 token 掃描改在 worker thread 執行；CLI 偵測與 `--help` 探測不再卡住主行程。新的 app 圖示。
+- Dashboard scanning runs in a worker thread and CLI detection no longer blocks the main process. New app icon.
+- CLI 安裝改為把官方安裝指令貼進可見的終端，失敗時改用 npm（Codex：winget 再 npm）；shell 安裝不再隱藏 404。
+- CLI installs paste the official command into a visible terminal and fall back to npm (Codex: winget, then npm); shell installs no longer hide a 404.
+
+### Security / 安全
+- 公開 repo 的歷史已移除 `.project-memory/`、`AGENTS.md`、`.agents/`。pre-commit 會擋下這些路徑（包含 force-add）。記憶同步關閉時也會替換舊版 `commit-handoff.sh`（舊版會用 `git add -f` 把記憶提交進專案 repo）。
+- Project memory and generated entry files were removed from the public history. The pre-commit hook now blocks them, including force-adds. The legacy `commit-handoff.sh`, which force-added memory into the project repository, is replaced even when memory sync is off.
+
+### Notes / 備註
+- 記憶同步只有本機自動化測試，尚未實測真正的 GitHub／OneDrive／Google Drive 設定流程。Linux 維持獨立的 v0.1.0。
+- Memory sync was covered by local automated checks only; real GitHub / OneDrive / Google Drive setup has not been tested. Linux remains the separate v0.1.0.
+
 ## [0.1.41] - 2026-10-16
 
 ### Added / 新增
