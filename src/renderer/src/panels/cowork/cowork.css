@@ -1387,3 +1387,27 @@
   width: 100%;
   max-width: none;
 }
+
+/* 越界改動：還沒 commit，等使用者決定 */
+.cw-scope-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 28%, transparent);
+}
+.cw-scope-review .cw-field-label {
+  color: var(--red);
+}
+.cw-assign-reason {
+  margin-top: var(--space-2);
+}
+.cw-assumptions {
+  margin: var(--space-3) 0;
+}
+.cw-exec-result {
+  margin-top: var(--space-3);
+}

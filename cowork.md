@@ -6,6 +6,19 @@
 - 原稿基準：`master` @ `b6c7841`（v0.1.38）
 - 驗證範圍：讀過原始碼、CLI help 與官方文件；**未執行模型任務，未實作 Cowork**
 
+> **閱讀前先看（2026-10-24 整理）：本文件混合了原始設計與後來的實作，以下章節已被取代或與程式碼不一致。** 以程式碼與 `docs/cowork-architecture.md` 為準。
+>
+> | 章節 | 現況 |
+> |---|---|
+> | §4.1「不讓 agent 自由討論」 | 只適用 Project 規劃。之後新增的 Discussion 模式讓參與者依序看到前面的公開發言（DEC-008）。 |
+> | §2.3「發現越界時先顯示 diff」 | 2026-10-24 起實作：每輪結束後比對改動與 scope，越界的檔不 commit，任務停在 blocked，由使用者還原、接受或追問（`executor.ts`）。 |
+> | §2.2「不預設共用含 native module 的 `node_modules`」 | 背景執行可選擇以 junction 共用；2026-10-24 起，只要有任務的 scope 會改依賴（package.json、lockfile），整場就不共用。 |
+> | §2、§5 的 P2 設計（專用 PTY 派送、`cowork.task()` MCP 回報、輪流執行） | 已被 §12.5 的 headless 背景執行取代，沒有實作 MCP 回報。 |
+> | §3.1 能力表「Claude Code 本機 PATH 上找不到、待實測」 | §12.1 已有 Claude Code 2.1.292 的實測結果。 |
+> | §12.5「尚未實作 `resources` 的互斥」 | 已實作（`executor.ts` 排程時檢查）。 |
+> | §12.1 各 CLI 的唯讀參數與 Antigravity 隔離方案 | 是 Claude Code 2.1.292、Codex 0.160.1、Antigravity 1.2.14 的實測結果；CLI 更新後需要重測。 |
+> | 任務間交接（§2.3「只傳 summary 與 commit hash」） | 2026-10-24 起：前置任務以 git 取得的改動清單，加上 agent 回報的 `cowork-result` 區塊（介面、已驗證、未驗證、備註）完整交給下游，文字摘要只當補充。 |
+
 | 標記 | 意思 |
 |---|---|
 | ✅ 原始碼／help 確認 | 確認介面或選項存在，不代表端到端實測通過 |

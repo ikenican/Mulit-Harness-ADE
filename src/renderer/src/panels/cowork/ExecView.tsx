@@ -6,6 +6,7 @@ import AppleAlertDialog from '@/components/AppleAlertDialog'
 import {
   agentLabel,
   currentBoard,
+  touchesDependencies,
   type CoworkExecMode,
   type CoworkResult,
   type CoworkRun,
@@ -28,6 +29,7 @@ export function ExecLauncher({ run, t, act, onChangePlan }: { run: CoworkRun; t:
   const [bypass, setBypass] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const agents = [...new Set((currentBoard(run)?.tasks || []).map((x) => x.assignee))]
+  const depTasks = (currentBoard(run)?.tasks || []).filter((x) => touchesDependencies(x.scope)).map((x) => x.id)
 
   useEffect(() => {
     window.api.cowork.bypass().then((r) => setBypass(r.ok ? r.data : null))
@@ -61,6 +63,7 @@ export function ExecLauncher({ run, t, act, onChangePlan }: { run: CoworkRun; t:
         <input type="checkbox" checked={linkDeps} onChange={(e) => setLinkDeps(e.target.checked)} />
         <span>{t('cowork.execLinkDeps')}</span>
       </label>
+      {linkDeps && depTasks.length > 0 && <div className="cw-muted small">{t('cowork.execLinkDepsSkipped', { tasks: depTasks.join(', ') })}</div>}
       <div className={`cw-exec-perm ${bypass ? 'bypass' : ''}`}>
         {bypass === null ? '' : bypass ? t('cowork.execBypassOn') : t('cowork.execBypassOff')}
       </div>
@@ -148,6 +151,7 @@ function ExecTaskCard({
           <code>{wt.branch}</code>
           {te.commits.length > 0 && <span>· {t('cowork.execCommits', { count: te.commits.length })}</span>}
           {te.usage?.costUsd ? <span>· ${te.usage.costUsd.toFixed(2)}</span> : null}
+          {wt.depsLinked === false && ex.linkDeps && <span>· {t('cowork.depsNotLinked')}</span>}
         </div>
       )}
       <div className="cw-exec-turns">
@@ -168,9 +172,51 @@ function ExecTaskCard({
         )}
       </div>
       {te.status === 'pending' && <div className="cw-muted small">{t('cowork.execWaiting', { deps: task.dependsOn.join(', ') || '—' })}</div>}
+      {te.result && (te.result.interfaces.length > 0 || te.result.unverified.length > 0) && (
+        <details className="cw-answers cw-exec-result">
+          <summary>{t('cowork.execResult')}</summary>
+          {te.result.interfaces.length > 0 && (
+            <>
+              <div className="cw-field-label">{t('cowork.execInterfaces')}</div>
+              <ul className="cw-list">{te.result.interfaces.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </>
+          )}
+          {te.result.verified.length > 0 && (
+            <>
+              <div className="cw-field-label">{t('cowork.execVerified')}</div>
+              <ul className="cw-list">{te.result.verified.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </>
+          )}
+          {te.result.unverified.length > 0 && (
+            <>
+              <div className="cw-field-label">{t('cowork.execUnverified')}</div>
+              <ul className="cw-list">{te.result.unverified.map((x, i) => <li key={i}>{x}</li>)}</ul>
+            </>
+          )}
+        </details>
+      )}
+      {te.status === 'blocked' && te.scopeReview && canTalk && (
+        <div className="cw-scope-review" role="alert">
+          <div className="cw-field-label">{t('cowork.scopeReviewTitle', { count: te.scopeReview.files.length })}</div>
+          <div className="cw-scope">
+            {te.scopeReview.files.map((f) => (
+              <code key={f}>{f}</code>
+            ))}
+          </div>
+          <div className="cw-muted small">{t('cowork.scopeReviewHint')}</div>
+          <div className="cw-task-actions">
+            <button type="button" className="cw-btn sm" onClick={() => act(window.api.cowork.execRevertScope(run.id, task.id))}>
+              {t('cowork.scopeRevert')}
+            </button>
+            <button type="button" className="cw-btn sm" onClick={() => act(window.api.cowork.execAcceptScope(run.id, task.id))}>
+              {t('cowork.scopeAccept')}
+            </button>
+          </div>
+        </div>
+      )}
       {(canTalk || canRetry) && te.status !== 'running' && te.status !== 'pending' && (
         <div className="cw-task-actions">
-          {canTalk && te.status !== 'blocked' && (
+          {canTalk && (te.status !== 'blocked' || !!te.scopeReview) && (
             <button type="button" className="cw-btn sm" onClick={() => onFollowUp(task.id)}>
               {t('cowork.execFollowUp')}
             </button>

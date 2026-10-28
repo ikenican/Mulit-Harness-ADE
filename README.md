@@ -23,7 +23,7 @@ React + Vite.
   natively as a child process via `node-pty`. No keys stored; the CLIs use their
   own subscriptions/auth.
 - **Cowork meetings** — independent tabs for Claude Code, Codex, and Antigravity; visible discussion, a selectable recorder, chair conclusions, code-aware project planning, and background execution after user approval. See [Cowork](#cowork) and its [rendered architecture](docs/architecture.html#cowork).
-- **Collapsible Developer Mode preview** — the center pane starts collapsed and can be toggled from the title bar.
+- **Adjustable layout** — drag the terminal and editor icons in the title bar to swap their sides, and switch each pane on or off.
 - **Preview & Documents** — live Markdown / HTML preview that auto-syncs on edit and save, plus built-in document viewing for Word, Excel, PowerPoint, and PDF.
 - **Vibe Coding Mode** — an alternative, task-first layout (Settings → Appearance → Work Mode): an icon rail (Sessions / Status / Handoff / Files / Git / Settings) whose panels fade in on hover and pin on click, the agent terminal in the middle, and the live result on the right. Dev-server URLs printed in the terminal (`http://localhost:PORT`) open automatically, and the Handoff panel summarises `.project-memory/handoff.md`. Developer Mode keeps the classic code-first layout.
 - **Dashboard & Telemetry** — session list plus token usage scanned from local CLI records (Claude Code, Codex, Antigravity), switchable between **All / 30d / 7d / Today** and split into input / cache read / output. Claude and Codex figures come from the CLIs' own usage records; Antigravity logs carry no token counts, so its figures are character-based estimates and are labelled as such. Includes CLI enable/disable filtering, folder grouping, and one-click workspace switching.
@@ -48,7 +48,7 @@ The executable, arguments, paths, and enable switch are local user settings, nev
 3. In Discussion, the chair speaks first and participants respond in order, seeing earlier public replies. Replies appear when each call completes; startup and first-output timings show progress. Send a follow-up to start another round, retry a failed speaker, or explicitly skip that speaker.
 4. Select a recorder and choose on-demand/context-limit summaries or a summary after every round. Records contain consensus, disagreements, and open questions; original messages remain available. **Ask the chair to conclude** produces a recommendation for your decision.
 5. A current chair conclusion can populate an editable Project proposal. Starting that proposal runs a fresh code-aware planning and review process. Review its task board and unresolved issues, then approve before executing. Further discussion makes the earlier conclusion stale and requires a new conclusion before conversion.
-6. Review background task results, then merge or clean up the execution worktrees. Closing a Cowork tab only closes its view; use **Cancel meeting** to stop a meeting. Saved meetings can be reopened from history; tab layouts and unsent drafts are session-local.
+6. Review background task results, then merge or clean up the execution worktrees. If an agent changed files outside its task scope, Cowork does not commit them: the task stops so you can revert those files, accept them, or follow up. Each task shows why the chair assigned it, and dependent tasks receive the earlier task's changed files (from Git) and its reported interfaces, checks and unverified points. When any task changes package.json or a lockfile, worktrees install their own dependencies instead of sharing `node_modules`. Closing a Cowork tab only closes its view; use **Cancel meeting** to stop a meeting. Saved meetings can be reopened from history; tab layouts and unsent drafts are session-local.
 
 **Settings → Cowork** controls default participants, chair, recorder, per-agent model/effort, and budgets for new meetings. Automatic effort uses lower effort for discussion, medium for opening proposals and summaries, and higher for review and conclusions, where the model supports it. Explicit effort choices take precedence.
 
@@ -63,6 +63,18 @@ These are call/time budgets, not a currency or token spending cap. Summaries, ch
 Multiple discussions and project-planning meetings may run concurrently, including in the same repository. **Actual background execution is limited to one run per repository until its execution is merged or cleaned up**; paused/review worktrees still hold that slot. Different repositories may execute concurrently. All tabs share each provider's account quota.
 
 Open the rendered [Cowork architecture and meeting flow](docs/architecture.html#cowork) in a browser. [Implementation notes](docs/cowork-architecture.md) cover storage, CLI isolation, scheduling and recovery.
+
+## Memory sync
+
+`.project-memory/` holds the handoff notes that Claude Code, Codex and Antigravity read and write. **Settings → Memory sync** keeps it in sync between your computers while keeping it out of the public project repository. It is off by default; while off, Workbench does no syncing at all (handoffs stay on this computer, no network, no extra tokens).
+
+1. Turn on the consent switch and choose where memory lives:
+   - **GitHub (private repository)** — versioned. Either install the GitHub CLI and let Workbench create the repository, or choose **Without installing gh** and click **Create private repository automatically**, then sign in to GitHub in the window Git opens (Git Credential Manager, bundled with Git for Windows). A fallback opens GitHub's new-repository page with the name and Private pre-filled; paste the URL back. Public repositories are always refused.
+   - **OneDrive / Google Drive** — pick a subfolder inside the synced drive; the drive app does the syncing and Workbench only reads and writes that folder. If the app is missing, Workbench pastes the official winget install command into a terminal; if it is installed but not signed in, Workbench opens it for you.
+2. Every project you open is linked automatically: its `.project-memory` becomes a link into the shared location (one folder per project), and the project repository stops tracking memory files with one small commit. GitHub mode pulls when a project opens and syncs in the background every 10 minutes.
+3. On another computer, enable memory sync with the same storage; projects link to the existing memory when opened.
+
+Switching storage later migrates linked projects on open and keeps the old copy. See [docs/two-pc-workflow.md](docs/two-pc-workflow.md) for a two-computer walkthrough.
 
 ## Installation
 
@@ -91,8 +103,8 @@ irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/inst
 Prefer manual download? Grab the setup package directly from GitHub:
 
 - 🚀 **[Download Latest Release](https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/latest)**
-- Download `Agent Workbench-<version>-setup.exe` and double-click to install.
-- *(Portable version: download portable archive and run `Agent Workbench.exe` directly without installation.)*
+- Download `Agent-Workbench-<version>-setup.exe` and double-click to install.
+- *(Portable version: download `Agent-Workbench-<version>-portable.zip`, extract it, and run `Agent Workbench.exe` directly without installation.)*
 
 ---
 
@@ -114,6 +126,8 @@ npm install
 npm run dev        # launch in development
 ```
 
+On Windows you can instead **double-click `dev.cmd`** in the repository folder. It installs dependencies on the first run (Node.js LTS required: `winget install OpenJS.NodeJS.LTS`) and starts the dev build, which uses its own settings folder (`%APPDATA%\agent-workbench-dev`) so it runs alongside an installed copy. Renderer changes reload live and main-process changes restart the app, so there is no need to package a build to try a change. `dev.cmd` only calls `dev.ps1` with `-ExecutionPolicy Bypass` for that one run, because Windows blocks running `.ps1` files by default.
+
 ## Build & Publish
 
 ```bash
@@ -133,13 +147,15 @@ Installer output goes to `release/`. Build config is in `electron-builder.yml`.
 src/main         Electron main process (IPC, git, pty, files, extensions)
 src/main/cowork   meeting orchestration, CLI runner, persistence, Git and execution
 src/main/remote  LAN remote bridge: HTTPS + WebSocket, local CA, web push, preview proxy
+src/main/memsync memory sync core (GitHub / OneDrive / Google Drive) and bundled memory scripts
 src/preload      the single IPC contract surface
 src/renderer/src React UI (editor / git / terminal / preview / dashboard panels)
 src/renderer/remote  the iPhone web app (second Vite entry, served by the bridge)
 src/shared       types and logic both sides use (remote protocol, detectors)
 docs/architecture.html  end-to-end architecture overview
 docs/cowork-architecture.md  Cowork flows and implementation boundaries
-.project-memory  shared cross-agent memory (handoff, protocol, decisions)
+.project-memory  shared cross-agent memory (handoff, protocol, decisions); local-only, not tracked in this repository
+dev.cmd / dev.ps1  double-click launcher for the dev build (Windows)
 ```
 
 ## iPhone remote control
@@ -288,7 +304,7 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 - **多 CLI 終端**——每個 CLI 各有一個 `xterm.js` 終端分頁，透過 `node-pty` 以子行程原生執行。
   不儲存金鑰；CLI 使用其自身的訂閱／驗證。
 - **Cowork 多 agent 會議**——獨立分頁、可見討論、指定摘要 agent、主席結論、專案規劃與核准後背景執行。支援 Claude Code、Codex、Antigravity；詳見下方〈Cowork 使用方式〉及 [架構圖](docs/architecture.html#cowork)。
-- **開發者模式中央預覽收合**——預設收合，可用標題列按鈕切換。
+- **可調整版面**——拖曳標題列的終端與編輯器圖示交換左右位置，並可各自開關。
 - **預覽與文件**——Markdown／HTML 即時預覽（編輯與存檔自動同步），並內建 Word、Excel、PowerPoint 與 PDF 檢視器。
 - **Vibe Coding 模式**——任務優先的另一種版面（設定 → 外觀 → 工作模式）：最左側圖示列（Sessions／Status／Handoff／Files／Git／Settings）游標移過去就淡入彈出、點擊可固定；中間是 Agent 終端，右側是即時成品。終端輸出的 dev server 網址（`http://localhost:PORT`）會自動開啟，Handoff 面板會整理 `.project-memory/handoff.md`。開發者模式維持原本程式碼優先的版面。
 - **儀表板與遙測**——從本機 CLI 紀錄（Claude Code、Codex、Antigravity）掃描 session 清單與 token 用量，可切換**總用量／30 天／7 天／今天**，並拆分輸入／快取讀取／輸出。Claude 與 Codex 取自 CLI 自己的用量紀錄；Antigravity 紀錄沒有 token 欄位，數字為字數估算並明確標示。支援 CLI 啟用連動、資料夾群組分類與一鍵工作區切換。
@@ -312,7 +328,7 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 
 - **Discussion 討論**：主席先發言，參與者依序看到前面的公開回覆並接續討論。一般資料夾也能使用。每次呼叫完成後顯示回覆，過程可查看啟動與首次輸出時間；追問會啟動下一輪。失敗時可重試或明確跳過該 agent。
 - **摘要與主席結論**：指定參與者作為摘要 agent，選擇按需／上下文達門檻時摘要，或每輪摘要。累積紀錄整理共識、歧見與待確認事項，原始訊息仍保留。「請主席總結」提出建議供使用者拍板；繼續追問後，必須重新總結才能轉專案。
-- **Project 專案**：可把最新主席結論轉成可編輯提案，或直接開始 Project。系統重新讀取 Git 專案、形成方案、獨立審查並由主席整合；使用者確認任務板與未決事項、核准後，才在 worktree 背景執行。完成後由使用者檢視、合併或清理。
+- **Project 專案**：可把最新主席結論轉成可編輯提案，或直接開始 Project。系統重新讀取 Git 專案、形成方案、獨立審查並由主席整合；使用者確認任務板與未決事項、核准後，才在 worktree 背景執行。完成後由使用者檢視、合併或清理。每個任務會顯示主席的指派理由；agent 若改到任務範圍以外的檔，這些改動不會 commit，任務會停下讓你還原、接受或追問。下游任務會拿到前置任務以 Git 取得的改動清單，以及它回報的介面、已驗證與未驗證事項。有任務會改 package.json 或 lockfile 時，worktree 不共用 `node_modules`，改由各自安裝。
 - **設定與預算**：Settings → Cowork 可調整參與者、主席、摘要 agent、模型／強度，以及新會議預算。模型顯示完整版本，沒有 Custom 輸入。自動強度依討論、摘要、審查等階段分配，手動選擇優先。
 
 | 預算 | 預設 | 設定範圍 |
@@ -326,6 +342,18 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 同一 repository 可同時開多場討論與規劃，但**實際背景執行同時限一場，直到合併或清理該次執行**；暫停或等待檢視的 worktree 仍占用名額。不同 repository 可同時執行，各分頁共用供應商帳號用量。關閉分頁只關閉畫面，要停止會議請按 Cancel meeting；紀錄可從歷史重新開啟，分頁版面與未送出草稿只保留於本次程式執行。
 
 以瀏覽器開啟 [架構總覽的 Cowork 章節](docs/architecture.html#cowork)，可查看已渲染的模組架構與會議流程圖；資料保存、隔離與恢復細節見 [實作筆記](docs/cowork-architecture.md)。
+
+## 記憶同步
+
+`.project-memory/` 是 Claude Code、Codex、Antigravity 共同讀寫的交接筆記。**設定 → 記憶同步**讓它在你的多台電腦間保持一致，同時不放進公開的專案 repo。預設關閉；關閉時 Workbench 完全不做同步（交接只存在本機，不連網路、不多花 token）。
+
+1. 打開同意開關，選擇記憶放哪裡：
+   - **GitHub（私人 repo）**——有版本紀錄。可以安裝 GitHub CLI 讓 Workbench 建立 repo，或選**不安裝 gh**，按**自動建立私人 repo**，再在 Git 跳出的視窗登入 GitHub（Git for Windows 內建的 Git Credential Manager）。備用方式會開啟名稱與 Private 都已預填的 GitHub 建立頁，建好後貼回網址。公開 repo 一律拒絕。
+   - **OneDrive／Google Drive**——在雲端硬碟的同步資料夾裡選一個子資料夾，由雲端硬碟程式負責同步，Workbench 只讀寫那個資料夾。沒安裝時，Workbench 會把官方 winget 安裝指令貼進終端；已安裝但沒登入時，會幫你開啟程式登入。
+2. 之後打開的每個專案都會自動接上：`.project-memory` 變成指向共用位置的連結（每個專案一個資料夾），專案 repo 用一個小提交停止追蹤記憶檔。GitHub 模式在打開專案時拉取，並每 10 分鐘背景同步。
+3. 另一台電腦開啟記憶同步並選同一個存放位置，打開專案時就會接上既有的記憶。
+
+之後換存放位置，已連結的專案會在打開時搬過去並保留舊的一份。兩台電腦的完整流程見 [docs/two-pc-workflow.md](docs/two-pc-workflow.md)。
 
 ## 安裝指南
 
@@ -352,8 +380,8 @@ irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/inst
 ### 方法二：直接自 GitHub Releases 下載
 
 - 🚀 **[前往最新發行頁面（GitHub Releases）](https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/latest)**
-- 下載 `Agent Workbench-<版本>-setup.exe` 雙擊即可安裝。
-- *(免安裝綠色版：解壓後直接雙擊 `Agent Workbench.exe` 即可使用)*
+- 下載 `Agent-Workbench-<版本>-setup.exe` 雙擊即可安裝。
+- *(免安裝綠色版：下載 `Agent-Workbench-<版本>-portable.zip`，解壓後直接雙擊 `Agent Workbench.exe` 即可使用)*
 
 ---
 
@@ -375,6 +403,8 @@ npm install
 npm run dev        # 開發模式啟動
 ```
 
+Windows 上也可以直接**雙擊 repo 資料夾裡的 `dev.cmd`**：第一次會自動安裝相依套件（需要 Node.js LTS：`winget install OpenJS.NodeJS.LTS`），然後啟動開發版。開發版使用獨立的設定資料夾（`%APPDATA%\agent-workbench-dev`），可以和已安裝的版本同時開。改畫面會即時刷新、改主行程會自動重啟，試改動不用重新打包。`dev.cmd` 只是用 `-ExecutionPolicy Bypass` 執行一次 `dev.ps1`，因為 Windows 預設禁止直接執行 `.ps1`。
+
 ## 建置與發佈 (Build & Publish)
 
 ```bash
@@ -394,13 +424,15 @@ npm run release    # （僅限專案維護者）一鍵自動編譯、打包並�
 src/main         Electron 主行程（IPC、git、pty、files、extensions）
 src/main/cowork   會議協調、CLI runner、保存、Git 與背景執行
 src/main/remote  區網遠端橋接：HTTPS + WebSocket、本機 CA、Web Push、預覽代理
+src/main/memsync 記憶同步核心（GitHub／OneDrive／Google Drive）與內建的記憶腳本
 src/preload      唯一的 IPC 契約介面
 src/renderer/src React UI（editor / git / terminal / preview / dashboard 面板）
 src/renderer/remote  iPhone 端網頁 App（第二個 Vite entry，由橋接層提供）
 src/shared       兩端共用的型別與邏輯（遠端協定、各種偵測）
 docs/architecture.html  端到端架構總覽
 docs/cowork-architecture.md  Cowork 功能流程與模組邊界
-.project-memory  跨 agent 共享記憶（handoff、protocol、decisions）
+.project-memory  跨 agent 共享記憶（handoff、protocol、decisions）；僅存本機，不納入版控
+dev.cmd / dev.ps1  Windows 雙擊啟動開發版
 ```
 
 ## iPhone 遠端控制

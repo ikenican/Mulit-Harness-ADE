@@ -1,2 +1,3 @@
 .githooks/* text eol=lf
 .project-memory/*.sh text eol=lf
+*.sh text eol=lf

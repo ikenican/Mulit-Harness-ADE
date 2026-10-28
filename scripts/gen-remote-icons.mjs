@@ -1,3 +1,4 @@
+// 已被 scripts/gen-app-icons.ps1 取代（2026-10-24 換成 build/icon-source.png 的新圖示）：執行這支會蓋回舊的程式繪製圖示。
 // 產生 iPhone 遠端控制 PWA 的主畫面圖示（src/renderer/public/remote-icon-*.png）。
 // 不依賴任何影像套件：直接算像素、用 zlib 寫 PNG。執行：node scripts/gen-remote-icons.mjs
 import { writeFileSync } from 'node:fs'

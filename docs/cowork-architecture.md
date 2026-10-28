@@ -28,7 +28,7 @@ Discussion is a public-turn conversation, not a display of private model reasoni
 
 Discussion 顯示公開回覆，每次追問開啟下一輪，不會自行無限討論。摘要 agent 保存累積結構化紀錄，原始訊息仍保留。尚未摘要的上下文達內部門檻（20 則或 18,000 個序列化字元）時，先濃縮最早尚未涵蓋的片段；手動／最終摘要會涵蓋剩餘片段，摘要失敗不推進涵蓋位置。
 
-A chair conclusion records which messages it covers. Further discussion makes it stale; only a current conclusion can populate a Project proposal. Conversion does not start planning or execution automatically. Project planning rereads repository context, validates structured proposals/reviews, and leaves unresolved issues for user decisions. Approval then starts background execution; completion still requires result review and a separate merge/cleanup action.
+A chair conclusion records which messages it covers. Further discussion makes it stale; only a current conclusion can populate a Project proposal. Conversion does not start planning or execution automatically. Project planning rereads repository context, validates structured proposals/reviews, and leaves unresolved issues for user decisions. Approval then starts background execution; completion still requires result review and a separate merge/cleanup action. Before each turn is committed, the changed files are compared with the task scope; out-of-scope files stay uncommitted and the task waits as blocked until the user reverts them, accepts them, or follows up. Dependent tasks receive the prerequisite's changed files from Git plus its `cowork-result` block (interfaces, verified, unverified, notes).
 
 主席結論保存涵蓋的訊息位置；後續發言會讓舊結論過期，僅最新結論可填入 Project 提案。轉換不會自動開始規劃或執行。Project 重新讀取專案並驗證方案／審查，未決事項交由使用者決定。核准後才背景執行，完成後仍須檢視結果並另行合併或清理。
 

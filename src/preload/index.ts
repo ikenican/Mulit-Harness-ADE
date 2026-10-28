@@ -32,6 +32,8 @@ const api = {
     openExternal: (path: string, customToolPath?: string): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('files:openExternal', path, customToolPath),
     showInFolder: (path: string): Promise<void> => ipcRenderer.invoke('files:showInFolder', path),
+    /** 在檔案總管／Finder 開啟這個視窗目前的專案資料夾 */
+    revealWorkspace: (): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('files:revealWorkspace'),
     stat: (path: string): Promise<FileStat> => ipcRenderer.invoke('files:stat', path),
     pickExecutable: (title?: string): Promise<string | null> =>
       ipcRenderer.invoke('files:pickExecutable', title),
@@ -69,13 +71,8 @@ const api = {
     planSync: (): Promise<FileChange[]> => ipcRenderer.invoke('ext:planSync'),
     applySync: (): Promise<{ written: string[] }> => ipcRenderer.invoke('ext:applySync'),
     trustWorkspace: (): Promise<boolean> => ipcRenderer.invoke('ext:trustWorkspace'),
-    installCodex: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('ext:installCodex'),
     getAgentInstallInfo: (agent: AgentId): Promise<AgentInstallInfo> =>
       ipcRenderer.invoke('ext:getAgentInstallInfo', agent),
-    installAgent: (
-      agent: AgentId
-    ): Promise<{ ok: boolean; message: string; installedPath?: string }> =>
-      ipcRenderer.invoke('ext:installAgent', agent),
     toggleItem: (kind: string, id: string, enabled: boolean, agent?: AgentId): Promise<boolean> =>
       ipcRenderer.invoke('ext:toggleItem', kind, id, enabled, agent)
   },
@@ -229,6 +226,28 @@ const api = {
       return () => ipcRenderer.removeListener('remote:status', listener)
     }
   },
+  // 記憶同步：專案記憶放進私人 GitHub repo 或 OneDrive／Google Drive 資料夾 —— main/ipc/memsync.ts、main/memsync/core.ts
+  memsync: {
+    state: (): Promise<MemSyncResult<MemSyncState>> => ipcRenderer.invoke('memsync:state'),
+    setConfig: (
+      patch: Partial<{ consent: boolean; backend: MemSyncBackend; repo: string; autoSync: boolean; autoLink: boolean }>
+    ): Promise<MemSyncResult<MemSyncState>> => ipcRenderer.invoke('memsync:setConfig', patch),
+    pickFolder: (): Promise<MemSyncResult<{ picked: boolean; state: MemSyncState }>> => ipcRenderer.invoke('memsync:pickFolder'),
+    launchCloudApp: (provider: 'onedrive' | 'gdrive'): Promise<MemSyncResult<boolean>> => ipcRenderer.invoke('memsync:launchCloudApp', provider),
+    setupRepo: (): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:setupRepo'),
+    /** 免 gh 一鍵建立：用 Git 的 GitHub 登入建立（或沿用）私人 repo */
+    createRepoViaGit: (name: string): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> =>
+      ipcRenderer.invoke('memsync:createRepoViaGit', name),
+    /** 免 gh：連結使用者自己建好的私人 repo（網址或 owner/repo） */
+    connectRepo: (input: string): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> =>
+      ipcRenderer.invoke('memsync:connectRepo', input),
+    linkProject: (): Promise<MemSyncResult<{ result: MemSyncLinkResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:linkProject'),
+    sync: (pullOnly?: boolean): Promise<MemSyncResult<{ result: MemSyncSyncResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:sync', pullOnly),
+    /** 開啟／切換專案時呼叫；記憶同步沒開啟時立刻回 null，不碰網路 */
+    onProjectOpen: (): Promise<MemSyncResult<{ pulled: MemSyncSyncResult | null; linked: MemSyncLinkResult | null } | null>> =>
+      ipcRenderer.invoke('memsync:onProjectOpen'),
+    openClone: (): Promise<void> => ipcRenderer.invoke('memsync:openClone')
+  },
   // Cowork 多 agent 規劃會議 —— main/ipc/cowork.ts（設計見 cowork.md）
   cowork: {
     capabilities: (force?: boolean): Promise<CoworkResult<{ agents: CoworkCapability[]; baseline: CoworkBaselineInfo }>> =>
@@ -279,6 +298,9 @@ const api = {
     execMessage: (runId: string, taskId: string, text: string): Promise<CoworkResult<void>> =>
       ipcRenderer.invoke('cowork:execMessage', runId, taskId, text),
     execRetry: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execRetry', runId, taskId),
+    // 越界改動：接受（照原樣 commit）或還原越界的檔
+    execAcceptScope: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execAcceptScope', runId, taskId),
+    execRevertScope: (runId: string, taskId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execRevertScope', runId, taskId),
     execPause: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execPause', runId),
     execResume: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execResume', runId),
     execMerge: (runId: string): Promise<CoworkResult<void>> => ipcRenderer.invoke('cowork:execMerge', runId),
@@ -437,6 +459,23 @@ export interface UpdaterStatus {
   }
   updateInfo?: UpdateInfo
   error?: string
+  /** 這個版本自己的更新來源（owner/repo）；官方版就是原作者的 repo */
+  channelRepo?: string
+  /** 只有 fork 版才有：原作者那邊的版本狀態，只提示、不自動安裝 */
+  upstream?: UpstreamStatus
+}
+
+export interface UpstreamStatus {
+  repo: string
+  /** 這個 fork 版基於原作者的哪一版 */
+  baseVersion: string
+  latestVersion?: string
+  latestReleaseDate?: string
+  latestUrl?: string
+  /** 原作者有比 baseVersion 新的版本 */
+  newer: boolean
+  checkedAt?: number
+  error?: string
 }
 
 export interface SessionTokenBreakdown {
@@ -547,6 +586,8 @@ export interface AgentInstallInfo {
   name: string
   command: string
   targetPath: string
+  /** 在哪一種終端執行 command（安裝指令會貼進看得見的終端，由使用者按 Enter） */
+  shell: 'powershell' | 'bash'
 }
 
 /** 某個擴充在某個 agent 上的狀態 */
@@ -632,6 +673,72 @@ export interface ConnectionInfo {
   isSet: boolean
   usedBy: string[]
 }
+
+// ── 記憶同步（main/memsync/core.ts 的結果型別） ────────────────────────
+/** 記憶放哪裡：GitHub 私人 repo，或由 OneDrive／Google Drive 同步的資料夾 */
+export type MemSyncBackend = 'github' | 'onedrive' | 'gdrive'
+export interface MemSyncConfig {
+  /** 使用者同意開啟的時間；null = 未同意 */
+  consentAt: number | null
+  backend: MemSyncBackend | null
+  /** 私人記憶 repo 名稱（repo 或 owner/repo） */
+  repo: string
+  /** 這台電腦上記憶 repo 的 clone 位置（GitHub 模式） */
+  clonePath: string
+  repoFull: string | null
+  login: string | null
+  /** 雲端硬碟模式選的資料夾；記憶只存在這裡 */
+  folderPath: string | null
+  /** GitHub 模式：開專案時拉取＋每 10 分鐘背景同步 */
+  autoSync: boolean
+  /** 開專案時把有記憶的專案自動接上 */
+  autoLink: boolean
+}
+export interface MemSyncState {
+  config: MemSyncConfig
+  /** 偵測到的雲端硬碟根目錄 */
+  cloudRoots: { onedrive: string[]; gdrive: string[] }
+  /** 雲端硬碟程式是否已安裝（已安裝但沒登入時 cloudRoots 會是空的） */
+  cloudApps: { onedrive: { installed: boolean; exe?: string }; gdrive: { installed: boolean; exe?: string } }
+  /** 目前的記憶根目錄（clone 或資料夾），尚未選擇時為 null */
+  root: string | null
+  rootReady: boolean
+  gitMissing: boolean
+  gh: { installed: boolean; loggedIn: boolean; login?: string }
+  clone: { exists: boolean; origin?: string; ahead?: number; behind?: number; dirty?: boolean }
+  project: {
+    key: string
+    target: string
+    linked: boolean
+    linkedElsewhere: boolean
+    linkedTo?: string
+    linkedToOldStore?: boolean
+    hasLocalMemory: boolean
+    hasRemoteMemory: boolean
+    tracked: string[]
+  } | null
+  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string }
+}
+export interface MemSyncRepoResult {
+  repo: string
+  created: boolean
+  cloned: boolean
+  clonePath: string
+}
+export interface MemSyncLinkResult {
+  key: string
+  target: string
+  source: 'local' | 'repo' | 'already-linked'
+  backup?: string
+  projectCommit?: string
+}
+export interface MemSyncSyncResult {
+  committed: boolean
+  pulled: boolean
+  pushed: boolean
+  error?: string
+}
+export type MemSyncResult<T> = { ok: true; data: T } | { ok: false; code: string; message: string }
 
 export interface RemoteStatus {
   enabled: boolean

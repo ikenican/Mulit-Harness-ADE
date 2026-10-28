@@ -5,7 +5,7 @@ import { execFile, exec } from 'child_process'
 import { promisify } from 'util'
 import { EventEmitter } from 'events'
 import { workspace } from '../index'
-import { findCli } from '../ext/paths'
+import { findCliAsync } from '../ext/paths'
 import type { AgentId, WorkbenchSettings } from '../../preload/index'
 import { sanitizeCoworkSettings } from '../../shared/cowork'
 import { sanitizeCustomAgent } from '../../shared/customAgent'
@@ -561,7 +561,7 @@ export function registerSettingsHandlers(): void {
 
         // 若不是絕對路徑且不帶路徑斜線，先透過 findCli 尋找實體路徑（如 'codex', 'agy', 'claude'）
         if (!target.includes('/') && !target.includes('\\')) {
-          const found = findCli(target)
+          const found = await findCliAsync(target)
           if (found) target = found
         }
 

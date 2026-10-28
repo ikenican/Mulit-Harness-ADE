@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useWorkbench, setTheme, bumpSettings, setUiMode } from '@/store'
+import { useWorkbench, setTheme, bumpSettings, setUiMode, pasteInNewShell } from '@/store'
 import { useTranslation } from '@/i18n'
 import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import RemoteSettings from './RemoteSettings'
 import CoworkSettings from './CoworkSettings'
+import MemorySyncSettings from './MemorySyncSettings'
 import CustomAgentSettings from './CustomAgentSettings'
 import {
   IconSun,
@@ -449,40 +450,15 @@ export default function SettingsModal({
     }
   }
 
-  const handleConfirmInstall = async (): Promise<void> => {
+  // 安裝指令貼進一個新的、看得見的終端，由使用者自己按 Enter 執行。
+  // 不再由 App 在背景啟動隱藏的 PowerShell：那種「下載後直接執行」的行為會被防毒軟體判成惡意程式，使用者也看不到實際在跑什麼。
+  const handleConfirmInstall = (): void => {
     if (!installConfirmAgent) return
-    const id = installConfirmAgent.id
-    const agentName = installConfirmAgent.name
+    const { id, command, shell } = installConfirmAgent
     setInstallConfirmAgent(null)
-
-    setInstallingAgent((prev) => ({ ...prev, [id]: true }))
-    setDetectFeedback((prev) => {
-      const next = { ...prev }
-      delete next[id]
-      return next
-    })
-
-    try {
-      const res = await window.api.ext.installAgent(id)
-      if (res.ok) {
-        window.api.notify.show(agentName, res.message)
-        // 自動重新偵測並套用路徑
-        await handleDetectCli(id)
-      } else {
-        setDetectFeedback((prev) => ({
-          ...prev,
-          [id]: { type: 'fail', msg: res.message }
-        }))
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setDetectFeedback((prev) => ({
-        ...prev,
-        [id]: { type: 'fail', msg: `Installation failed: ${msg}` }
-      }))
-    } finally {
-      setInstallingAgent((prev) => ({ ...prev, [id]: false }))
-    }
+    pasteInNewShell(command, shell)
+    setDetectFeedback((prev) => ({ ...prev, [id]: { type: 'ok', msg: t('settings.installPasted') } }))
+    onClose()
   }
 
   const handleDetectAll = async (): Promise<void> => {
@@ -854,6 +830,17 @@ export default function SettingsModal({
                 <IconCowork size={14} />
               </div>
               <span className="macos-sidebar-item-text">{t('settings.coworkTab')}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`macos-sidebar-item ${tab === 'memsync' ? 'active' : ''}`}
+              onClick={() => setTab('memsync')}
+            >
+              <div className="macos-icon-squircle" style={{ background: '#475569' }}>
+                <IconShield size={14} />
+              </div>
+              <span className="macos-sidebar-item-text">{t('memsync.tab')}</span>
             </button>
 
             <button
@@ -1574,6 +1561,23 @@ export default function SettingsModal({
             </>
           )}
 
+          {tab === 'memsync' && (
+            <>
+              <div className="macos-settings-header">
+                <div className="macos-settings-header-top">
+                  <div>
+                    <h2 className="macos-settings-title">{t('memsync.title')}</h2>
+                    <p className="macos-settings-desc">{t('memsync.desc')}</p>
+                  </div>
+                  <button type="button" className="macos-close-btn" onClick={onClose} title={t('settings.closeEsc')}>
+                    <IconClose size={12} />
+                  </button>
+                </div>
+              </div>
+              <MemorySyncSettings />
+            </>
+          )}
+
           {tab === 'cowork' && (
             <>
               <div className="macos-settings-header">
@@ -1634,6 +1638,11 @@ export default function SettingsModal({
                           ? t('settings.channelInstalled')
                           : t('settings.channelPortable')}
                       </span>
+                      {updaterStatus?.upstream && (
+                        <span className="macos-channel-badge" title={updaterStatus.channelRepo}>
+                          {t('settings.forkBadge', { base: updaterStatus.upstream.baseVersion || '?' })}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1753,6 +1762,50 @@ export default function SettingsModal({
                         ⚠️ {updaterStatus.error}
                       </div>
                     )}
+
+                    {/* fork 版：原作者的版本只提示、不自動安裝（會蓋掉 fork 的改動） */}
+                    {updaterStatus?.upstream && (
+                      <div className="macos-row">
+                        <div className="macos-row-main" style={{ padding: '14px 16px' }}>
+                          <div className="macos-row-left" style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                            {updaterStatus.upstream.newer ? (
+                              <IconDownload size={18} style={{ color: 'var(--orange)', flexShrink: 0 }} />
+                            ) : (
+                              <IconCheck size={18} style={{ color: 'var(--green)', flexShrink: 0 }} />
+                            )}
+                            <div className="macos-row-info">
+                              <div className="macos-row-title-row">
+                                <span className="macos-row-title">
+                                  {updaterStatus.upstream.newer
+                                    ? t('settings.upstreamNewer', { version: updaterStatus.upstream.latestVersion || '' })
+                                    : updaterStatus.upstream.latestVersion
+                                    ? t('settings.upstreamCurrent')
+                                    : t('settings.upstreamUnknown')}
+                                </span>
+                              </div>
+                              <span className="macos-row-sub">
+                                {t('settings.upstreamSub', {
+                                  repo: updaterStatus.upstream.repo,
+                                  base: updaterStatus.upstream.baseVersion || '?',
+                                  latest: updaterStatus.upstream.latestVersion || '—'
+                                })}
+                                {updaterStatus.upstream.error ? ` · ${updaterStatus.upstream.error}` : ''}
+                              </span>
+                            </div>
+                          </div>
+                          {updaterStatus.upstream.latestUrl && (
+                            <button
+                              type="button"
+                              className="macos-btn-secondary"
+                              style={{ fontSize: '11.5px', padding: '4px 11px', flexShrink: 0 }}
+                              onClick={() => window.api.updater.openRelease(updaterStatus.upstream?.latestUrl)}
+                            >
+                              {t('settings.openUpstreamRelease')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1831,6 +1884,8 @@ export default function SettingsModal({
                 t('settings.footerAboutHint')
               ) : tab === 'cowork' ? (
                 t('settings.footerCoworkHint')
+              ) : tab === 'memsync' ? (
+                t('memsync.footerHint')
               ) : (
                 t('settings.footerGeneralHint')
               )}

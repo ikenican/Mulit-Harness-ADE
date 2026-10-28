@@ -1893,3 +1893,20 @@ details.cw-card > summary {
     background: color-mix(in srgb, var(--label-3) 10%, var(--surface)) !important;
   }
 }
+
+.cw-scope-review {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger, #d33) 35%, transparent);
+}
+.cw-scope-review ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+.cw-scope-review code {
+  word-break: break-all;
+}

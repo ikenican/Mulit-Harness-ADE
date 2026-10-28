@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# Git pre-commit hook
-set -e
-
-# Whitespace check
-git diff --cached --check
-
-echo "Pre-commit check passed."
+# Project-repository guard. Enable per clone with: git config core.hooksPath .githooks
+#
+# Project memory (.project-memory/) and the entry files generated from it (AGENTS.md,
+# .agents/) are local-only and gitignored: they sync through Settings > Memory sync, never through
+# this public repository. Block them even when force-added. Deleting them (untracking) is allowed.
+# No whitespace or "memory not staged" checks: Cowork commits each task in a worktree of this repo
+# and those commits never touch memory, so such checks would stop background execution.
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- .project-memory AGENTS.md .agents)
+if [ -n "$staged" ]; then
+  echo "$staged"
+  echo "Project memory must not be committed to this repository. Unstage it with:"
+  echo "  git rm -r --cached --ignore-unmatch .project-memory AGENTS.md .agents"
+  exit 1
+fi
+exit 0
