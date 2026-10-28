@@ -11,6 +11,7 @@ import { findCliAsync } from '../ext/paths'
 import { getWorkspaceForEvent } from '../index'
 import {
   DEFAULT_REPO_NAME,
+  MEMORY_DIR,
   MemSyncError,
   cloneState,
   defaultClonePath,
@@ -335,15 +336,20 @@ export function registerMemSyncHandlers(): void {
   )
 
   /**
-   * 開啟／切換專案時：已開啟記憶同步才動作，否則立刻回 null（不碰網路）。
+   * 開啟／切換專案時：未開啟記憶同步只換掉舊版腳本（本機檔案，不碰網路）後回 null。
    * GitHub 模式先拉取（另一台電腦的最新記憶），再把有記憶的專案自動接上。
    */
   ipcMain.handle('memsync:onProjectOpen', (event) =>
     wrap(async () => {
       const c = loadMemSyncConfig()
       const root = activeRoot(c)
-      if (!root) return null
       const workspace = getWorkspaceForEvent(event)
+      if (!root) {
+        // 舊版 commit-handoff.sh 會用 `git add -f` 把記憶強制提交進專案 repo；同步關閉時也要換成不提交的版本
+        const mem = path.join(workspace, MEMORY_DIR)
+        if (fs.existsSync(path.join(mem, 'commit-handoff.sh'))) ensureMemoryScripts(mem, MEMORY_SCRIPTS)
+        return null
+      }
       const t = await tools()
       if (!(await isGitRepo(t, workspace))) return null
       return exclusive(async () => {

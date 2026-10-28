@@ -6,18 +6,6 @@ React + Vite.
 
 *English is the primary language of this README; a 繁體中文 version follows below.*
 
-> **This is ikenican's fork** of [zkylek1212-k/Mulit-Harness-ADE](https://github.com/zkylek1212-k/Mulit-Harness-ADE).
-> Work happens on the `improve/accuracy-handoff` branch (`master` mirrors upstream); fork builds
-> are published as `<upstream version>-fork.<n>` in this repository's
-> [Releases](https://github.com/ikenican/Mulit-Harness-ADE/releases). What the fork adds:
->
-> - **Memory sync** — keep `.project-memory` (AI handoffs) in sync across computers through a private GitHub repository or a OneDrive / Google Drive folder, never in the public project repository. See [Memory sync](#memory-sync).
-> - **Layout** — drag the terminal / editor icons in the title bar to put the terminal left or right, and turn each pane on or off; the terminal can be widened past the editor.
-> - **Workspace switching** — switching workspace selects that project's most recent CLI tab, or resumes its latest session when it has no tab.
-> - **Open the project folder** — a button in the file tree opens the real folder in File Explorer.
-> - **Faster main process** — CLI detection, the Cowork capability probe and dashboard / usage scanning no longer block the main process (scans run in a worker thread): worst IPC round trips dropped from ~530 ms to ~1 ms (dashboard), ~100 ms to ≤14 ms (agent detection) and ~290 ms to ~4 ms (Cowork).
-> - **Codex install** falls back from the official script to winget and npm; a new app icon; `dev.cmd` runs the app from source with a double-click.
-
 > **Design principle — official CLIs own the agent runtime.** The workbench uses
 > each vendor's official CLI and its existing authentication. It provides code
 > editing, Git, terminals, shared memory, and Cowork coordination; Cowork schedules
@@ -95,26 +83,26 @@ Switching storage later migrates linked projects on open and keeps the old copy.
 Run this command in **PowerShell** (no Git or Node.js required):
 
 ```powershell
-irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
+irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 ```
 
-> **What this does:** Automatically fetches this fork's latest release from GitHub, downloads the Windows setup installer (`.exe`), and starts the installation.
+> **What this does:** Automatically fetches the latest release from GitHub, downloads the Windows setup installer (`.exe`), and starts the installation.
 >
 > *Options:*
 > - **Silent install** (no wizard prompt):
 >   ```powershell
->   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
+>   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 > - **Download installer only** (saves to current folder without running):
 >   ```powershell
->   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
+>   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 
 ### Method 2: Direct Download from GitHub Releases
 
 Prefer manual download? Grab the setup package directly from GitHub:
 
-- 🚀 **[Download Latest Release](https://github.com/ikenican/Mulit-Harness-ADE/releases/latest)**
+- 🚀 **[Download Latest Release](https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/latest)**
 - Download `Agent-Workbench-<version>-setup.exe` and double-click to install.
 - *(Portable version: download `Agent-Workbench-<version>-portable.zip`, extract it, and run `Agent Workbench.exe` directly without installation.)*
 
@@ -132,7 +120,7 @@ For developers who want to contribute or build from source:
 ### Getting started
 
 ```bash
-git clone -b improve/accuracy-handoff https://github.com/ikenican/Mulit-Harness-ADE.git
+git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
 cd Mulit-Harness-ADE
 npm install
 npm run dev        # launch in development
@@ -166,7 +154,7 @@ src/renderer/remote  the iPhone web app (second Vite entry, served by the bridge
 src/shared       types and logic both sides use (remote protocol, detectors)
 docs/architecture.html  end-to-end architecture overview
 docs/cowork-architecture.md  Cowork flows and implementation boundaries
-.project-memory  shared cross-agent memory (handoff, protocol, decisions); not tracked in this fork
+.project-memory  shared cross-agent memory (handoff, protocol, decisions); local-only, not tracked in this repository
 dev.cmd / dev.ps1  double-click launcher for the dev build (Windows)
 ```
 
@@ -267,10 +255,6 @@ once before testing it with `npm run dev`.
 - `npm run dev` uses its own user-data folder (`agent-workbench-dev`), so a dev
   build can run alongside an installed copy without sharing settings or caches.
 
-## Fork builds
-
-This fork publishes its own Windows builds, versioned `<upstream version>-fork.<n>` (for example `0.1.41-fork.1` is the first fork build based on upstream 0.1.41). Push a branch named `release/<version>` and `.github/workflows/fork-release.yml` builds on a Windows runner, publishes release `v<version>` in this repository, and deletes the branch. The installed fork build checks two things: updates from this repository, installed through the normal update flow, and a notice in Settings → About when upstream has a newer version. Upstream versions are never installed over the fork build; merge them into the fork instead.
-
 ## Release Notes & Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for full version history and release details.
@@ -311,17 +295,6 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 > **設計原則——由官方 CLI 負責 agent runtime。** 工作台使用各廠商的官方 CLI 與既有登入，
 > 提供編輯、Git、終端、共享記憶，以及 Cowork 協調。Cowork 排程 CLI 呼叫、保存會議紀錄，
 > 並執行使用者明確核准的專案計畫。跨 CLI 交接透過 `.project-memory/`（handoff 筆記 + Git）完成。
-
-> **這是 ikenican 的 fork**，原專案為 [zkylek1212-k/Mulit-Harness-ADE](https://github.com/zkylek1212-k/Mulit-Harness-ADE)。
-> 開發在 `improve/accuracy-handoff` 分支（`master` 對齊原作者）；fork 版以 `<原作者版本>-fork.<序號>`
-> 發佈在本 repo 的 [Releases](https://github.com/ikenican/Mulit-Harness-ADE/releases)。fork 新增：
->
-> - **記憶同步**——把 `.project-memory`（AI 交接）透過私人 GitHub repo 或 OneDrive／Google Drive 資料夾在多台電腦間同步，不會出現在公開的專案 repo。詳見下方〈記憶同步〉。
-> - **版面**——拖曳標題列的終端／編輯器圖示決定終端在左或右，並可各自開關；終端可以拉寬超過編輯器。
-> - **切換工作區**——切換時自動選到該專案最後用的 CLI 分頁；沒有分頁時自動接續它最近的 session。
-> - **開啟專案資料夾**——檔案樹的按鈕直接用檔案總管開啟實際資料夾。
-> - **主行程更流暢**——CLI 偵測、Cowork 能力探測與儀表板／用量掃描不再卡住主行程（掃描移到 worker thread）：最慢的 IPC 往返從約 530 ms 降到約 1 ms（儀表板）、約 100 ms 降到 14 ms 以內（agent 偵測）、約 290 ms 降到約 4 ms（Cowork）。
-> - **Codex 安裝**在官方腳本失敗時改用 winget、再改用 npm；新的 app 圖示；`dev.cmd` 雙擊就能從原始碼啟動。
 
 ## 功能
 
@@ -389,24 +362,24 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 在 **PowerShell** 貼上並執行以下單行指令（無需 Git 或 Node.js）：
 
 ```powershell
-irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
+irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 ```
 
-> **說明：** 自動向 GitHub 取得本 fork 最新版本安裝包（`.exe`），下載並自動啟動安裝精靈。
+> **說明：** 自動向 GitHub 取得最新版本安裝包（`.exe`），下載並自動啟動安裝精靈。
 >
 > *進階選項：*
 > - **靜默自動安裝**（不彈出安裝引導畫面）：
 >   ```powershell
->   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
+>   $env:INSTALL_SILENT=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 > - **僅下載安裝檔到本地**（儲存至當前目錄，不立即執行）：
 >   ```powershell
->   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accuracy-handoff/install.ps1 | iex
+>   $env:INSTALL_DOWNLOAD_ONLY=1; irm https://raw.githubusercontent.com/zkylek1212-k/Mulit-Harness-ADE/master/install.ps1 | iex
 >   ```
 
 ### 方法二：直接自 GitHub Releases 下載
 
-- 🚀 **[前往最新發行頁面（GitHub Releases）](https://github.com/ikenican/Mulit-Harness-ADE/releases/latest)**
+- 🚀 **[前往最新發行頁面（GitHub Releases）](https://github.com/zkylek1212-k/Mulit-Harness-ADE/releases/latest)**
 - 下載 `Agent-Workbench-<版本>-setup.exe` 雙擊即可安裝。
 - *(免安裝綠色版：下載 `Agent-Workbench-<版本>-portable.zip`，解壓後直接雙擊 `Agent Workbench.exe` 即可使用)*
 
@@ -424,7 +397,7 @@ irm https://raw.githubusercontent.com/ikenican/Mulit-Harness-ADE/improve/accurac
 ### 快速開始
 
 ```bash
-git clone -b improve/accuracy-handoff https://github.com/ikenican/Mulit-Harness-ADE.git
+git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
 cd Mulit-Harness-ADE
 npm install
 npm run dev        # 開發模式啟動
@@ -458,7 +431,7 @@ src/renderer/remote  iPhone 端網頁 App（第二個 Vite entry，由橋接層�
 src/shared       兩端共用的型別與邏輯（遠端協定、各種偵測）
 docs/architecture.html  端到端架構總覽
 docs/cowork-architecture.md  Cowork 功能流程與模組邊界
-.project-memory  跨 agent 共享記憶（handoff、protocol、decisions）；本 fork 不納入版控
+.project-memory  跨 agent 共享記憶（handoff、protocol、decisions）；僅存本機，不納入版控
 dev.cmd / dev.ps1  Windows 雙擊啟動開發版
 ```
 
@@ -503,10 +476,6 @@ dev.cmd / dev.ps1  Windows 雙擊啟動開發版
 - 儀表板快取（`dashboard-cache.json`、`usage-cache.json`）放在 app 的使用者資料夾，所有視窗共用。
   「當前工作區」由各視窗自行判斷；主行程不會以「目前聚焦的視窗」來歸屬 session。
 - `npm run dev` 使用獨立的使用者資料夾（`agent-workbench-dev`），可與已安裝版本同時執行，互不共用設定與快取。
-
-## Fork 版本
-
-這個 fork 會發佈自己的 Windows 版本，版本號為 `<原作者版本>-fork.<序號>`（例如 `0.1.41-fork.1` 是基於原作者 0.1.41 的第一個 fork 版）。推送名為 `release/<版本>` 的分支，`.github/workflows/fork-release.yml` 就會在 Windows 執行環境打包、在本 repo 發佈 `v<版本>`，並刪除該分支。安裝後的 fork 版會檢查兩件事：本 repo 的更新（走一般的更新流程安裝），以及原作者是否有新版本（只在 設定 → 關於 顯示提示）。原作者的版本不會直接安裝在 fork 版上，要合併進 fork 後再發新版。
 
 ## 版本紀錄與變更日誌
 

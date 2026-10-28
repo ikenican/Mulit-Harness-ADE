@@ -1,33 +1,16 @@
 #!/usr/bin/env bash
-# Shared project memory guard (adapted from ShareProjectMem for this fork).
-# Enable per clone with: git config core.hooksPath .githooks
+# Project-repository guard. Enable per clone with: git config core.hooksPath .githooks
 #
-# Kept: refresh the Codex/Antigravity entry files when the handoff changes, and block secrets in
-# newly added memory content (the memory is pushed to GitHub).
-# Not kept from the upstream template: "code changed but memory not staged" and the whitespace
-# check. Cowork commits each task in a worktree of this repo (hooks run there too) and those
-# commits never touch .project-memory/, so either check would stop background execution.
-set -e
-MEM=".project-memory"
-
-# handoff staged -> regenerate the AUTO-MEMORY block that Codex and Antigravity load at startup
-if git diff --cached --name-only | grep -q "^$MEM/handoff\.md$"; then
-  if [ -f "$MEM/sync-entry-files.sh" ]; then
-    bash "$MEM/sync-entry-files.sh" >/dev/null
-    git add -f AGENTS.md .agents/rules/shared-memory.md 2>/dev/null || true
-  fi
-fi
-
-# secret scan on ADDED memory lines only, so removing an old secret is not blocked
-ADDED=$(git diff --cached -U0 -- "$MEM" | grep '^+' | grep -v '^+++' || true)
-if [ -n "$ADDED" ]; then
-  if echo "$ADDED" | grep -nEi '(api[_-]?key|secret|password|passwd|token)[[:space:]]*[:=][[:space:]]*[^[:space:]]{12,}'; then
-    echo "Possible secret (key=value) in newly added project-memory content. Remove it."
-    exit 1
-  fi
-  if echo "$ADDED" | grep -nE 'BEGIN (RSA|OPENSSH|EC|DSA|PGP) PRIVATE KEY'; then
-    echo "Private key found in newly added project-memory content. Remove it."
-    exit 1
-  fi
+# Project memory (.project-memory/) and the entry files generated from it (AGENTS.md,
+# .agents/) are local-only and gitignored: they sync through Settings > Memory sync, never through
+# this public repository. Block them even when force-added. Deleting them (untracking) is allowed.
+# No whitespace or "memory not staged" checks: Cowork commits each task in a worktree of this repo
+# and those commits never touch memory, so such checks would stop background execution.
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- .project-memory AGENTS.md .agents)
+if [ -n "$staged" ]; then
+  echo "$staged"
+  echo "Project memory must not be committed to this repository. Unstage it with:"
+  echo "  git rm -r --cached --ignore-unmatch .project-memory AGENTS.md .agents"
+  exit 1
 fi
 exit 0

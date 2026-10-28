@@ -62,6 +62,9 @@ const g = async (cwd: string, ...args: string[]): Promise<string> => {
   return r.stdout
 }
 const isLink = (p: string): boolean => fs.lstatSync(p).isSymbolicLink()
+// 專案的記憶腳本：這個 repo 不追蹤 .project-memory，從內建範本與 fixture 取（不依賴本機記憶）
+const memScript = (f: string): string =>
+  f === 'sync-entry-files.sh' ? path.join(ROOT, 'scripts', 'fixtures', f) : path.join(ROOT, 'src', 'main', 'memsync', 'templates', f)
 
 // ── project repo on GitHub, with memory tracked the old way ─────────────
 const projBare = path.join(remotes, 'someone', 'demo.git')
@@ -75,9 +78,7 @@ await g(projA, 'config', 'user.name', 'Dev')
 await g(projA, 'config', 'user.email', 'dev@example.com')
 fs.writeFileSync(path.join(projA, 'app.js'), 'console.log(1)\n')
 fs.mkdirSync(path.join(projA, '.project-memory', 'archive'), { recursive: true })
-for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) {
-  fs.copyFileSync(path.join(ROOT, '.project-memory', f), path.join(projA, '.project-memory', f))
-}
+for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) fs.copyFileSync(memScript(f), path.join(projA, '.project-memory', f))
 fs.writeFileSync(path.join(projA, '.project-memory', 'INDEX.md'), '# Index\n')
 fs.writeFileSync(path.join(projA, '.project-memory', 'handoff.md'), '# Latest Handoff\n\n## State\n- A1\n')
 fs.writeFileSync(path.join(projA, 'AGENTS.md'), '# Agents\n')
@@ -238,7 +239,7 @@ await g(projC, 'config', 'user.name', 'Dev')
 await g(projC, 'config', 'user.email', 'dev@example.com')
 await g(projC, 'remote', 'add', 'origin', 'https://github.com/someone/demo2.git')
 fs.mkdirSync(path.join(projC, '.project-memory'))
-for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) fs.copyFileSync(path.join(ROOT, '.project-memory', f), path.join(projC, '.project-memory', f))
+for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) fs.copyFileSync(memScript(f), path.join(projC, '.project-memory', f))
 fs.writeFileSync(path.join(projC, '.project-memory', 'handoff.md'), '# Latest Handoff\n\n## State\n- C1\n')
 fs.writeFileSync(path.join(projC, '.project-memory', 'INDEX.md'), '# Index\n')
 fs.writeFileSync(path.join(projC, 'AGENTS.md'), '# Agents\n')
