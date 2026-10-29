@@ -1269,7 +1269,7 @@ export default function DashboardPanel({
                             groupKey={group.key}
                             isExpanded={expandedSessionId === session.id}
                             onToggle={() => toggleExpand(session.id)}
-                            onArchive={(e) => handleArchive(session.id, !session.isArchived, e)}
+                            onArchive={(e) => handleArchive(session.id, !!session.isArchived, e)}
                             onDelete={(e) => handleDeletePrompt(session, e)}
                             onReorder={handleReorderSession}
                             onOpenCli={handleSessionOpenCli}
