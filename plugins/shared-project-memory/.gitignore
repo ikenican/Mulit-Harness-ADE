@@ -1,0 +1,14 @@
+# Editor / IDE
+.obsidian/
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Scratch / local experiments
+*.local
+tmp/
+scratch/

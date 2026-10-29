@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Shared project memory guard. Enable per clone with: git config core.hooksPath .githooks
+#
+# Project memory (.project-memory/) and the entry files generated from it (AGENTS.md,
+# .agents/rules/shared-memory.md) are local to each clone and never belong in the project
+# repository: they are shared through Agent Workbench (Settings > Memory sync). Block them even
+# when force-added. Deleting them (untracking) is allowed. A project's own tracked AGENTS.md is
+# not memory and is left alone.
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- .project-memory .agents/rules/shared-memory.md)
+if git diff --cached --name-only --diff-filter=ACMR -- AGENTS.md | grep -q . \
+   && git show :AGENTS.md 2>/dev/null | grep -qF '<!-- BEGIN AUTO-MEMORY'; then
+  staged="$staged
+AGENTS.md (contains the generated AUTO-MEMORY block)"
+fi
+if [ -n "$(printf '%s' "$staged" | tr -d '[:space:]')" ]; then
+  printf '%s\n' "$staged" | sed '/^$/d'
+  echo "Project memory must not be committed to this repository. Unstage it with:"
+  echo "  git rm -r --cached --ignore-unmatch .project-memory .agents/rules/shared-memory.md"
+  echo "(and AGENTS.md if it is the generated one)"
+  exit 1
+fi
+exit 0

@@ -1,0 +1,9 @@
+# Shell scripts and git hooks MUST stay LF, or bash on Windows fails with
+# "\r: command not found" and every hook silently breaks.
+*.sh              text eol=lf
+templates/pre-commit   text eol=lf
+install.sh        text eol=lf
+
+*.ps1             text eol=crlf
+*.md              text
+*.json            text

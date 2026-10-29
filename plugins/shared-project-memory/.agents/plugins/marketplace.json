@@ -1,0 +1,21 @@
+{
+  "name": "shared-project-memory",
+  "interface": {
+    "displayName": "Shared Project Memory"
+  },
+  "plugins": [
+    {
+      "name": "shared-project-memory",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/zkylek1212-k/ShareProjectMem.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

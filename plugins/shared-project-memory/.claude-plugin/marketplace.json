@@ -1,0 +1,13 @@
+{
+  "name": "shared-project-memory",
+  "owner": {
+    "name": "zkylek1212-k"
+  },
+  "plugins": [
+    {
+      "name": "shared-project-memory",
+      "source": "./",
+      "description": "Cross-tool shared project memory for Claude Code, Codex and Antigravity. Auto-injects tier-1 memory at session start, scaffolds .project-memory/ with entry files for all three agents, and installs git hooks that enforce memory updates and block secrets."
+    }
+  ]
+}
