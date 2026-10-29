@@ -6,8 +6,8 @@
     "name": "zkylek1212-k",
     "url": "https://github.com/zkylek1212-k"
   },
-  "homepage": "https://github.com/zkylek1212-k/ShareProjectMem",
-  "repository": "https://github.com/zkylek1212-k/ShareProjectMem",
+  "homepage": "https://github.com/zkylek1212-k/Mulit-Harness-ADE/tree/master/plugins/shared-project-memory",
+  "repository": "https://github.com/zkylek1212-k/Mulit-Harness-ADE",
   "license": "MIT",
   "skills": "./skills/",
   "hooks": "./hooks/codex-hooks.json",

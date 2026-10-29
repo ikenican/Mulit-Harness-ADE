@@ -84,11 +84,12 @@ Workbench 一起更新。
 沒裝 plugin 時，Claude Code 仍會拿到記憶快照：`sync-entry-files.sh` 會寫入
 `.claude/rules/shared-memory.md`（只在這個 clone），裝上 plugin 後就移除，handoff 不會被載入兩次。
 
-### Claude Code
+### Claude Code（不透過 Agent Workbench）
 
 ```bash
-claude plugin marketplace add zkylek1212-k/ShareProjectMem
-claude plugin install shared-project-memory
+git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
+claude plugin marketplace add ./Mulit-Harness-ADE/plugins/shared-project-memory
+claude plugin install shared-project-memory@shared-project-memory
 ```
 
 然後在任一專案裡：
@@ -100,9 +101,9 @@ claude plugin install shared-project-memory
 ### Codex / Antigravity / 純手動（不需要 Claude Code）
 
 ```bash
-git clone https://github.com/zkylek1212-k/ShareProjectMem.git
-bash ShareProjectMem/install.sh            # 裝進目前 repo
-bash ShareProjectMem/install.sh /my/repo   # 裝進指定 repo
+git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
+bash Mulit-Harness-ADE/plugins/shared-project-memory/install.sh            # 裝進目前 repo
+bash Mulit-Harness-ADE/plugins/shared-project-memory/install.sh /my/repo   # 裝進指定 repo
 ```
 
 Windows PowerShell：
@@ -117,10 +118,10 @@ Windows PowerShell：
 
 ### Codex plugin
 
-安裝本 repo 的 marketplace 和 plugin：
+把 clone 裡的 plugin 資料夾加成本機 marketplace 再安裝：
 
 ```bash
-codex plugin marketplace add zkylek1212-k/ShareProjectMem
+codex plugin marketplace add ./Mulit-Harness-ADE/plugins/shared-project-memory
 codex plugin add shared-project-memory@shared-project-memory
 ```
 

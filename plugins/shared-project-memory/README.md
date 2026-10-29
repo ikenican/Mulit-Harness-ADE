@@ -92,11 +92,12 @@ Without the plugin, Claude Code still gets a memory snapshot: `sync-entry-files.
 `.claude/rules/shared-memory.md` (local to the clone) and removes it once the plugin is installed,
 so the handoff is never loaded twice.
 
-### Claude Code
+### Claude Code (without Agent Workbench)
 
 ```bash
-claude plugin marketplace add zkylek1212-k/ShareProjectMem
-claude plugin install shared-project-memory
+git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
+claude plugin marketplace add ./Mulit-Harness-ADE/plugins/shared-project-memory
+claude plugin install shared-project-memory@shared-project-memory
 ```
 
 Then, in any project:
@@ -108,9 +109,9 @@ Then, in any project:
 ### Codex / Antigravity / by hand (no Claude Code required)
 
 ```bash
-git clone https://github.com/zkylek1212-k/ShareProjectMem.git
-bash ShareProjectMem/install.sh            # into the current repo
-bash ShareProjectMem/install.sh /my/repo   # into a specific repo
+git clone https://github.com/zkylek1212-k/Mulit-Harness-ADE.git
+bash Mulit-Harness-ADE/plugins/shared-project-memory/install.sh            # into the current repo
+bash Mulit-Harness-ADE/plugins/shared-project-memory/install.sh /my/repo   # into a specific repo
 ```
 
 Windows PowerShell:
@@ -126,10 +127,10 @@ Both paths run the same `scripts/init-memory.sh`, produce identical results, and
 
 ### Codex plugin
 
-Install the repository marketplace and plugin:
+Install the plugin folder of a clone as a local marketplace:
 
 ```bash
-codex plugin marketplace add zkylek1212-k/ShareProjectMem
+codex plugin marketplace add ./Mulit-Harness-ADE/plugins/shared-project-memory
 codex plugin add shared-project-memory@shared-project-memory
 ```
 
