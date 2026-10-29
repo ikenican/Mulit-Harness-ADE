@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.46] - 2026-10-29
+
+### Added / 新增
+- Workbench 內附 shared-project-memory plugin（1.2.0）。開啟設定時，若已啟用的 Claude Code／Codex 還沒裝、版本較舊，或裝的是 GitHub 版，會詢問是否安裝或換成內附版：先裝好新版並確認成功，才移除舊版。拒絕時會說明交接會少什麼；「設定 → 記憶同步」隨時可以安裝。（PR #58）
+- Agent Workbench ships the shared-project-memory plugin (1.2.0). When Settings opens, it offers to install it into every enabled Claude Code / Codex that lacks it, has an older copy, or has the GitHub install. The new one is installed and verified before the old one is removed. Declining explains what the handoff loses; Settings → Memory sync can install it any time.
+- 沒裝 plugin 時，Claude Code 也會從 `.claude/rules/shared-memory.md`（只在本機 clone）載入記憶快照；裝了 plugin 就移除這個檔，避免重複載入。（PR #58）
+- Without the plugin, Claude Code now loads a memory snapshot from `.claude/rules/shared-memory.md` (local to the clone); the file is removed once the plugin is installed so memory is not loaded twice.
+
+### Changed / 變更
+- plugin 改在 Workbench repo 的 `plugins/shared-project-memory/` 維護，記憶腳本只有這一份來源；GitHub 的 ShareProjectMem 已封存。（PR #58）
+- The plugin is now maintained in `plugins/shared-project-memory/` of this repository and is the only source of the memory scripts; the GitHub ShareProjectMem repository is archived.
+
 ## [0.1.45] - 2026-10-29
 
 ### Added / 新增
