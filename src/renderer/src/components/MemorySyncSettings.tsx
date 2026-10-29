@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from '@/i18n'
 import { pasteInNewShell } from '@/store'
 import { IconShield, IconRefresh, IconFolder } from './Icons'
+import MemoryPluginPrompt from './MemoryPluginPrompt'
 import type { MemSyncBackend, MemSyncResult, MemSyncState } from '../../../preload/index'
 
 // 設定 → 記憶同步：把專案記憶（.project-memory）放進使用者自己的私人 GitHub repo，
@@ -192,14 +193,7 @@ export default function MemorySyncSettings(): JSX.Element {
 
       {st.gitMissing && <p className="remote-note danger">⚠️ {t('memsync.err.git-missing')}</p>}
 
-      {!st.memoryPlugin && (
-        <div className="remote-note warn" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ flex: '1 1 260px' }}>⚠️ {t('memsync.pluginMissing')}</span>
-          <button type="button" className="macos-btn-secondary" onClick={() => pasteInNewShell(st.commands.installPlugin, st.commands.shell)}>
-            {t('memsync.installPlugin')}
-          </button>
-        </div>
-      )}
+      <MemoryPluginPrompt />
 
       {consented && !st.gitMissing && (
         <>

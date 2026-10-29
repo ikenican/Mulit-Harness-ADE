@@ -7,13 +7,14 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { execFile } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
-import { findCliAsync } from '../ext/paths'
+import { findAgentCliAsync, findCliAsync } from '../ext/paths'
+import { launchPlan } from '../cowork/runner'
+import { loadSettings } from './settings'
 import { getWorkspaceForEvent } from '../index'
 import {
   DEFAULT_REPO_NAME,
   MEMORY_DIR,
   autoLinkBlock,
-  claudeMemoryPluginInstalled,
   ensureLocalExclude,
   MemSyncError,
   cloneState,
@@ -30,14 +31,23 @@ import {
   projectState,
   rootReady,
   syncNow,
+  applyBundledPlugin,
+  installedPlugins,
+  pluginAction,
+  pluginVersion,
+  prepareMarketplace,
+  PLUGIN,
+  PLUGIN_AGENTS,
+  type CliExec,
+  type PluginAgent,
   type CloudProvider,
   type Run,
   type Tools
 } from '../memsync/core'
-import type { MemSyncBackend, MemSyncConfig, MemSyncState, MemSyncResult } from '../../preload/index'
-import commitHandoffScript from '../memsync/templates/commit-handoff.sh?raw'
-import statusScript from '../memsync/templates/status.sh?raw'
-import syncEntryFilesScript from '../memsync/templates/sync-entry-files.sh?raw'
+import type { MemSyncBackend, MemSyncConfig, MemSyncState, MemSyncResult, MemoryPluginApplyResult, MemoryPluginState } from '../../preload/index'
+import commitHandoffScript from '../../../plugins/shared-project-memory/templates/commit-handoff.sh?raw'
+import statusScript from '../../../plugins/shared-project-memory/templates/status.sh?raw'
+import syncEntryFilesScript from '../../../plugins/shared-project-memory/templates/sync-entry-files.sh?raw'
 
 /** 有記憶的專案一律用這些腳本（依設定存本機／雲端資料夾／私人 repo，絕不寫進專案 repo） */
 const MEMORY_SCRIPTS = { 'commit-handoff.sh': commitHandoffScript, 'status.sh': statusScript, 'sync-entry-files.sh': syncEntryFilesScript }
@@ -55,7 +65,8 @@ function defaults(): MemSyncConfig {
     login: null,
     folderPath: null,
     autoSync: true,
-    autoLink: true
+    autoLink: true,
+    pluginDeclined: null
   }
 }
 
@@ -75,7 +86,8 @@ export function loadMemSyncConfig(): MemSyncConfig {
       folderPath: typeof raw.folderPath === 'string' && path.isAbsolute(raw.folderPath) ? raw.folderPath : null,
       // 舊版設定叫 autoPull
       autoSync: (raw.autoSync ?? raw.autoPull) !== false,
-      autoLink: raw.autoLink !== false
+      autoLink: raw.autoLink !== false,
+      pluginDeclined: typeof raw.pluginDeclined === 'string' ? raw.pluginDeclined : null
     }
   } catch {
     return d
@@ -150,9 +162,7 @@ function commands(gh: string | null): MemSyncState['commands'] {
     loginGh: `${ghCmd} auth login --hostname github.com --git-protocol https --web; ${ghCmd} auth setup-git`,
     // 雲端硬碟程式：winget 官方套件（Microsoft／Google LLC）；macOS 用 Homebrew cask
     installOneDrive: isWin ? 'winget install --id Microsoft.OneDrive -e --source winget' : 'brew install --cask onedrive',
-    installGDrive: isWin ? 'winget install --id Google.GoogleDrive -e --source winget' : 'brew install --cask google-drive',
-    // Claude Code 的記憶 plugin：開局載入記憶與 /handoff；存放仍照這裡的設定
-    installPlugin: 'claude plugin marketplace add zkylek1212-k/ShareProjectMem; claude plugin install shared-project-memory@shared-project-memory'
+    installGDrive: isWin ? 'winget install --id Google.GoogleDrive -e --source winget' : 'brew install --cask google-drive'
   }
 }
 
@@ -167,7 +177,6 @@ async function state(workspace: string): Promise<MemSyncState> {
   const cloudApps = detectCloudApps()
   const root = memoryRoot(config)
   const ready = !!root && rootReady(root)
-  const memoryPlugin = claudeMemoryPluginInstalled()
   let t: Tools
   try {
     t = await tools()
@@ -179,7 +188,6 @@ async function state(workspace: string): Promise<MemSyncState> {
       root,
       rootReady: ready,
       gitMissing: true,
-      memoryPlugin,
       gh: { installed: false, loggedIn: false },
       clone: { exists: false },
       project: null,
@@ -192,7 +200,7 @@ async function state(workspace: string): Promise<MemSyncState> {
     cloneState(t, config.clonePath)
   ])
   const project = root && (await isGitRepo(t, workspace)) ? await projectState(t, { workspace, clonePath: root }) : null
-  return { config, cloudRoots, cloudApps, root, rootReady: ready, gitMissing: false, memoryPlugin, gh, clone, project, commands: commands(t.gh) }
+  return { config, cloudRoots, cloudApps, root, rootReady: ready, gitMissing: false, gh, clone, project, commands: commands(t.gh) }
 }
 
 async function wrap<T>(fn: () => Promise<T>): Promise<MemSyncResult<T>> {
@@ -230,8 +238,82 @@ async function backgroundSync(): Promise<void> {
   }
 }
 
+// ── 自帶的 shared-project-memory plugin ─────────────────────────────────
+// 打包後在 resources/plugins（electron-builder extraResources），開發時在 repo 的 plugins/
+const bundledPluginDir = (): string => path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'plugins', PLUGIN)
+const pluginMarketplaceDir = (): string => path.join(app.getPath('userData'), 'plugin-marketplace')
+
+/** 執行 claude／codex 的 plugin 子指令；.cmd 與 npm shim 照 cowork 的規則啟動 */
+function cliExec(cli: string): CliExec {
+  return (args) =>
+    new Promise((resolve) => {
+      const plan = launchPlan(cli, args)
+      if ('error' in plan) return resolve({ code: 1, stdout: '', stderr: plan.error })
+      const child = execFile(
+        plan.file,
+        plan.args,
+        { encoding: 'utf8', windowsHide: true, timeout: 180_000, maxBuffer: 8 * 1024 * 1024, windowsVerbatimArguments: plan.verbatim },
+        (err, stdout, stderr) => resolve({ code: err ? 1 : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') || (err ? err.message : '') })
+      )
+      child.stdin?.end()
+    })
+}
+
+async function pluginState(): Promise<MemoryPluginState> {
+  const bundledVersion = pluginVersion(bundledPluginDir())
+  const enabled = loadSettings().cliEnabled || {}
+  const agents = await Promise.all(
+    PLUGIN_AGENTS.map(async (agent) => {
+      const installed = installedPlugins(agent)
+      return {
+        agent,
+        enabled: enabled[agent] !== false,
+        cli: !!(await findAgentCliAsync(agent)),
+        installed: installed.map(({ key, version, scope }) => ({ key, version, scope })),
+        action: pluginAction(installed, bundledVersion)
+      }
+    })
+  )
+  return { bundledVersion, declined: loadMemSyncConfig().pluginDeclined, agents }
+}
+
 export function registerMemSyncHandlers(): void {
   ipcMain.handle('memsync:state', (event) => wrap(() => state(getWorkspaceForEvent(event))))
+
+  ipcMain.handle('memsync:pluginState', () => wrap(pluginState))
+
+  // 使用者在同意視窗按下才呼叫；agent 一家失敗不影響另一家
+  ipcMain.handle('memsync:applyPlugin', (_event, agents: PluginAgent[]) =>
+    wrap(async () => {
+      prepareMarketplace(bundledPluginDir(), pluginMarketplaceDir())
+      const results: MemoryPluginApplyResult[] = []
+      for (const agent of PLUGIN_AGENTS.filter((a) => agents?.includes(a))) {
+        const cli = await findAgentCliAsync(agent)
+        if (!cli) {
+          results.push({ agent, ok: false, log: [], error: `${agent} CLI not found` })
+          continue
+        }
+        try {
+          results.push({ agent, ok: true, log: await applyBundledPlugin(agent, cliExec(cli), { marketplaceDir: pluginMarketplaceDir() }) })
+        } catch (e) {
+          results.push({ agent, ok: false, log: [], error: (e as Error).message })
+        }
+      }
+      const c = loadMemSyncConfig()
+      c.pluginDeclined = null
+      saveConfig(c)
+      return { results, state: await pluginState() }
+    })
+  )
+
+  ipcMain.handle('memsync:declinePlugin', () =>
+    wrap(async () => {
+      const c = loadMemSyncConfig()
+      c.pluginDeclined = pluginVersion(bundledPluginDir())
+      saveConfig(c)
+      return pluginState()
+    })
+  )
 
   ipcMain.handle(
     'memsync:setConfig',
