@@ -9,7 +9,8 @@ export interface AppleAlertDialogProps {
   description?: string
   detail?: React.ReactNode
   confirmLabel?: string
-  cancelLabel?: string
+  /** null：只有一個動作，不顯示取消按鈕 */
+  cancelLabel?: string | null
   isDestructive?: boolean
   icon?: React.ReactNode
   onConfirm: () => void | Promise<void>
@@ -99,13 +100,11 @@ export default function AppleAlertDialog({
 
         {/* Button Actions: Cancel (Leading) and Action (Trailing) per Apple HIG */}
         <div className="apple-alert-actions">
-          <button
-            type="button"
-            className="apple-alert-btn apple-alert-btn-cancel"
-            onClick={onClose}
-          >
-            {cancelLabel}
-          </button>
+          {cancelLabel !== null && (
+            <button type="button" className="apple-alert-btn apple-alert-btn-cancel" onClick={onClose}>
+              {cancelLabel}
+            </button>
+          )}
           <button
             type="button"
             className={`apple-alert-btn ${

@@ -74,6 +74,16 @@ entry 檔裡的 `AUTO-MEMORY` 區塊是**機器衍生**的，標有 do-not-edit�
 
 ## 安裝
 
+### 搭配 Agent Workbench（建議）
+
+Agent Workbench 內附這個 plugin（原始碼在 Workbench repo 的 `plugins/shared-project-memory`）。
+開啟設定時，Workbench 會詢問是否幫每個已啟用的 Claude Code／Codex 從本機 marketplace
+`agent-workbench` 安裝，並取代從 GitHub 裝的版本（`@shared-project-memory`）。之後 plugin 跟著
+Workbench 一起更新。
+
+沒裝 plugin 時，Claude Code 仍會拿到記憶快照：`sync-entry-files.sh` 會寫入
+`.claude/rules/shared-memory.md`（只在這個 clone），裝上 plugin 後就移除，handoff 不會被載入兩次。
+
 ### Claude Code
 
 ```bash

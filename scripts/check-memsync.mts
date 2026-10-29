@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { autoLinkBlock, claudeMemoryPluginInstalled, connectRepoByUrl, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
+import { applyBundledPlugin, autoLinkBlock, connectRepoByUrl, installedPlugins, pluginAction, pluginVersion, prepareMarketplace, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-check-'))
@@ -466,16 +466,88 @@ assert.deepEqual([lz2.repo, lz2.created], ['tester/ai-project-memory', false], '
 assert.equal(ghCalls.length, ghBefore, 'gh never called on the one-click route')
 console.log('one-click create: login cancel/expired, public refusals, created private + initialized, existing reused ok')
 
-// Claude Code plugin detection
-const fakeHome = path.join(tmp, 'home')
-assert.equal(claudeMemoryPluginInstalled(fakeHome), false, 'no plugins file')
-fs.mkdirSync(path.join(fakeHome, '.claude', 'plugins'), { recursive: true })
-const pluginsFile = path.join(fakeHome, '.claude', 'plugins', 'installed_plugins.json')
-fs.writeFileSync(pluginsFile, JSON.stringify({ version: 2, plugins: { 'other@x': [] } }))
-assert.equal(claudeMemoryPluginInstalled(fakeHome), false, 'other plugins only')
-fs.writeFileSync(pluginsFile, JSON.stringify({ version: 2, plugins: { 'shared-project-memory@shared-project-memory': [{}] } }))
-assert.equal(claudeMemoryPluginInstalled(fakeHome), true, 'plugin installed')
-console.log('plugin detection ok')
+// Bundled shared-project-memory plugin: detection, what to do, and the install/migrate order.
+// A fake CLI edits the same files the real claude/codex CLIs do (verified by hand with both CLIs).
+const pluginSrc = path.join(ROOT, 'plugins', 'shared-project-memory')
+const bundledV = pluginVersion(pluginSrc)
+for (const m of ['plugin.json', '.codex-plugin/plugin.json']) {
+  assert.equal(JSON.parse(fs.readFileSync(path.join(pluginSrc, m), 'utf8')).version, bundledV, `${m} has the same version as .claude-plugin/plugin.json`)
+}
+const homes = { claude: path.join(tmp, 'ph', 'claude'), codex: path.join(tmp, 'ph', 'codex') }
+fs.mkdirSync(path.join(homes.claude, 'plugins'), { recursive: true })
+fs.mkdirSync(homes.codex, { recursive: true })
+const cInstalled = path.join(homes.claude, 'plugins', 'installed_plugins.json')
+const cKnown = path.join(homes.claude, 'plugins', 'known_marketplaces.json')
+const toml = path.join(homes.codex, 'config.toml')
+const rj = (p: string): Record<string, any> => (fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : {})
+assert.deepEqual([installedPlugins('claude', homes), installedPlugins('codex', homes)], [[], []], 'nothing installed')
+assert.equal(pluginAction([], bundledV), 'install')
+// an old user: the GitHub version in Claude Code and Codex, plus another plugin from the same marketplace in Codex
+fs.writeFileSync(cInstalled, JSON.stringify({ version: 2, plugins: { 'shared-project-memory@shared-project-memory': [{ scope: 'user', version: '1.0.0' }], 'other@x': [{ scope: 'user' }] } }))
+fs.writeFileSync(cKnown, JSON.stringify({ 'shared-project-memory': {}, x: {} }))
+fs.writeFileSync(toml, '[marketplaces.shared-project-memory]\nsource_type = "git"\n\n[plugins."shared-project-memory@shared-project-memory"]\nenabled = true\n\n[plugins."helper@shared-project-memory"]\nenabled = true\n')
+fs.mkdirSync(path.join(homes.codex, 'plugins', 'cache', 'shared-project-memory', 'shared-project-memory', '1.0.0'), { recursive: true })
+assert.deepEqual(installedPlugins('codex', homes), [{ key: 'shared-project-memory@shared-project-memory', marketplace: 'shared-project-memory', version: '1.0.0', scope: 'user' }])
+assert.equal(pluginAction(installedPlugins('claude', homes), bundledV), 'migrate')
+const mkt = path.join(tmp, 'ph', 'mkt')
+prepareMarketplace(pluginSrc, mkt)
+assert.equal(pluginVersion(path.join(mkt, 'shared-project-memory')), bundledV)
+assert.equal(fs.existsSync(path.join(mkt, 'shared-project-memory', 'tests')), false, 'tests not copied')
+assert.equal(rj(path.join(mkt, '.claude-plugin', 'marketplace.json')).name, 'agent-workbench')
+assert.equal(rj(path.join(mkt, '.agents', 'plugins', 'marketplace.json')).plugins[0].source.path, './shared-project-memory')
+const calls: string[] = []
+const fakeCli = (agent: 'claude' | 'codex', failInstall = false) => async (args: string[]) => {
+  calls.push(`${agent} ${args.join(' ')}`)
+  const sub = args.slice(1).filter((a) => !a.startsWith('--') && a !== 'user')
+  if (agent === 'claude') {
+    const inst = rj(cInstalled)
+    const known = rj(cKnown)
+    if (sub[0] === 'marketplace' && sub[1] === 'add') known['agent-workbench'] = {}
+    if (sub[0] === 'marketplace' && sub[1] === 'remove') delete known[sub[2]]
+    if (sub[0] === 'install' || sub[0] === 'update') {
+      if (failInstall) return { code: 1, stdout: '', stderr: 'network down' }
+      inst.plugins[sub[1]] = [{ scope: 'user', version: bundledV }]
+    }
+    if (sub[0] === 'uninstall') delete inst.plugins[sub[1]]
+    fs.writeFileSync(cInstalled, JSON.stringify(inst))
+    fs.writeFileSync(cKnown, JSON.stringify(known))
+  } else {
+    let t = fs.readFileSync(toml, 'utf8')
+    if (sub[0] === 'marketplace' && sub[1] === 'add') t += '\n[marketplaces.agent-workbench]\nsource_type = "local"\n'
+    if (sub[0] === 'marketplace' && sub[1] === 'remove') t = t.replace(`[marketplaces.${sub[2]}]`, '')
+    if (sub[0] === 'add') {
+      t += `\n[plugins."${sub[1]}"]\nenabled = true\n`
+      fs.mkdirSync(path.join(homes.codex, 'plugins', 'cache', 'agent-workbench', 'shared-project-memory', bundledV), { recursive: true })
+    }
+    if (sub[0] === 'remove') t = t.replace(`[plugins."${sub[1]}"]`, '')
+    fs.writeFileSync(toml, t)
+  }
+  return { code: 0, stdout: '', stderr: '' }
+}
+// a failed install leaves the old version in place
+await assert.rejects(applyBundledPlugin('claude', fakeCli('claude', true), { marketplaceDir: mkt, homes }), (e: MemSyncError) => e.code === 'plugin-install-failed' && /network down/.test(e.message))
+assert.ok(rj(cInstalled).plugins['shared-project-memory@shared-project-memory'], 'old plugin kept when the new one failed')
+calls.length = 0
+await applyBundledPlugin('claude', fakeCli('claude'), { marketplaceDir: mkt, homes })
+assert.deepEqual(calls, [
+  'claude plugin marketplace update agent-workbench',
+  'claude plugin install shared-project-memory@agent-workbench --scope user',
+  'claude plugin uninstall shared-project-memory@shared-project-memory --scope user',
+  'claude plugin marketplace remove shared-project-memory'
+], 'claude: new first, then the old one and its now-empty marketplace')
+assert.deepEqual(Object.keys(rj(cInstalled).plugins).sort(), ['other@x', 'shared-project-memory@agent-workbench'])
+calls.length = 0
+await applyBundledPlugin('codex', fakeCli('codex'), { marketplaceDir: mkt, homes })
+assert.deepEqual(calls, [
+  `codex plugin marketplace add ${mkt}`,
+  'codex plugin add shared-project-memory@agent-workbench',
+  'codex plugin remove shared-project-memory@shared-project-memory'
+], 'codex: the old marketplace still has another plugin, so it stays')
+assert.equal(pluginAction(installedPlugins('codex', homes), bundledV), 'ok')
+assert.equal(pluginAction(installedPlugins('claude', homes), bundledV), 'ok')
+assert.equal(pluginAction([{ key: 'shared-project-memory@agent-workbench', marketplace: 'agent-workbench', version: '0.0.1', scope: 'user' }], bundledV), 'update')
+assert.equal(pluginAction([{ key: 'shared-project-memory@shared-project-memory', marketplace: 'shared-project-memory', version: '1.0.0', scope: 'project' }], bundledV), 'install', 'project-scope installs are left to the user')
+console.log('bundled plugin: versions agree, marketplace prepared, failed install keeps the old one, migrate order ok')
 
 // Claude Code entry file: written while the plugin is absent, removed once it is installed
 const projCl = path.join(tmp, 'claude-entry')

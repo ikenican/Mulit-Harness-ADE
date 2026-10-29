@@ -5,6 +5,7 @@ import CustomizedPanel from '@/panels/customized/CustomizedPanel'
 import RemoteSettings from './RemoteSettings'
 import CoworkSettings from './CoworkSettings'
 import MemorySyncSettings from './MemorySyncSettings'
+import MemoryPluginPrompt from './MemoryPluginPrompt'
 import CustomAgentSettings from './CustomAgentSettings'
 import {
   IconSun,
@@ -759,6 +760,8 @@ export default function SettingsModal({
   return (
     <div className="apple-modal-backdrop" onClick={onClose}>
       <div className="macos-settings-window" onClick={(e) => e.stopPropagation()}>
+        {/* 自帶的記憶 plugin：已啟用的 agent 沒裝或版本不對時，徵求同意後安裝 */}
+        <MemoryPluginPrompt auto />
         {/* Left Sidebar */}
         <div className="macos-settings-sidebar">
           <div className="macos-sidebar-header">

@@ -81,6 +81,17 @@ derived from `handoff.md` — never hand-copied, so it cannot drift.
 
 ## Install
 
+### With Agent Workbench (recommended)
+
+Agent Workbench ships this plugin (source: `plugins/shared-project-memory` in the Workbench
+repository). When Settings opens, Workbench offers to install it into every enabled Claude Code /
+Codex from a local marketplace named `agent-workbench`, and to replace a GitHub install
+(`@shared-project-memory`). The plugin then updates together with Workbench.
+
+Without the plugin, Claude Code still gets a memory snapshot: `sync-entry-files.sh` writes
+`.claude/rules/shared-memory.md` (local to the clone) and removes it once the plugin is installed,
+so the handoff is never loaded twice.
+
 ### Claude Code
 
 ```bash

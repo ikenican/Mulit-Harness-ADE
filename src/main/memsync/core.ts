@@ -59,19 +59,6 @@ export function defaultClonePath(home = os.homedir()): string {
   return path.join(home, '.ai-project-memory')
 }
 
-/**
- * Claude Code 是否裝了 shared-project-memory plugin。記憶的存放由 Workbench 負責，
- * 但 Claude Code 開局載入記憶與 /handoff 要靠這個 plugin；沒裝時設定頁提示安裝。
- */
-export function claudeMemoryPluginInstalled(home = os.homedir()): boolean {
-  try {
-    const j = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'))
-    return Object.keys(j?.plugins ?? {}).some((k) => k.startsWith('shared-project-memory@'))
-  } catch {
-    return false
-  }
-}
-
 // ── 雲端硬碟資料夾模式（OneDrive／Google Drive） ─────────────────────────
 // 記憶放在使用者選的資料夾（由雲端硬碟程式同步），Workbench 不做任何網路動作。
 // 資料夾根目錄放一個標記檔，commit-handoff.sh 靠它知道「存好就好，不用提交」。
@@ -822,4 +809,195 @@ export async function syncNow(
     if (st.linked) await restoreEntryFiles(tools, opts.workspace, st.target)
   }
   return res
+}
+
+// ── shared-project-memory plugin（隨 Workbench 出貨） ─────────────────────
+// 原始碼在 plugins/shared-project-memory。安裝時複製到使用者資料夾裡的本機 marketplace
+// 「agent-workbench」，Claude Code 與 Codex 都從那裡裝，版本跟著 Workbench 走。名稱和 GitHub 版
+// （@shared-project-memory）不同，所以能先裝好新版、確認成功後才移除舊版，中間不會沒有 plugin。
+
+export const PLUGIN = 'shared-project-memory'
+export const MARKETPLACE = 'agent-workbench'
+export const BUNDLED_KEY = `${PLUGIN}@${MARKETPLACE}`
+export type PluginAgent = 'claude' | 'codex'
+export const PLUGIN_AGENTS: PluginAgent[] = ['claude', 'codex']
+
+export interface InstalledPlugin {
+  key: string
+  marketplace: string
+  version: string | null
+  /** Claude Code 的安裝範圍；Codex 沒有範圍，一律 user */
+  scope: string
+}
+
+export interface PluginHomes {
+  claude: string
+  codex: string
+}
+
+export function defaultHomes(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): PluginHomes {
+  return { claude: env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), codex: env.CODEX_HOME || path.join(home, '.codex') }
+}
+
+const readText = (p: string): string => {
+  try {
+    return fs.readFileSync(p, 'utf8')
+  } catch {
+    return ''
+  }
+}
+const readJson = (p: string): Record<string, unknown> => {
+  try {
+    return JSON.parse(readText(p)) ?? {}
+  } catch {
+    return {}
+  }
+}
+const claudePluginKeys = (dir: string): string[] => Object.keys((readJson(path.join(dir, 'plugins', 'installed_plugins.json')).plugins ?? {}) as object)
+/** config.toml 裡 [plugins."<plugin>@<marketplace>"] 的 key */
+const codexPluginKeys = (dir: string): string[] => [...readText(path.join(dir, 'config.toml')).matchAll(/^\[plugins\."([^"]+)"\]/gm)].map((m) => m[1])
+
+/** Claude Code：plugins/installed_plugins.json 裡所有 shared-project-memory@* */
+function claudeInstalled(dir: string): InstalledPlugin[] {
+  const plugins = (readJson(path.join(dir, 'plugins', 'installed_plugins.json')).plugins ?? {}) as Record<string, unknown>
+  return Object.entries(plugins)
+    .filter(([key]) => key.startsWith(`${PLUGIN}@`))
+    .flatMap(([key, entries]) =>
+      (Array.isArray(entries) && entries.length ? entries : [{}]).map((e: { version?: unknown; scope?: unknown }) => ({
+        key,
+        marketplace: key.slice(PLUGIN.length + 1),
+        version: typeof e?.version === 'string' ? e.version : null,
+        scope: typeof e?.scope === 'string' ? e.scope : 'user'
+      }))
+    )
+}
+
+/** Codex：config.toml 的 [plugins."shared-project-memory@*"]；版本看 plugins/cache/<marketplace>/<plugin>/<version> */
+function codexInstalled(dir: string): InstalledPlugin[] {
+  return codexPluginKeys(dir)
+    .filter((key) => key.startsWith(`${PLUGIN}@`))
+    .map((key) => {
+      const marketplace = key.slice(PLUGIN.length + 1)
+      let version: string | null = null
+      try {
+        version = fs.readdirSync(path.join(dir, 'plugins', 'cache', marketplace, PLUGIN)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).pop() ?? null
+      } catch {
+        /* 沒有快取 */
+      }
+      return { key, marketplace, version, scope: 'user' }
+    })
+}
+
+export function installedPlugins(agent: PluginAgent, homes: PluginHomes = defaultHomes()): InstalledPlugin[] {
+  return agent === 'claude' ? claudeInstalled(homes.claude) : codexInstalled(homes.codex)
+}
+
+function marketplaceKnown(agent: PluginAgent, homes: PluginHomes): boolean {
+  if (agent === 'claude') return MARKETPLACE in readJson(path.join(homes.claude, 'plugins', 'known_marketplaces.json'))
+  return new RegExp(`^\\[marketplaces\\.${MARKETPLACE}\\]`, 'm').test(readText(path.join(homes.codex, 'config.toml')))
+}
+
+/** 這個 marketplace 是否還有別的 plugin（有的話不能整個移除） */
+function marketplaceInUse(agent: PluginAgent, homes: PluginHomes, marketplace: string): boolean {
+  return (agent === 'claude' ? claudePluginKeys(homes.claude) : codexPluginKeys(homes.codex)).some((k) => k.endsWith(`@${marketplace}`))
+}
+
+export function pluginVersion(pluginDir: string): string {
+  const v = readJson(path.join(pluginDir, '.claude-plugin', 'plugin.json')).version
+  if (typeof v !== 'string') throw new MemSyncError('plugin-missing', `no plugin manifest in ${pluginDir}`)
+  return v
+}
+
+export type PluginAction = 'ok' | 'install' | 'update' | 'migrate'
+
+/** 要做什麼：沒裝 → install；只有舊的自帶版 → update；有其他來源（GitHub、開發中的本機版）→ migrate */
+export function pluginAction(installed: InstalledPlugin[], bundledVersion: string): PluginAction {
+  if (installed.some((p) => p.key !== BUNDLED_KEY && p.scope === 'user')) return 'migrate'
+  const ours = installed.filter((p) => p.key === BUNDLED_KEY)
+  if (!ours.length) return 'install'
+  return ours.every((p) => p.version === bundledVersion) ? 'ok' : 'update'
+}
+
+/**
+ * 把自帶的 plugin 複製成本機 marketplace：
+ *   <dir>/.claude-plugin/marketplace.json   Claude Code
+ *   <dir>/.agents/plugins/marketplace.json  Codex
+ *   <dir>/shared-project-memory/            plugin 本體
+ * 版本相同就不重新複製。CLI 安裝時會再複製到自己的快取，所以這裡不會被執行中的 session 鎖住。
+ */
+export function prepareMarketplace(bundledDir: string, dir: string): void {
+  const target = path.join(dir, PLUGIN)
+  const version = pluginVersion(bundledDir)
+  let current: string | null = null
+  try {
+    current = pluginVersion(target)
+  } catch {
+    /* 還沒有 */
+  }
+  if (current !== version) {
+    fs.rmSync(target, { recursive: true, force: true })
+    fs.cpSync(bundledDir, target, { recursive: true, filter: (src) => path.basename(src) !== 'tests' })
+  }
+  const write = (rel: string, data: unknown): void => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.writeFileSync(path.join(dir, rel), JSON.stringify(data, null, 2) + '\n')
+  }
+  const description = 'Cross-tool shared project memory, bundled with Agent Workbench.'
+  write('.claude-plugin/marketplace.json', {
+    name: MARKETPLACE,
+    owner: { name: 'Agent Workbench' },
+    plugins: [{ name: PLUGIN, source: `./${PLUGIN}`, description }]
+  })
+  write('.agents/plugins/marketplace.json', {
+    name: MARKETPLACE,
+    interface: { displayName: 'Agent Workbench' },
+    plugins: [
+      {
+        name: PLUGIN,
+        source: { source: 'local', path: `./${PLUGIN}` },
+        policy: { installation: 'AVAILABLE', authentication: 'ON_INSTALL' },
+        category: 'Productivity'
+      }
+    ]
+  })
+}
+
+/** 執行某家 CLI 的 plugin 子指令；怎麼啟動（.cmd、npm shim）由呼叫端決定 */
+export type CliExec = (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>
+
+/**
+ * 裝上自帶版並移除其他來源的 shared-project-memory。先裝新的、確認裝好，才移除舊的；
+ * 新的沒裝成功就丟錯，舊的不動。只處理 user 範圍，專案範圍的安裝留給使用者。回傳執行過的指令。
+ */
+export async function applyBundledPlugin(agent: PluginAgent, exec: CliExec, opts: { marketplaceDir: string; homes?: PluginHomes }): Promise<string[]> {
+  const homes = opts.homes ?? defaultHomes()
+  const log: string[] = []
+  const step = async (args: string[], allowFail = false): Promise<void> => {
+    log.push(`${agent} ${args.join(' ')}`)
+    const r = await exec(args)
+    if (r.code !== 0 && !allowFail) throw new MemSyncError('plugin-install-failed', `${agent} ${args.join(' ')}: ${(r.stderr || r.stdout).trim().slice(0, 400)}`)
+  }
+  const bundledVersion = pluginVersion(path.join(opts.marketplaceDir, PLUGIN))
+  const before = installedPlugins(agent, homes)
+  const ours = before.find((p) => p.key === BUNDLED_KEY)
+
+  if (agent === 'claude') {
+    await step(marketplaceKnown(agent, homes) ? ['plugin', 'marketplace', 'update', MARKETPLACE] : ['plugin', 'marketplace', 'add', opts.marketplaceDir])
+    if (!ours) await step(['plugin', 'install', BUNDLED_KEY, '--scope', 'user'])
+    else if (ours.version !== bundledVersion) await step(['plugin', 'update', BUNDLED_KEY])
+  } else {
+    if (!marketplaceKnown(agent, homes)) await step(['plugin', 'marketplace', 'add', opts.marketplaceDir])
+    // 本機 marketplace 沒有 upgrade：舊版先移除再裝
+    if (ours && ours.version !== bundledVersion) await step(['plugin', 'remove', BUNDLED_KEY])
+    if (!ours || ours.version !== bundledVersion) await step(['plugin', 'add', BUNDLED_KEY])
+  }
+  if (!installedPlugins(agent, homes).some((p) => p.key === BUNDLED_KEY)) {
+    throw new MemSyncError('plugin-install-failed', `${agent}: ${BUNDLED_KEY} is not listed as installed after the install`)
+  }
+
+  for (const old of before.filter((p) => p.key !== BUNDLED_KEY && p.scope === 'user')) {
+    await step(agent === 'claude' ? ['plugin', 'uninstall', old.key, '--scope', 'user'] : ['plugin', 'remove', old.key])
+    if (!marketplaceInUse(agent, homes, old.marketplace)) await step(['plugin', 'marketplace', 'remove', old.marketplace], true)
+  }
+  return log
 }

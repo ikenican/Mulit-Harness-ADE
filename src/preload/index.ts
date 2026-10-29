@@ -249,7 +249,14 @@ const api = {
     onProjectOpen: (): Promise<
       MemSyncResult<{ pulled: MemSyncSyncResult | null; linked: MemSyncLinkResult | null; needsReview: 'tracked' | 'differs' | null } | null>
     > => ipcRenderer.invoke('memsync:onProjectOpen'),
-    openClone: (): Promise<void> => ipcRenderer.invoke('memsync:openClone')
+    openClone: (): Promise<void> => ipcRenderer.invoke('memsync:openClone'),
+    /** Workbench 自帶的 shared-project-memory plugin：每家 agent 的安裝狀態 */
+    pluginState: (): Promise<MemSyncResult<MemoryPluginState>> => ipcRenderer.invoke('memsync:pluginState'),
+    /** 使用者同意後：裝上自帶版，並移除其他來源的版本 */
+    applyPlugin: (agents: MemoryPluginAgent[]): Promise<MemSyncResult<{ results: MemoryPluginApplyResult[]; state: MemoryPluginState }>> =>
+      ipcRenderer.invoke('memsync:applyPlugin', agents),
+    /** 使用者拒絕：這個自帶版本不再自動詢問 */
+    declinePlugin: (): Promise<MemSyncResult<MemoryPluginState>> => ipcRenderer.invoke('memsync:declinePlugin')
   },
   // Cowork 多 agent 規劃會議 —— main/ipc/cowork.ts（設計見 cowork.md）
   cowork: {
@@ -696,6 +703,8 @@ export interface MemSyncConfig {
   autoSync: boolean
   /** 開專案時把有記憶的專案自動接上 */
   autoLink: boolean
+  /** 使用者拒絕安裝的自帶 plugin 版本 */
+  pluginDeclined: string | null
 }
 export interface MemSyncState {
   config: MemSyncConfig
@@ -707,8 +716,6 @@ export interface MemSyncState {
   root: string | null
   rootReady: boolean
   gitMissing: boolean
-  /** Claude Code 裝了 shared-project-memory plugin（開局載入記憶、/handoff） */
-  memoryPlugin: boolean
   gh: { installed: boolean; loggedIn: boolean; login?: string }
   clone: { exists: boolean; origin?: string; ahead?: number; behind?: number; dirty?: boolean }
   project: {
@@ -725,7 +732,31 @@ export interface MemSyncState {
     memoryDiffers: boolean
     branch: string
   } | null
-  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string; installPlugin: string }
+  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string }
+}
+export type MemoryPluginAgent = 'claude' | 'codex'
+export interface MemoryPluginAgentState {
+  agent: MemoryPluginAgent
+  /** 設定裡有啟用這家 agent */
+  enabled: boolean
+  /** 找得到 CLI */
+  cli: boolean
+  /** 已安裝的 shared-project-memory（任何來源） */
+  installed: { key: string; version: string | null; scope: string }[]
+  /** ok：已是自帶版；install：沒裝；update：自帶版較舊；migrate：有 GitHub 或其他來源的版本 */
+  action: 'ok' | 'install' | 'update' | 'migrate'
+}
+export interface MemoryPluginState {
+  bundledVersion: string
+  /** 使用者拒絕過的自帶版本；和 bundledVersion 相同就不自動詢問 */
+  declined: string | null
+  agents: MemoryPluginAgentState[]
+}
+export interface MemoryPluginApplyResult {
+  agent: MemoryPluginAgent
+  ok: boolean
+  log: string[]
+  error?: string
 }
 export interface MemSyncRepoResult {
   repo: string
