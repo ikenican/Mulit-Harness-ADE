@@ -7,8 +7,8 @@
 # them to run status.sh, we derive the current handoff INTO the files they already read.
 #
 # handoff.md remains the single source of truth. The block below is GENERATED - never hand-edited.
-# Bundled with Agent Workbench (memory sync) and run by commit-handoff.sh, Workbench and the
-# post-merge hook. Entry files tracked by the project repository are never written.
+# Bundled with Agent Workbench (memory sync) and the shared-project-memory plugin; run by
+# commit-handoff.sh and Workbench. Entry files tracked by the project repository are never written.
 
 set -e
 MEM="$(cd "$(dirname "$0")" && pwd)"

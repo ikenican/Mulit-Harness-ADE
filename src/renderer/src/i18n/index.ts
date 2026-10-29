@@ -360,6 +360,8 @@ export const translations = {
       cloneCounts: 'Local commits not pushed: {ahead} · not pulled: {behind}',
       cloneDirty: 'uncommitted changes',
       handoffNote: 'Agents save handoffs with bash .project-memory/commit-handoff.sh; it follows this setting (off: local only, folder: saved, GitHub: committed and pushed).',
+      pluginMissing: 'The shared-project-memory plugin is not installed in Claude Code, so Claude Code does not load this memory at startup and has no /handoff. Memory is still stored as set here; install the plugin for handoffs.',
+      installPlugin: 'Install the plugin',
       working: 'Working…',
       err: {
         'git-missing': 'Git is not installed (winget install --id Git.Git -e).',
@@ -1239,6 +1241,8 @@ export const translations = {
       cloneCounts: '本機未推送的提交：{ahead} · 尚未拉取：{behind}',
       cloneDirty: '有未提交的改動',
       handoffNote: 'AI 交接時執行 bash .project-memory/commit-handoff.sh，會依這裡的設定處理（未開啟：只存本機；資料夾：存好即可；GitHub：提交並推送）。',
+      pluginMissing: 'Claude Code 尚未安裝 shared-project-memory plugin：Claude Code 開局不會載入專案記憶，也沒有 /handoff。記憶仍照這裡的設定存放；要交接請先安裝 plugin。',
+      installPlugin: '安裝 plugin',
       working: '處理中…',
       err: {
         'git-missing': '尚未安裝 Git（winget install --id Git.Git -e）。',

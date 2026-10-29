@@ -59,6 +59,19 @@ export function defaultClonePath(home = os.homedir()): string {
   return path.join(home, '.ai-project-memory')
 }
 
+/**
+ * Claude Code 是否裝了 shared-project-memory plugin。記憶的存放由 Workbench 負責，
+ * 但 Claude Code 開局載入記憶與 /handoff 要靠這個 plugin；沒裝時設定頁提示安裝。
+ */
+export function claudeMemoryPluginInstalled(home = os.homedir()): boolean {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'))
+    return Object.keys(j?.plugins ?? {}).some((k) => k.startsWith('shared-project-memory@'))
+  } catch {
+    return false
+  }
+}
+
 // ── 雲端硬碟資料夾模式（OneDrive／Google Drive） ─────────────────────────
 // 記憶放在使用者選的資料夾（由雲端硬碟程式同步），Workbench 不做任何網路動作。
 // 資料夾根目錄放一個標記檔，commit-handoff.sh 靠它知道「存好就好，不用提交」。

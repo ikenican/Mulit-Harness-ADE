@@ -13,6 +13,7 @@ import {
   DEFAULT_REPO_NAME,
   MEMORY_DIR,
   autoLinkBlock,
+  claudeMemoryPluginInstalled,
   ensureLocalExclude,
   MemSyncError,
   cloneState,
@@ -149,7 +150,9 @@ function commands(gh: string | null): MemSyncState['commands'] {
     loginGh: `${ghCmd} auth login --hostname github.com --git-protocol https --web; ${ghCmd} auth setup-git`,
     // 雲端硬碟程式：winget 官方套件（Microsoft／Google LLC）；macOS 用 Homebrew cask
     installOneDrive: isWin ? 'winget install --id Microsoft.OneDrive -e --source winget' : 'brew install --cask onedrive',
-    installGDrive: isWin ? 'winget install --id Google.GoogleDrive -e --source winget' : 'brew install --cask google-drive'
+    installGDrive: isWin ? 'winget install --id Google.GoogleDrive -e --source winget' : 'brew install --cask google-drive',
+    // Claude Code 的記憶 plugin：開局載入記憶與 /handoff；存放仍照這裡的設定
+    installPlugin: 'claude plugin marketplace add zkylek1212-k/ShareProjectMem; claude plugin install shared-project-memory@shared-project-memory'
   }
 }
 
@@ -164,6 +167,7 @@ async function state(workspace: string): Promise<MemSyncState> {
   const cloudApps = detectCloudApps()
   const root = memoryRoot(config)
   const ready = !!root && rootReady(root)
+  const memoryPlugin = claudeMemoryPluginInstalled()
   let t: Tools
   try {
     t = await tools()
@@ -175,6 +179,7 @@ async function state(workspace: string): Promise<MemSyncState> {
       root,
       rootReady: ready,
       gitMissing: true,
+      memoryPlugin,
       gh: { installed: false, loggedIn: false },
       clone: { exists: false },
       project: null,
@@ -187,7 +192,7 @@ async function state(workspace: string): Promise<MemSyncState> {
     cloneState(t, config.clonePath)
   ])
   const project = root && (await isGitRepo(t, workspace)) ? await projectState(t, { workspace, clonePath: root }) : null
-  return { config, cloudRoots, cloudApps, root, rootReady: ready, gitMissing: false, gh, clone, project, commands: commands(t.gh) }
+  return { config, cloudRoots, cloudApps, root, rootReady: ready, gitMissing: false, memoryPlugin, gh, clone, project, commands: commands(t.gh) }
 }
 
 async function wrap<T>(fn: () => Promise<T>): Promise<MemSyncResult<T>> {
