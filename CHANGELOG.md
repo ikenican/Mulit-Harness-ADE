@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.44] - 2026-10-29
+
+### Changed / 變更
+- 記憶同步的「自動接上專案」不再修改專案 repo：只寫入這個 clone 的 `.git/info/exclude`，不會產生 commit，也不改 `.gitignore`。repo 仍追蹤記憶檔，或本機記憶和共用的不同（例如同一個 repo 的另一個 clone）時，不會自動接上，會發一次通知，請你到 設定 → 記憶同步 → 這個專案 決定。（PR #52）
+- Memory sync auto-link no longer changes the project repository: it only writes this clone's `.git/info/exclude` (no commit, no `.gitignore` edit). Projects that still track memory files, or whose local memory differs from the shared copy, are not linked automatically. You get a notification and decide under Settings → Memory sync → This project.
+
+### Fixed / 修復
+- 專案自己追蹤的 `AGENTS.md`、`.agents/rules/shared-memory.md` 不會再被取消追蹤，也不會被寫入交接內容，避免記憶變成專案 repo 的待提交改動。（PR #52）
+- An `AGENTS.md` or `.agents/rules/shared-memory.md` that the project tracks itself is never untracked or written with the handoff, so memory can no longer become a pending change of the project repository.
+- 儀表板每個會話的「封存」按鈕沒有作用（封存和還原都無效）。（PR #54，Issue #53）
+- The per-session Archive button on the Dashboard did nothing, for both archive and restore.
+
 ## [0.1.43] - 2026-10-29
 
 ### Fixed / 修復
