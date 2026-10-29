@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.45] - 2026-10-29
+
+### Added / 新增
+- 設定 → 記憶同步：Claude Code 沒有安裝 shared-project-memory plugin 時，會顯示提示和「安裝 plugin」按鈕（把安裝指令貼進新的終端）。記憶的存放與同步仍由 Workbench 負責；Claude Code 開局載入記憶和 `/handoff` 要靠這個 plugin。（PR #56）
+- Settings → Memory sync warns when Claude Code does not have the shared-project-memory plugin, with an "Install the plugin" button that pastes the install commands into a new shell. Workbench still stores and syncs the memory; the plugin loads it at Claude Code startup and provides `/handoff`.
+
+### Changed / 變更
+- 記憶腳本（`commit-handoff.sh`、`status.sh`、`sync-entry-files.sh`）與 shared-project-memory plugin v1.1.0 完全相同，兩邊對「記憶絕不進專案 repo」的規則一致。（PR #56）
+- The memory scripts are now identical to shared-project-memory plugin v1.1.0, so both agree that memory never goes into the project repository.
+
 ## [0.1.44] - 2026-10-29
 
 ### Changed / 變更
