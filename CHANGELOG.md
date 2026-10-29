@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.43] - 2026-10-29
+
+### Fixed / 修復
+- 從空白工作區（預設啟動狀態）第一次切換資料夾時，現在也會接續該專案最後使用的 CLI。只有啟動時從後端還原的那一次不算切換。（PR #50）
+- Switching folders for the first time from the empty startup workspace now resumes that project's last CLI; only the startup restore from the backend is skipped.
+
+### Changed / 變更
+- 從儀表板切換資料夾後會留在儀表板，不再跳到檔案頁。「開啟資料夾」與「Clone」仍會切到檔案頁。（PR #50）
+- Switching folders from the dashboard keeps the dashboard open; Open folder and Clone still go to Files.
+
 ## [0.1.42] - 2026-10-28
 
 ### Added / 新增
