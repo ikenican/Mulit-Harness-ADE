@@ -87,19 +87,22 @@ export default function MemorySyncSettings(): JSX.Element {
     )
   }
 
-  const link = async (): Promise<void> => {
+  // prefer：本機與共用的記憶內容不同時，使用者選用哪一份
+  const link = async (prefer?: 'shared' | 'local'): Promise<void> => {
     if (!p) return
     const lines = [
       p.linkedToOldStore
         ? t('memsync.confirmMigrate', { key: p.key, from: p.linkedTo || '' })
-        : p.hasRemoteMemory
-          ? t('memsync.confirmFromStore', { key: p.key })
-          : t('memsync.confirmMove', { key: p.key }),
+        : prefer === 'local'
+          ? t('memsync.confirmUseLocal', { key: p.key })
+          : p.hasRemoteMemory
+            ? t('memsync.confirmFromStore', { key: p.key })
+            : t('memsync.confirmMove', { key: p.key }),
       p.hasLocalMemory || p.linkedToOldStore ? t('memsync.confirmBackup') : '',
-      p.tracked.length ? t('memsync.confirmUntrack', { n: p.tracked.length }) : ''
+      p.tracked.length ? t('memsync.confirmUntrack', { n: p.tracked.length, branch: p.branch || 'HEAD' }) : ''
     ].filter(Boolean)
     if (!window.confirm(lines.join('\n\n'))) return
-    await act('link', () => window.api.memsync.linkProject(), (d) =>
+    await act('link', () => window.api.memsync.linkProject(prefer), (d) =>
       [
         t(d.result.source === 'local' ? 'memsync.linkedMoved' : d.result.source === 'repo' ? 'memsync.linkedFromStore' : 'memsync.linkedAlready'),
         d.result.projectCommit ? t('memsync.projectCommit', { hash: d.result.projectCommit }) : ''
@@ -474,7 +477,20 @@ export default function MemorySyncSettings(): JSX.Element {
                               : t('memsync.projectNoMemory')}
                     </p>
                     {p.linked && p.tracked.length > 0 && <p className="remote-note danger">⚠️ {t('memsync.stillTracked', { n: p.tracked.length })}</p>}
-                    {(p.linkedToOldStore || (!p.linkedElsewhere && (p.hasLocalMemory || p.hasRemoteMemory || (p.linked && p.tracked.length > 0)))) && (
+                    {p.trackedEntries.length > 0 && <p className="macos-row-sub">{t('memsync.trackedEntries', { files: p.trackedEntries.join(', ') })}</p>}
+                    {!p.linked && !p.linkedElsewhere && p.memoryDiffers ? (
+                      <>
+                        <p className="remote-note danger">⚠️ {t('memsync.memoryDiffers')}</p>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <button type="button" className="macos-btn-primary" disabled={acting} onClick={() => void link('shared')}>
+                            {busy === 'link' ? t('memsync.working') : t('memsync.useShared')}
+                          </button>
+                          <button type="button" className="macos-btn-secondary" disabled={acting} onClick={() => void link('local')}>
+                            {t('memsync.useLocal')}
+                          </button>
+                        </div>
+                      </>
+                    ) : (p.linkedToOldStore || (!p.linkedElsewhere && (p.hasLocalMemory || p.hasRemoteMemory || (p.linked && p.tracked.length > 0)))) && (
                       <button type="button" className="macos-btn-primary" disabled={acting} onClick={() => void link()}>
                         {busy === 'link'
                           ? t('memsync.working')

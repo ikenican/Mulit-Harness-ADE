@@ -12,6 +12,8 @@ import { getWorkspaceForEvent } from '../index'
 import {
   DEFAULT_REPO_NAME,
   MEMORY_DIR,
+  autoLinkBlock,
+  ensureLocalExclude,
   MemSyncError,
   cloneState,
   defaultClonePath,
@@ -34,9 +36,10 @@ import {
 import type { MemSyncBackend, MemSyncConfig, MemSyncState, MemSyncResult } from '../../preload/index'
 import commitHandoffScript from '../memsync/templates/commit-handoff.sh?raw'
 import statusScript from '../memsync/templates/status.sh?raw'
+import syncEntryFilesScript from '../memsync/templates/sync-entry-files.sh?raw'
 
-/** 接上記憶同步的專案一律用這兩個腳本（依設定存本機／雲端資料夾／私人 repo，絕不寫進專案 repo） */
-const MEMORY_SCRIPTS = { 'commit-handoff.sh': commitHandoffScript, 'status.sh': statusScript }
+/** 有記憶的專案一律用這些腳本（依設定存本機／雲端資料夾／私人 repo，絕不寫進專案 repo） */
+const MEMORY_SCRIPTS = { 'commit-handoff.sh': commitHandoffScript, 'status.sh': statusScript, 'sync-entry-files.sh': syncEntryFilesScript }
 
 const configFile = (): string => path.join(app.getPath('userData'), 'memory-sync.json')
 const SYNC_INTERVAL_MS = 10 * 60 * 1000
@@ -311,14 +314,18 @@ export function registerMemSyncHandlers(): void {
     })
   )
 
-  ipcMain.handle('memsync:linkProject', (event) =>
+  // 使用者在設定頁按下（已確認）：可以提交「停止追蹤」；記憶內容不同時由使用者選用哪一份
+  ipcMain.handle('memsync:linkProject', (event, prefer?: 'shared' | 'local') =>
     wrap(async () => {
       const c = loadMemSyncConfig()
       const root = requireRoot(c)
       const workspace = getWorkspaceForEvent(event)
       const t = await tools()
       if (!(await isGitRepo(t, workspace))) throw new MemSyncError('not-a-git-repo', workspace)
-      const r = await exclusive(() => linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS, migrate: true }))
+      const pick = prefer === 'shared' || prefer === 'local' ? prefer : undefined
+      const r = await exclusive(() =>
+        linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS, migrate: true, allowCommit: true, prefer: pick })
+      )
       return { result: r, state: await state(workspace) }
     })
   )
@@ -357,16 +364,20 @@ export function registerMemSyncHandlers(): void {
         const pulled = c.backend === 'github' && !c.autoSync ? null : await syncNow(t, { clonePath: root, workspace, pullOnly: true })
         const p = await projectState(t, { workspace, clonePath: root })
         let linked: Awaited<ReturnType<typeof linkProject>> | null = null
-        if (c.autoLink && p.linkedElsewhere && p.linkedToOldStore) {
-          // 換過存放方式：Workbench 自己建的舊連結自動搬到新位置
-          linked = await linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS, migrate: true })
-        } else if (c.autoLink && !p.linked && !p.linkedElsewhere && (p.hasLocalMemory || p.hasRemoteMemory)) {
-          linked = await linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS })
+        let needsReview: ReturnType<typeof autoLinkBlock> = null
+        // 換過存放方式（Workbench 自己建的舊連結搬到新位置），或有記憶但還沒接上
+        const auto = c.autoLink && ((p.linkedElsewhere && p.linkedToOldStore) || (!p.linked && !p.linkedElsewhere && (p.hasLocalMemory || p.hasRemoteMemory)))
+        if (auto) {
+          // 自動接上不動專案 repo、不蓋掉內容不同的記憶；需要確認的留在 設定 → 記憶同步 → 這個專案
+          needsReview = autoLinkBlock(p)
+          if (!needsReview) linked = await linkProject(t, { workspace, clonePath: root, login: c.login || undefined, scripts: MEMORY_SCRIPTS, migrate: true })
         } else if (p.linked) {
           // 已連結的專案：腳本跟著 Workbench 更新（另一台電腦連結時寫進共用位置的可能是舊版）
           ensureMemoryScripts(p.target, MEMORY_SCRIPTS)
+          await ensureLocalExclude(t, workspace)
+          needsReview = autoLinkBlock(p)
         }
-        return { pulled, linked }
+        return { pulled, linked, needsReview }
       })
     })
   )

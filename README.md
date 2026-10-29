@@ -71,7 +71,7 @@ Open the rendered [Cowork architecture and meeting flow](docs/architecture.html#
 1. Turn on the consent switch and choose where memory lives:
    - **GitHub (private repository)** — versioned. Either install the GitHub CLI and let Workbench create the repository, or choose **Without installing gh** and click **Create private repository automatically**, then sign in to GitHub in the window Git opens (Git Credential Manager, bundled with Git for Windows). A fallback opens GitHub's new-repository page with the name and Private pre-filled; paste the URL back. Public repositories are always refused.
    - **OneDrive / Google Drive** — pick a subfolder inside the synced drive; the drive app does the syncing and Workbench only reads and writes that folder. If the app is missing, Workbench pastes the official winget install command into a terminal; if it is installed but not signed in, Workbench opens it for you.
-2. Every project you open is linked automatically: its `.project-memory` becomes a link into the shared location (one folder per project), and the project repository stops tracking memory files with one small commit. GitHub mode pulls when a project opens and syncs in the background every 10 minutes.
+2. Every project you open is linked automatically: its `.project-memory` becomes a link into the shared location (one folder per project), without changing the project repository (memory is ignored through this clone's `.git/info/exclude`; no commit, no `.gitignore` edit, and an `AGENTS.md` the project tracks itself is left alone). Projects that still track memory files, or whose local memory differs from the shared copy (for example a second clone of the same repository), are not linked automatically: Workbench notifies you and you decide under **This project**. GitHub mode pulls when a project opens and syncs in the background every 10 minutes.
 3. On another computer, enable memory sync with the same storage; projects link to the existing memory when opened.
 
 Switching storage later migrates linked projects on open and keeps the old copy. See [docs/two-pc-workflow.md](docs/two-pc-workflow.md) for a two-computer walkthrough.
@@ -350,7 +350,7 @@ N 個內嵌 CLI 終端，以及 Cowork 多 agent 會議。以 Electron + React +
 1. 打開同意開關，選擇記憶放哪裡：
    - **GitHub（私人 repo）**——有版本紀錄。可以安裝 GitHub CLI 讓 Workbench 建立 repo，或選**不安裝 gh**，按**自動建立私人 repo**，再在 Git 跳出的視窗登入 GitHub（Git for Windows 內建的 Git Credential Manager）。備用方式會開啟名稱與 Private 都已預填的 GitHub 建立頁，建好後貼回網址。公開 repo 一律拒絕。
    - **OneDrive／Google Drive**——在雲端硬碟的同步資料夾裡選一個子資料夾，由雲端硬碟程式負責同步，Workbench 只讀寫那個資料夾。沒安裝時，Workbench 會把官方 winget 安裝指令貼進終端；已安裝但沒登入時，會幫你開啟程式登入。
-2. 之後打開的每個專案都會自動接上：`.project-memory` 變成指向共用位置的連結（每個專案一個資料夾），專案 repo 用一個小提交停止追蹤記憶檔。GitHub 模式在打開專案時拉取，並每 10 分鐘背景同步。
+2. 之後打開的每個專案都會自動接上：`.project-memory` 變成指向共用位置的連結（每個專案一個資料夾），不會修改專案 repo（只寫這個 clone 的 `.git/info/exclude`，不產生提交、不改 `.gitignore`，專案自己追蹤的 `AGENTS.md` 也不碰）。repo 仍追蹤記憶檔、或本機記憶和共用的不同（例如同一個 repo 的另一個 clone）時不會自動接上，Workbench 會通知你到**這個專案**區塊決定。GitHub 模式在打開專案時拉取，並每 10 分鐘背景同步。
 3. 另一台電腦開啟記憶同步並選同一個存放位置，打開專案時就會接上既有的記憶。
 
 之後換存放位置，已連結的專案會在打開時搬過去並保留舊的一份。兩台電腦的完整流程見 [docs/two-pc-workflow.md](docs/two-pc-workflow.md)。

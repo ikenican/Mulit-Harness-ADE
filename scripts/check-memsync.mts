@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { connectRepoByUrl, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
+import { autoLinkBlock, connectRepoByUrl, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-check-'))
@@ -62,9 +62,8 @@ const g = async (cwd: string, ...args: string[]): Promise<string> => {
   return r.stdout
 }
 const isLink = (p: string): boolean => fs.lstatSync(p).isSymbolicLink()
-// 專案的記憶腳本：這個 repo 不追蹤 .project-memory，從內建範本與 fixture 取（不依賴本機記憶）
-const memScript = (f: string): string =>
-  f === 'sync-entry-files.sh' ? path.join(ROOT, 'scripts', 'fixtures', f) : path.join(ROOT, 'src', 'main', 'memsync', 'templates', f)
+// 專案的記憶腳本：這個 repo 不追蹤 .project-memory，一律用 Workbench 內建的範本（不依賴本機記憶）
+const memScript = (f: string): string => path.join(ROOT, 'src', 'main', 'memsync', 'templates', f)
 
 // ── project repo on GitHub, with memory tracked the old way ─────────────
 const projBare = path.join(remotes, 'someone', 'demo.git')
@@ -108,11 +107,14 @@ assert.equal(repos.get('tester/ai-project-memory'), true, 'created private')
 const sA = await projectState(tools, { workspace: projA, clonePath: memA })
 assert.equal(sA.key, 'someone/demo')
 assert.ok(sA.hasLocalMemory && !sA.hasRemoteMemory && !sA.linked)
-assert.ok(sA.tracked.includes('.project-memory/handoff.md') && sA.tracked.includes('AGENTS.md'))
+assert.ok(sA.tracked.includes('.project-memory/handoff.md') && sA.trackedEntries.includes('AGENTS.md') && !sA.tracked.includes('AGENTS.md'))
+assert.equal(autoLinkBlock(sA), 'tracked', 'tracked memory is never linked automatically')
+await assert.rejects(linkProject(tools, { workspace: projA, clonePath: memA, login: 'tester' }), (e: MemSyncError) => e.code === 'needs-review')
+assert.ok(!isLink(path.join(projA, '.project-memory')), 'refused link changed nothing')
 // the user has an unrelated change staged: it must not end up in the untrack commit, and stays staged
 fs.writeFileSync(path.join(projA, 'app.js'), 'console.log(2)\n')
 await g(projA, 'add', 'app.js')
-const l1 = await linkProject(tools, { workspace: projA, clonePath: memA, login: 'tester' })
+const l1 = await linkProject(tools, { workspace: projA, clonePath: memA, login: 'tester', allowCommit: true })
 assert.deepEqual((await g(projA, 'show', '--name-only', '--format=', 'HEAD')).split(/\r?\n/).filter((f) => f === 'app.js'), [], 'staged app.js not in the untrack commit')
 assert.equal((await g(projA, 'diff', '--cached', '--name-only')).trim(), 'app.js', 'app.js still staged')
 await g(projA, 'commit', '-q', '-m', 'unrelated change')
@@ -120,22 +122,23 @@ assert.equal(l1.source, 'local')
 assert.ok(l1.backup && fs.existsSync(path.join(l1.backup, 'handoff.md')), 'local backup kept')
 assert.ok(isLink(path.join(projA, '.project-memory')), '.project-memory is now a link')
 assert.match(fs.readFileSync(path.join(projA, '.project-memory', 'handoff.md'), 'utf8'), /A1/)
-// project repo: memory and entry files no longer tracked, ignored, nothing else touched
+// project repo: memory no longer tracked and ignored; the project's own AGENTS.md / rules stay tracked and untouched
 const trackedAfter = (await g(projA, 'ls-files')).split(/\r?\n/).filter(Boolean)
-assert.deepEqual(trackedAfter.sort(), ['.gitignore', 'app.js'])
+assert.deepEqual(trackedAfter.sort(), ['.agents/rules/shared-memory.md', '.gitignore', 'AGENTS.md', 'app.js'])
+assert.equal(fs.readFileSync(path.join(projA, 'AGENTS.md'), 'utf8'), '# Agents\n', 'tracked AGENTS.md not rewritten')
 assert.equal((await g(projA, 'status', '--porcelain')).trim(), '', 'project working tree clean (link, entry files ignored)')
 assert.match(fs.readFileSync(path.join(projA, '.gitignore'), 'utf8'), /\.project-memory\//)
 assert.ok(l1.projectCommit)
 assert.equal((await g(projA, 'log', '-1', '--skip=1', '--format=%s')).trim(), 'chore: move project memory to a private repository')
 assert.deepEqual(
   (await g(projA, 'show', '--name-status', '--format=', 'HEAD~1')).split(/\r?\n/).filter(Boolean).map((l) => l.split('\t')[1]).sort(),
-  ['.agents/rules/shared-memory.md', '.gitignore', '.project-memory/INDEX.md', '.project-memory/commit-handoff.sh', '.project-memory/handoff.md',
-    '.project-memory/status.sh', '.project-memory/sync-entry-files.sh', 'AGENTS.md'].sort(),
+  ['.gitignore', '.project-memory/INDEX.md', '.project-memory/commit-handoff.sh', '.project-memory/handoff.md',
+    '.project-memory/status.sh', '.project-memory/sync-entry-files.sh'].sort(),
   'untrack commit touches only memory paths and .gitignore'
 )
 // memory repo: pushed, backups not committed
 const remoteFiles = (await g(memA, 'ls-tree', '-r', '--name-only', 'origin/main')).split(/\r?\n/)
-assert.ok(remoteFiles.includes('someone/demo/handoff.md') && remoteFiles.includes('someone/demo/entry/AGENTS.md'))
+assert.ok(remoteFiles.includes('someone/demo/handoff.md'))
 assert.ok(!remoteFiles.some((f) => f.startsWith('.local-backups/')), 'backups stay local')
 console.log('PC A: private repo created, memory moved + pushed, project stopped tracking memory ok')
 
@@ -174,10 +177,9 @@ const l2 = await linkProject(tools, { workspace: projB, clonePath: memB, login: 
 assert.equal(l2.source, 'repo')
 assert.ok(!l2.projectCommit, 'no project commit needed on PC B')
 assert.match(fs.readFileSync(path.join(projB, '.project-memory', 'handoff.md'), 'utf8'), /A2/)
-assert.ok(fs.existsSync(path.join(projB, 'AGENTS.md')), 'entry files restored from the memory repo')
-assert.match(fs.readFileSync(path.join(projB, 'AGENTS.md'), 'utf8'), /BEGIN AUTO-MEMORY/)
+assert.doesNotMatch(fs.readFileSync(path.join(projB, 'AGENTS.md'), 'utf8'), /AUTO-MEMORY/, 'tracked AGENTS.md: no handoff written into it')
 assert.equal((await g(projB, 'status', '--porcelain')).trim(), '')
-console.log('PC B: linked from the private repo, entry files restored ok')
+console.log('PC B: linked from the private repo, tracked entry files untouched ok')
 
 // B writes, A syncs
 fs.appendFileSync(path.join(projB, '.project-memory', 'handoff.md'), '- B1\n')
@@ -186,8 +188,9 @@ assert.equal(chB.code, 0, chB.stdout + chB.stderr)
 const sync = await syncNow(tools, { clonePath: memA, workspace: projA, login: 'tester' })
 assert.ok(sync.pulled && !sync.error, JSON.stringify(sync))
 assert.match(fs.readFileSync(path.join(projA, '.project-memory', 'handoff.md'), 'utf8'), /B1/)
-assert.match(fs.readFileSync(path.join(projA, 'AGENTS.md'), 'utf8'), /B1/, 'A entry files refreshed after sync')
-console.log('sync: B -> private repo -> A, entry files refreshed ok')
+assert.equal(fs.readFileSync(path.join(projA, 'AGENTS.md'), 'utf8'), '# Agents\n', 'tracked AGENTS.md left alone by sync')
+assert.equal((await g(projA, 'status', '--porcelain')).trim(), '', 'sync leaves the project repo clean')
+console.log('sync: B -> private repo -> A, project repo stays clean ok')
 
 // uncommitted edit on A + new commit on B → syncNow commits, rebases, pushes
 fs.appendFileSync(path.join(projA, '.project-memory', 'STATE.md'), 'A state\n')
@@ -242,10 +245,10 @@ fs.mkdirSync(path.join(projC, '.project-memory'))
 for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) fs.copyFileSync(memScript(f), path.join(projC, '.project-memory', f))
 fs.writeFileSync(path.join(projC, '.project-memory', 'handoff.md'), '# Latest Handoff\n\n## State\n- C1\n')
 fs.writeFileSync(path.join(projC, '.project-memory', 'INDEX.md'), '# Index\n')
-fs.writeFileSync(path.join(projC, 'AGENTS.md'), '# Agents\n')
 fs.writeFileSync(path.join(projC, 'main.js'), '1\n')
 await g(projC, 'add', '-A')
 await g(projC, 'commit', '-q', '-m', 'init')
+fs.writeFileSync(path.join(projC, 'AGENTS.md'), '# Agents\n') // untracked: the entry file Workbench manages
 
 // memory sync OFF: commit-handoff.sh keeps the handoff local, makes no commit, touches no network
 const gitTrace = path.join(tmp, 'git-trace.txt')
@@ -259,7 +262,8 @@ const traced = fs.existsSync(gitTrace) ? fs.readFileSync(gitTrace, 'utf8') : ''
 assert.ok(!/\b(fetch|push|pull|ls-remote|remote-https)\b/.test(traced), 'no network git commands while memory sync is off')
 console.log('memory sync off: handoff local only, no commit, no network git calls ok')
 
-const lc = await linkProject(tools, { workspace: projC, clonePath: folder })
+await assert.rejects(linkProject(tools, { workspace: projC, clonePath: folder }), (e: MemSyncError) => e.code === 'needs-review')
+const lc = await linkProject(tools, { workspace: projC, clonePath: folder, allowCommit: true })
 assert.equal(lc.source, 'local')
 assert.ok(isLink(path.join(projC, '.project-memory')))
 assert.ok(fs.existsSync(path.join(folder, 'someone', 'demo2', 'handoff.md')))
@@ -291,6 +295,62 @@ assert.equal(fs.readFileSync(storedScript, 'utf8'), bundled['commit-handoff.sh']
 assert.match(fs.readFileSync(path.join(projD, '.project-memory', 'handoff.md'), 'utf8'), /C2/)
 assert.match(fs.readFileSync(path.join(projD, 'AGENTS.md'), 'utf8'), /C2/, 'entry file restored and regenerated from the shared handoff')
 console.log('folder mode: refusals, move + untrack, commit-handoff saves only, second PC links ok')
+
+// ── auto-link safety: no project commit, a team AGENTS.md untouched, differing clones need a choice ──
+const bundled3 = { ...bundled, 'sync-entry-files.sh': fs.readFileSync(memScript('sync-entry-files.sh'), 'utf8') }
+const mkClone = async (dir: string, handoff: string): Promise<void> => {
+  fs.mkdirSync(dir, { recursive: true })
+  await g(dir, 'init', '-q')
+  await g(dir, 'config', 'user.name', 'Dev')
+  await g(dir, 'config', 'user.email', 'dev@example.com')
+  await g(dir, 'remote', 'add', 'origin', 'https://github.com/someone/demo3.git')
+  fs.writeFileSync(path.join(dir, 'AGENTS.md'), '# Team agents\n') // the team's own instructions, tracked
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n')
+  await g(dir, 'add', '-A')
+  await g(dir, 'commit', '-q', '-m', 'init')
+  fs.mkdirSync(path.join(dir, '.project-memory')) // untracked memory, as the memory plugin creates it
+  for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) fs.copyFileSync(memScript(f), path.join(dir, '.project-memory', f))
+  fs.writeFileSync(path.join(dir, '.project-memory', 'handoff.md'), handoff)
+}
+const projE = path.join(tmp, 'pcE', 'demo3')
+await mkClone(projE, '# Latest Handoff\n- E1\n')
+const headE = (await g(projE, 'rev-parse', 'HEAD')).trim()
+const sE = await projectState(tools, { workspace: projE, clonePath: folder })
+assert.deepEqual([autoLinkBlock(sE), sE.tracked, sE.trackedEntries], [null, [], ['AGENTS.md']])
+const le = await linkProject(tools, { workspace: projE, clonePath: folder, scripts: bundled3 })
+assert.ok(le.source === 'local' && !le.projectCommit, JSON.stringify(le))
+assert.equal((await g(projE, 'rev-parse', 'HEAD')).trim(), headE, 'no commit in the project repository')
+assert.equal(fs.readFileSync(path.join(projE, '.gitignore'), 'utf8'), 'node_modules/\n', '.gitignore untouched')
+assert.match(fs.readFileSync(path.join(projE, '.git', 'info', 'exclude'), 'utf8'), /^\/\.project-memory$/m, 'ignored through this clone only')
+assert.equal((await g(projE, 'status', '--porcelain')).trim(), '', 'project repository clean')
+assert.equal(fs.readFileSync(path.join(projE, 'AGENTS.md'), 'utf8'), '# Team agents\n', 'team AGENTS.md untouched')
+fs.appendFileSync(path.join(projE, '.project-memory', 'handoff.md'), '- E2\n')
+const chE = await exec(BASH, ['.project-memory/commit-handoff.sh', 'E2'], { cwd: projE })
+assert.equal(chE.code, 0, chE.stdout + chE.stderr)
+assert.equal(fs.readFileSync(path.join(projE, 'AGENTS.md'), 'utf8'), '# Team agents\n', 'handoff never written into a tracked AGENTS.md')
+assert.equal((await g(projE, 'status', '--porcelain')).trim(), '', 'still clean after a handoff')
+// a second clone of the same repository with different memory: not linked until the user chooses
+const projF = path.join(tmp, 'pcE', 'demo3-copy')
+await mkClone(projF, '# Latest Handoff\n- F1\n')
+const sF = await projectState(tools, { workspace: projF, clonePath: folder })
+assert.ok(sF.memoryDiffers && autoLinkBlock(sF) === 'differs', JSON.stringify(sF))
+await assert.rejects(linkProject(tools, { workspace: projF, clonePath: folder }), (e: MemSyncError) => e.code === 'memory-differs')
+assert.ok(!isLink(path.join(projF, '.project-memory')), 'refused link changed nothing')
+const sharedHandoff = path.join(folder, 'someone', 'demo3', 'handoff.md')
+assert.match(fs.readFileSync(sharedHandoff, 'utf8'), /E2/, 'shared memory untouched by the refused link')
+const lf = await linkProject(tools, { workspace: projF, clonePath: folder, prefer: 'local', scripts: bundled3 })
+assert.equal(lf.source, 'local')
+assert.match(fs.readFileSync(sharedHandoff, 'utf8'), /F1/, "this clone's memory replaced the shared copy")
+assert.match(fs.readFileSync(path.join(`${lf.backup}-shared`, 'handoff.md'), 'utf8'), /E2/, 'previous shared copy backed up')
+assert.match(fs.readFileSync(path.join(projE, '.project-memory', 'handoff.md'), 'utf8'), /F1/, 'both clones share one memory')
+// a third clone whose memory equals the shared copy (scripts aside) links without asking
+const projG = path.join(tmp, 'pcE', 'demo3-third')
+await mkClone(projG, fs.readFileSync(sharedHandoff, 'utf8'))
+fs.writeFileSync(path.join(projG, '.project-memory', 'commit-handoff.sh'), '#!/usr/bin/env bash\n# older script\n')
+const sG = await projectState(tools, { workspace: projG, clonePath: folder })
+assert.ok(!sG.memoryDiffers && autoLinkBlock(sG) === null, JSON.stringify(sG))
+assert.equal((await linkProject(tools, { workspace: projG, clonePath: folder, scripts: bundled3 })).source, 'repo')
+console.log('auto-link safety: no project commit, team AGENTS.md untouched, differing clone needs a choice ok')
 
 // switching storage: projA is linked to the GitHub clone; move it to the cloud folder
 const sMig = await projectState(tools, { workspace: projA, clonePath: folder })

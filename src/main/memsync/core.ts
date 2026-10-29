@@ -412,8 +412,14 @@ export interface ProjectState {
   hasLocalMemory: boolean
   /** 記憶 repo 裡已有這個專案的記憶（另一台電腦已經搬過） */
   hasRemoteMemory: boolean
-  /** 專案 repo 仍在追蹤的記憶檔 */
+  /** 專案 repo 仍在追蹤的記憶檔（.project-memory 底下） */
   tracked: string[]
+  /** 專案 repo 自己追蹤的入口檔（例如團隊共用的 AGENTS.md）：Workbench 不取消追蹤、也不寫入 */
+  trackedEntries: string[]
+  /** 本機記憶與共用位置裡的記憶都存在，但內容不同 */
+  memoryDiffers: boolean
+  /** 目前分支（detached HEAD 時為空字串） */
+  branch: string
 }
 
 function realOrNull(p: string): string | null {
@@ -446,6 +452,10 @@ export async function projectState(tools: Tools, opts: { workspace: string; clon
   const linked = isLink && sameDir(memPath, target)
   const linkedTo = isLink && !linked ? realOrNull(memPath) || undefined : undefined
   const r = await git(tools, opts.workspace, 'ls-files', '--', MEMORY_DIR, ...ENTRY_FILES.map((e) => e.project))
+  const trackedAll = r.code === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : []
+  const entries = new Set(ENTRY_FILES.map((e) => e.project))
+  const hasLocalMemory = isDir && exists(path.join(memPath, 'handoff.md'))
+  const hasRemoteMemory = exists(path.join(target, 'handoff.md'))
   return {
     key,
     target,
@@ -454,25 +464,70 @@ export async function projectState(tools: Tools, opts: { workspace: string; clon
     ...(linkedTo ? { linkedTo } : {}),
     // Workbench 自己建的連結（另一個存放位置的 <owner>/<repo>）：換存放方式後可以自動搬
     ...(linkedTo ? { linkedToOldStore: linkedTo.replace(/\\/g, '/').toLowerCase().endsWith('/' + key.toLowerCase()) && exists(path.join(linkedTo, 'handoff.md')) } : {}),
-    hasLocalMemory: isDir && exists(path.join(memPath, 'handoff.md')),
-    hasRemoteMemory: exists(path.join(target, 'handoff.md')),
-    tracked: r.code === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : []
+    hasLocalMemory,
+    hasRemoteMemory,
+    tracked: trackedAll.filter((f) => !entries.has(f)),
+    trackedEntries: trackedAll.filter((f) => entries.has(f)),
+    memoryDiffers: hasLocalMemory && hasRemoteMemory && !sameMemory(memPath, target),
+    branch: (await git(tools, opts.workspace, 'symbolic-ref', '-q', '--short', 'HEAD')).stdout.trim()
   }
 }
 
-/** 專案 .gitignore 要有的條目；回傳是否有改動 */
+/** 記憶內容（相對路徑 → 文字）；不含 Workbench 會覆寫的腳本、入口檔範本與備份 */
+function memoryFiles(dir: string, base = dir, out = new Map<string, string>()): Map<string, string> {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name)
+    if (e.isDirectory()) {
+      if (!['entry', BACKUP_DIR, '.git'].includes(e.name) || dir !== base) memoryFiles(p, base, out)
+    } else if (!e.name.endsWith('.sh')) {
+      out.set(path.relative(base, p).replace(/\\/g, '/'), fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n'))
+    }
+  }
+  return out
+}
+
+function sameMemory(a: string, b: string): boolean {
+  const x = memoryFiles(a)
+  const y = memoryFiles(b)
+  return x.size === y.size && [...x].every(([k, v]) => y.get(k) === v)
+}
+
+/**
+ * 自動接上前的檢查。自動接上只做「不會動到專案 repo、不會蓋掉不同內容」的事：
+ * - 'tracked'：專案 repo 仍追蹤記憶檔，接上要一個「停止追蹤」的提交；
+ * - 'differs'：本機記憶和共用位置的不同，要使用者選用哪一份。
+ * 其餘回 null，可以直接接上。
+ */
+export function autoLinkBlock(st: ProjectState): 'tracked' | 'differs' | null {
+  if (st.tracked.length) return 'tracked'
+  if (!st.linked && st.memoryDiffers) return 'differs'
+  return null
+}
+
+/** 使用者確認的「停止追蹤」提交要放進 .gitignore 的條目；回傳是否有改動 */
 function ensureProjectIgnore(workspace: string): boolean {
   const file = path.join(workspace, '.gitignore')
   const text = exists(file) ? fs.readFileSync(file, 'utf8') : ''
   const lines = new Set(text.split(/\r?\n/).map((l) => l.trim()))
-  const missing: string[] = []
-  if (!lines.has('.project-memory') && !lines.has('.project-memory/')) missing.push('.project-memory/')
-  if (!lines.has('AGENTS.md')) missing.push('AGENTS.md')
-  if (!lines.has('.agents/') && !lines.has('.agents') && !lines.has('.agents/rules/shared-memory.md')) missing.push('.agents/rules/shared-memory.md')
-  if (!missing.length) return false
+  if (lines.has('.project-memory') || lines.has('.project-memory/')) return false
   const sep = text && !text.endsWith('\n') ? '\n' : ''
-  fs.writeFileSync(file, `${text}${sep}\n# 專案記憶放在私人記憶 repo（Agent Workbench：設定 → 記憶同步），不進這個 repo\n${missing.join('\n')}\n`)
+  fs.writeFileSync(file, `${text}${sep}\n# 專案記憶放在記憶同步的存放位置（Agent Workbench：設定 → 記憶同步），不進這個 repo\n.project-memory/\n`)
   return true
+}
+
+/**
+ * 只在這個 clone 忽略記憶與入口檔：寫進 .git/info/exclude，不改 .gitignore、不產生提交、不會被推送。
+ * 已追蹤的檔案不受 exclude 影響；開頭的 / 只比對 repo 根目錄，子資料夾裡的 AGENTS.md 不受影響。
+ */
+export async function ensureLocalExclude(tools: Tools, workspace: string): Promise<void> {
+  const file = path.resolve(workspace, (await gitMust(tools, workspace, 'rev-parse', '--git-path', 'info/exclude')).trim())
+  const text = exists(file) ? fs.readFileSync(file, 'utf8') : ''
+  const lines = new Set(text.split(/\r?\n/).map((l) => l.trim()))
+  const missing = [MEMORY_DIR, ...ENTRY_FILES.map((e) => e.project)].map((p) => '/' + p).filter((l) => !lines.has(l))
+  if (!missing.length) return
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const sep = text && !text.endsWith('\n') ? '\n' : ''
+  fs.appendFileSync(file, `${sep}# Agent Workbench memory sync (this clone only)\n${missing.join('\n')}\n`)
 }
 
 function bashFor(gitPath: string): string | null {
@@ -501,9 +556,15 @@ export function entryTemplate(text: string): string {
   return out.join('\n')
 }
 
-/** 從記憶資料夾的 entry/ 補回入口檔，再用 handoff 重新產生其中的記憶區塊 */
+/**
+ * 從記憶資料夾的 entry/ 補回入口檔，再用 handoff 重新產生其中的記憶區塊。
+ * 專案自己追蹤的入口檔不碰（sync-entry-files.sh 同樣會跳過）：寫進去的 handoff 會變成待提交的改動。
+ */
 async function restoreEntryFiles(tools: Tools, workspace: string, target: string): Promise<void> {
+  const r = await git(tools, workspace, 'ls-files', '--', ...ENTRY_FILES.map((e) => e.project))
+  const tracked = new Set(r.code === 0 ? r.stdout.split(/\r?\n/).filter(Boolean) : [])
   for (const e of ENTRY_FILES) {
+    if (tracked.has(e.project)) continue
     const dst = path.join(workspace, e.project)
     const stored = path.join(target, 'entry', e.stored)
     if (!exists(dst) && exists(stored)) {
@@ -553,15 +614,26 @@ export interface LinkResult {
  * 把專案接到記憶 repo：
  * - 第一台：專案的 .project-memory 搬進 clone/<owner>/<repo>/ 並推上私人 repo；
  * - 其他電腦：記憶 repo 已有這個專案 → 直接連結（本機若有舊的 .project-memory 先備份）。
- * 最後專案 repo 停止追蹤記憶檔與入口檔（一個只動這些路徑與 .gitignore 的提交）。
+ * 專案 repo 只寫本機的 .git/info/exclude。只有使用者確認過（allowCommit）且仍追蹤記憶檔時，
+ * 才會有一個「停止追蹤」的提交；本機與共用的記憶內容不同時，要指定 prefer 用哪一份。
  */
 export async function linkProject(
   tools: Tools,
-  opts: { workspace: string; clonePath: string; login?: string; scripts?: Record<string, string>; migrate?: boolean }
+  opts: {
+    workspace: string
+    clonePath: string
+    login?: string
+    scripts?: Record<string, string>
+    migrate?: boolean
+    allowCommit?: boolean
+    prefer?: 'shared' | 'local'
+  }
 ): Promise<LinkResult> {
   // clonePath 是記憶根目錄：GitHub 模式的 clone，或雲端硬碟模式的資料夾
   if (!rootReady(opts.clonePath)) throw new MemSyncError('no-clone', 'Set up the memory storage first')
   const st = await projectState(tools, opts)
+  if (st.tracked.length && !opts.allowCommit) throw new MemSyncError('needs-review', `The project repository tracks ${st.tracked.length} memory file(s)`)
+  if (!st.linked && !st.linkedElsewhere && st.memoryDiffers && !opts.prefer) throw new MemSyncError('memory-differs', 'Local memory differs from the shared copy')
   const memPath = path.join(opts.workspace, MEMORY_DIR)
   let source: LinkResult['source'] = 'already-linked'
   let backup: string | undefined
@@ -589,7 +661,12 @@ export async function linkProject(
       backup = path.join(opts.clonePath, BACKUP_DIR, st.key.replace('/', '__'), new Date().toISOString().replace(/[:.]/g, '-'))
       fs.mkdirSync(path.dirname(backup), { recursive: true })
       fs.cpSync(memPath, backup, { recursive: true })
-      if (!st.hasRemoteMemory) {
+      if (!st.hasRemoteMemory || (st.memoryDiffers && opts.prefer === 'local')) {
+        if (st.hasRemoteMemory) {
+          // 用這個 clone 的記憶蓋掉共用的：共用的那份也先備份
+          fs.cpSync(st.target, `${backup}-shared`, { recursive: true })
+          fs.rmSync(st.target, { recursive: true, force: true })
+        }
         fs.mkdirSync(path.dirname(st.target), { recursive: true })
         fs.cpSync(memPath, st.target, { recursive: true })
         source = 'local'
@@ -616,10 +693,13 @@ export async function linkProject(
     await gitMust(tools, opts.clonePath, 'push', '-q', '-u', 'origin', 'HEAD')
   }
 
-  // 專案 repo：停止追蹤記憶檔，補 .gitignore
-  const ignoreChanged = ensureProjectIgnore(opts.workspace)
+  // 專案 repo：本機忽略；仍追蹤記憶檔時（只會在 allowCommit 走到這裡）才提交「停止追蹤」並補 .gitignore
+  await ensureLocalExclude(tools, opts.workspace)
   let projectCommit: string | undefined
-  if (st.tracked.length || ignoreChanged) projectCommit = await commitUntrack(tools, opts.workspace, st.tracked, opts.login)
+  if (st.tracked.length) {
+    ensureProjectIgnore(opts.workspace)
+    projectCommit = await commitUntrack(tools, opts.workspace, st.tracked, opts.login)
+  }
   return { key: st.key, target: st.target, source, ...(backup ? { backup } : {}), ...(projectCommit ? { projectCommit } : {}) }
 }
 
