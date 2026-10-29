@@ -358,7 +358,11 @@ export function setEditorDirtyPaths(paths: string[]): void {
   set({ editorDirtyPaths: paths })
 }
 
+/** 使用者是否已主動設定過工作區；啟動時從後端還原的那一次不算（終端面板據此決定要不要接續最後的 CLI） */
+export let workspaceChangedByUser = false
+
 export function setWorkspaceRoot(path: string): void {
+  workspaceChangedByUser = true
   set({ workspaceRoot: path })
 }
 
@@ -370,6 +374,7 @@ export async function switchWorkspace(path: string): Promise<boolean> {
   if (path && window.api?.files?.setWorkspaceRoot) {
     const ok = await window.api.files.setWorkspaceRoot(path).catch(() => false)
     if (ok) {
+      workspaceChangedByUser = true
       set({
         workspaceRoot: path,
         sidebarTab: 'files',

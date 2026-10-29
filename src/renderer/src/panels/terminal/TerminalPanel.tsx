@@ -9,7 +9,8 @@ import {
   getDraggedSession,
   setLiveAgentSessionIds,
   reportDevUrl,
-  pulseAgentActivity
+  pulseAgentActivity,
+  workspaceChangedByUser
 } from '@/store'
 import type { DraggedSessionPayload } from '@/store'
 import { useTranslation } from '@/i18n'
@@ -728,14 +729,15 @@ export default function TerminalPanel(): JSX.Element {
 
   // ── 切換工作區 → 切到該專案最後用的 CLI ─────────────────────────────
   // 有開著的分頁：切到該專案最近用過的那個。沒有：從儀表板紀錄找該專案最後一次的
-  // Claude／Codex／Antigravity 會話並接續（openOrResumeSession）。啟動時第一次設定工作區不算切換。
+  // Claude／Codex／Antigravity 會話並接續（openOrResumeSession）。啟動時從後端還原工作區不算切換；
+  // 但從空白工作區（預設啟動狀態）第一次切到資料夾要算。
   const mruRef = useRef<string[]>([])
   mruRef.current = mru
   const prevWorkspaceRef = useRef(workspaceRoot)
   useEffect(() => {
     const prev = prevWorkspaceRef.current
     prevWorkspaceRef.current = workspaceRoot
-    if (!prev || !workspaceRoot || isDetached || normPath(prev) === normPath(workspaceRoot)) return
+    if ((!prev && !workspaceChangedByUser) || !workspaceRoot || isDetached || normPath(prev) === normPath(workspaceRoot)) return
     const root = normPath(workspaceRoot)
     const inWorkspace = (p?: string): boolean => {
       const n = normPath(p)
