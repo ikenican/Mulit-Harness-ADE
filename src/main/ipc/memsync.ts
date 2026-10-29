@@ -35,9 +35,9 @@ import {
   type Tools
 } from '../memsync/core'
 import type { MemSyncBackend, MemSyncConfig, MemSyncState, MemSyncResult } from '../../preload/index'
-import commitHandoffScript from '../memsync/templates/commit-handoff.sh?raw'
-import statusScript from '../memsync/templates/status.sh?raw'
-import syncEntryFilesScript from '../memsync/templates/sync-entry-files.sh?raw'
+import commitHandoffScript from '../../../plugins/shared-project-memory/templates/commit-handoff.sh?raw'
+import statusScript from '../../../plugins/shared-project-memory/templates/status.sh?raw'
+import syncEntryFilesScript from '../../../plugins/shared-project-memory/templates/sync-entry-files.sh?raw'
 
 /** 有記憶的專案一律用這些腳本（依設定存本機／雲端資料夾／私人 repo，絕不寫進專案 repo） */
 const MEMORY_SCRIPTS = { 'commit-handoff.sh': commitHandoffScript, 'status.sh': statusScript, 'sync-entry-files.sh': syncEntryFilesScript }

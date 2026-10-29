@@ -21,6 +21,9 @@ process.env.GIT_CONFIG_VALUE_0 = 'https://github.com/'
 process.env.GIT_CONFIG_KEY_1 = 'init.defaultBranch'
 process.env.GIT_CONFIG_VALUE_1 = 'main'
 process.env.GIT_TERMINAL_PROMPT = '0'
+// sync-entry-files.sh looks for the Claude Code plugin here: start from "not installed" on every machine
+const claudeHome = path.join(tmp, 'claude-home')
+process.env.CLAUDE_CONFIG_DIR = claudeHome
 
 const GIT = process.platform === 'win32' ? 'C:\\Program Files\\Git\\cmd\\git.exe' : 'git'
 const BASH = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash'
@@ -63,7 +66,7 @@ const g = async (cwd: string, ...args: string[]): Promise<string> => {
 }
 const isLink = (p: string): boolean => fs.lstatSync(p).isSymbolicLink()
 // 專案的記憶腳本：這個 repo 不追蹤 .project-memory，一律用 Workbench 內建的範本（不依賴本機記憶）
-const memScript = (f: string): string => path.join(ROOT, 'src', 'main', 'memsync', 'templates', f)
+const memScript = (f: string): string => path.join(ROOT, 'plugins', 'shared-project-memory', 'templates', f)
 
 // ── project repo on GitHub, with memory tracked the old way ─────────────
 const projBare = path.join(remotes, 'someone', 'demo.git')
@@ -286,8 +289,8 @@ fs.cpSync(projC, projD, { recursive: true, filter: (src) => !src.includes(`${pat
 const storedScript = path.join(folder, 'someone', 'demo2', 'commit-handoff.sh')
 fs.writeFileSync(storedScript, '#!/usr/bin/env bash\ngit add -f -- .project-memory\n')
 const bundled = {
-  'commit-handoff.sh': fs.readFileSync(path.join(ROOT, 'src', 'main', 'memsync', 'templates', 'commit-handoff.sh'), 'utf8'),
-  'status.sh': fs.readFileSync(path.join(ROOT, 'src', 'main', 'memsync', 'templates', 'status.sh'), 'utf8')
+  'commit-handoff.sh': fs.readFileSync(memScript('commit-handoff.sh'), 'utf8'),
+  'status.sh': fs.readFileSync(memScript('status.sh'), 'utf8')
 }
 const ld = await linkProject(tools, { workspace: projD, clonePath: folder, scripts: bundled })
 assert.equal(ld.source, 'repo')
@@ -463,7 +466,7 @@ assert.deepEqual([lz2.repo, lz2.created], ['tester/ai-project-memory', false], '
 assert.equal(ghCalls.length, ghBefore, 'gh never called on the one-click route')
 console.log('one-click create: login cancel/expired, public refusals, created private + initialized, existing reused ok')
 
-// Claude Code plugin detection + the scripts must stay byte-identical to the plugin's templates
+// Claude Code plugin detection
 const fakeHome = path.join(tmp, 'home')
 assert.equal(claudeMemoryPluginInstalled(fakeHome), false, 'no plugins file')
 fs.mkdirSync(path.join(fakeHome, '.claude', 'plugins'), { recursive: true })
@@ -472,16 +475,36 @@ fs.writeFileSync(pluginsFile, JSON.stringify({ version: 2, plugins: { 'other@x':
 assert.equal(claudeMemoryPluginInstalled(fakeHome), false, 'other plugins only')
 fs.writeFileSync(pluginsFile, JSON.stringify({ version: 2, plugins: { 'shared-project-memory@shared-project-memory': [{}] } }))
 assert.equal(claudeMemoryPluginInstalled(fakeHome), true, 'plugin installed')
-const pluginTemplates = path.join(os.homedir(), '.claude', 'plugins', 'marketplaces', 'shared-project-memory', 'templates')
-if (fs.existsSync(pluginTemplates)) {
-  for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) {
-    const lf = (p: string): string => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
-    assert.equal(lf(memScript(f)), lf(path.join(pluginTemplates, f)), `${f} differs from the shared-project-memory plugin`)
-  }
-  console.log('plugin detection + scripts identical to the installed plugin ok')
-} else {
-  console.log('plugin detection ok (plugin not installed here: script parity skipped)')
+console.log('plugin detection ok')
+
+// Claude Code entry file: written while the plugin is absent, removed once it is installed
+const projCl = path.join(tmp, 'claude-entry')
+fs.mkdirSync(path.join(projCl, '.project-memory'), { recursive: true })
+await g(projCl, 'init', '-q')
+fs.copyFileSync(memScript('sync-entry-files.sh'), path.join(projCl, '.project-memory', 'sync-entry-files.sh'))
+fs.writeFileSync(path.join(projCl, '.project-memory', 'handoff.md'), '# Latest Handoff\nF1\n')
+const syncCl = async (): Promise<void> => {
+  const r = await exec(BASH, [path.join(projCl, '.project-memory', 'sync-entry-files.sh')], { cwd: projCl })
+  assert.equal(r.code, 0, r.stderr)
 }
+const claudeEntry = path.join(projCl, '.claude', 'rules', 'shared-memory.md')
+await syncCl()
+assert.match(fs.readFileSync(claudeEntry, 'utf8'), /F1/, 'handoff written for Claude Code without the plugin')
+assert.match(fs.readFileSync(path.join(projCl, '.git', 'info', 'exclude'), 'utf8'), /^\/\.claude\/rules\/shared-memory\.md$/m, 'excluded in this clone')
+assert.equal((await g(projCl, 'status', '--porcelain', '-uall')).includes('.claude'), false, 'never shows as a change')
+fs.writeFileSync(path.join(projCl, '.project-memory', 'handoff.md'), '# Latest Handoff\nF2\n')
+await syncCl()
+assert.doesNotMatch(fs.readFileSync(claudeEntry, 'utf8'), /F1/, 'block regenerated, not appended')
+fs.mkdirSync(path.join(claudeHome, 'plugins'), { recursive: true })
+fs.writeFileSync(path.join(claudeHome, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'shared-project-memory@agent-workbench': [{}] } }))
+await syncCl()
+assert.equal(fs.existsSync(claudeEntry), false, 'removed once the plugin injects memory')
+fs.mkdirSync(path.dirname(claudeEntry), { recursive: true })
+fs.writeFileSync(claudeEntry, '# my own notes\n')
+await syncCl()
+assert.equal(fs.readFileSync(claudeEntry, 'utf8'), '# my own notes\n', "a user's own file is never removed")
+fs.rmSync(path.join(claudeHome, 'plugins'), { recursive: true })
+console.log('Claude Code entry file: written without the plugin, excluded, regenerated, removed with the plugin ok')
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('memsync ok')
