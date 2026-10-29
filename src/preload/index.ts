@@ -707,6 +707,8 @@ export interface MemSyncState {
   root: string | null
   rootReady: boolean
   gitMissing: boolean
+  /** Claude Code 裝了 shared-project-memory plugin（開局載入記憶、/handoff） */
+  memoryPlugin: boolean
   gh: { installed: boolean; loggedIn: boolean; login?: string }
   clone: { exists: boolean; origin?: string; ahead?: number; behind?: number; dirty?: boolean }
   project: {
@@ -723,7 +725,7 @@ export interface MemSyncState {
     memoryDiffers: boolean
     branch: string
   } | null
-  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string }
+  commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string; installPlugin: string }
 }
 export interface MemSyncRepoResult {
   repo: string

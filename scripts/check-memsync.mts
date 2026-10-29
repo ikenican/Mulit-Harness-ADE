@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { autoLinkBlock, connectRepoByUrl, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
+import { autoLinkBlock, claudeMemoryPluginInstalled, connectRepoByUrl, createRepoViaGitLogin, parseRepoInput, ensureRepo, ensureFolder, linkProject, projectState, syncNow, ghStatus, MemSyncError, type Run, type Tools } from '../src/main/memsync/core.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'memsync-check-'))
@@ -462,6 +462,26 @@ const lz2 = await createRepoViaGitLogin(lazyTools('ok'), { name: 'ai-project-mem
 assert.deepEqual([lz2.repo, lz2.created], ['tester/ai-project-memory', false], 'existing private repo reused')
 assert.equal(ghCalls.length, ghBefore, 'gh never called on the one-click route')
 console.log('one-click create: login cancel/expired, public refusals, created private + initialized, existing reused ok')
+
+// Claude Code plugin detection + the scripts must stay byte-identical to the plugin's templates
+const fakeHome = path.join(tmp, 'home')
+assert.equal(claudeMemoryPluginInstalled(fakeHome), false, 'no plugins file')
+fs.mkdirSync(path.join(fakeHome, '.claude', 'plugins'), { recursive: true })
+const pluginsFile = path.join(fakeHome, '.claude', 'plugins', 'installed_plugins.json')
+fs.writeFileSync(pluginsFile, JSON.stringify({ version: 2, plugins: { 'other@x': [] } }))
+assert.equal(claudeMemoryPluginInstalled(fakeHome), false, 'other plugins only')
+fs.writeFileSync(pluginsFile, JSON.stringify({ version: 2, plugins: { 'shared-project-memory@shared-project-memory': [{}] } }))
+assert.equal(claudeMemoryPluginInstalled(fakeHome), true, 'plugin installed')
+const pluginTemplates = path.join(os.homedir(), '.claude', 'plugins', 'marketplaces', 'shared-project-memory', 'templates')
+if (fs.existsSync(pluginTemplates)) {
+  for (const f of ['commit-handoff.sh', 'status.sh', 'sync-entry-files.sh']) {
+    const lf = (p: string): string => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
+    assert.equal(lf(memScript(f)), lf(path.join(pluginTemplates, f)), `${f} differs from the shared-project-memory plugin`)
+  }
+  console.log('plugin detection + scripts identical to the installed plugin ok')
+} else {
+  console.log('plugin detection ok (plugin not installed here: script parity skipped)')
+}
 
 fs.rmSync(tmp, { recursive: true, force: true })
 console.log('memsync ok')
