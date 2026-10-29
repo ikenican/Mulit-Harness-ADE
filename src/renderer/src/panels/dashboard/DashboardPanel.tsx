@@ -118,6 +118,7 @@ export default function DashboardPanel({
           await window.api.dashboard.unmarkWorkspace(selected)
         }
         await switchWorkspace(selected)
+        setSidebarTab('files')
         await loadData(true, true)
       }
     }
@@ -171,6 +172,7 @@ export default function DashboardPanel({
           await window.api.dashboard.unmarkWorkspace(res.targetDir)
         }
         await switchWorkspace(res.targetDir)
+        setSidebarTab('files')
         await loadData(true, true)
       } else {
         setCloneError(res.error || t('dashboard.cloneFailed'))

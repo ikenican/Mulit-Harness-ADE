@@ -375,17 +375,15 @@ export async function switchWorkspace(path: string): Promise<boolean> {
     const ok = await window.api.files.setWorkspaceRoot(path).catch(() => false)
     if (ok) {
       workspaceChangedByUser = true
+      // 不切換側邊欄：從儀表板切資料夾後留在儀表板
       set({
         workspaceRoot: path,
-        sidebarTab: 'files',
         fileTreeTick: state.fileTreeTick + 1,
         gitTick: state.gitTick + 1
       })
       return true
     }
   }
-  // If no path or path doesn't exist on disk, still switch sidebar to files
-  set({ sidebarTab: 'files' })
   return false
 }
 
