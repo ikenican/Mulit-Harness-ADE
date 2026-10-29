@@ -2,7 +2,6 @@
 # "\r: command not found" and every hook silently breaks.
 *.sh              text eol=lf
 templates/pre-commit   text eol=lf
-templates/post-merge   text eol=lf
 install.sh        text eol=lf
 
 *.ps1             text eol=crlf

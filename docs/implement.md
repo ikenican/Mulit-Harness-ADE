@@ -1,5 +1,7 @@
 # 跨工具共享記憶 — 實作方案（implement.md · 自動化版）
 
+> **v1.1.0 起的存放方式（取代本文所有「記憶 commit 進專案 repo／post-merge／MEM_AUTOPUSH」的描述）**：記憶絕不進專案 repo，只在 clone 本機（`.git/info/exclude`），跨電腦共用交給 Agent Workbench：設定 → 記憶同步（私人 GitHub repo，或 OneDrive／Google Drive 指定資料夾）；`post-merge` 已移除；handoff 改為 State／Verified／Not verified／Next／Risks / do not 五段、最多 8000 bytes。現行規則以 `templates/memory/PROTOCOL.md` 與 README「Storage」一節為準，本文其餘內容保留為設計歷程。
+
 > 目標：讓 **Claude Code / Antigravity / Codex** 在換電腦、換 agent、跨工作階段時，用同一份 Git 版控的專案記憶；**開局自動讀、收工強制更新**，不靠人工貼開場白、不靠 agent 自覺。
 > 原則：**最小骨架、單一事實來源、分層讀取、明確更新門檻、用 hook 自動化與防呆。**
 

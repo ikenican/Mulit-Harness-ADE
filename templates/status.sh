@@ -16,17 +16,28 @@ MEM="$(cd "$(dirname "$0")" && pwd)"
 AUTOSYNC="${MEM_AUTOSYNC:-0}"
 
 SYNC_NOTE=""
+# Remote check only when the memory is linked to a private GitHub memory repository
+# (Workbench: Settings > Memory sync). Memory sync off (a plain folder in the project) or a
+# cloud-drive folder: no network access at all.
+g() { git -C "$MEM" "$@"; }
+MEMREAL="$(cd "$MEM" && pwd -P)"
+PROJREAL="$(cd "$MEM/.." && pwd -P)"
+LINKED_REPO=0
+case "$MEMREAL/" in
+  "$PROJREAL"/*) ;;
+  *) g rev-parse --is-inside-work-tree >/dev/null 2>&1 && LINKED_REPO=1 ;;
+esac
 # git fetch is read-only and always safe. Anything that MUTATES the tree is guarded.
-if git rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
-  git fetch --quiet 2>/dev/null || true
-  behind=$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
-  ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
-  dirty=$(git status --porcelain 2>/dev/null)
+if [ "$LINKED_REPO" = "1" ] && g rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+  g fetch --quiet 2>/dev/null || true
+  behind=$(g rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+  ahead=$(g rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+  dirty=$(g status --porcelain 2>/dev/null)
 
   if [ "${behind:-0}" -gt 0 ]; then
     # Triple guard: switch on + clean tree + no divergent local commits.
     if [ "$AUTOSYNC" = "1" ] && [ -z "$dirty" ] && [ "${ahead:-0}" -eq 0 ]; then
-      if git pull --ff-only --quiet 2>/dev/null; then
+      if g pull --ff-only --quiet 2>/dev/null; then
         SYNC_NOTE="> Auto-synced: fast-forwarded $behind commit(s). Memory below is fresh."
       else
         SYNC_NOTE="> Auto-sync aborted (not a fast-forward). Memory below may be stale - ask the user before merging."
@@ -49,3 +60,21 @@ cat "$MEM/INDEX.md" 2>/dev/null
 echo
 echo "## handoff.md"
 cat "$MEM/handoff.md" 2>/dev/null
+
+# Handoff shape check (see PROTOCOL.md "Handoff format"): a missing section is easy to miss in
+# free text, and an oversized Tier 1 gets truncated by context-injection hooks.
+REQUIRED_SECTIONS=("## State" "## Verified" "## Not verified" "## Next" "## Risks / do not")
+MISSING=()
+for sec in "${REQUIRED_SECTIONS[@]}"; do
+  grep -qF -- "$sec" "$MEM/handoff.md" 2>/dev/null || MISSING+=("$sec")
+done
+SIZE=$(wc -c < "$MEM/handoff.md" 2>/dev/null || echo 0)
+if [ "${#MISSING[@]}" -gt 0 ] || [ "${SIZE:-0}" -gt 8000 ]; then
+  echo
+  echo "> Handoff check:"
+  [ "${#MISSING[@]}" -gt 0 ] && echo ">   missing section(s): ${MISSING[*]} - treat the handoff as incomplete and verify against Git."
+  [ "${SIZE:-0}" -gt 8000 ] && echo ">   handoff.md is ${SIZE} bytes (limit 8000) - move finished-event detail to archive/."
+fi
+
+# The checks above are informational; reading memory itself succeeded.
+exit 0

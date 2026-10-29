@@ -23,18 +23,21 @@ Then:
 Apply the memory-update criteria in `PROTOCOL.md`: rewrite `handoff.md` when the work meets the
 threshold; skip it entirely for read-only questions, trivial explanations, and no-change reviews.
 
-Then commit the memory yourself — an uncommitted handoff does not exist for anyone else:
+Then save the memory — use the Handoff format in `PROTOCOL.md` (under 8000 bytes):
 
 ```bash
 bash .project-memory/commit-handoff.sh "docs(memory): <one-line summary>"
 ```
 
-It is pathspec-limited to memory files, so the user's staged source changes are left untouched.
-It pushes only when `MEM_AUTOPUSH=1`; otherwise say clearly that the handoff is not pushed yet.
+It saves according to Agent Workbench: Settings > Memory sync (off: this machine only; OneDrive /
+Google Drive folder; or a commit + push to the private memory repository). Tell the user what it
+printed.
 
 ## Never
 
+- Commit `.project-memory/`, this file or `.agents/` to the project repository — memory is local
+  to this clone and shared only through memory sync.
 - Auto pull/rebase/merge/reset/force-push without user authorization. `git fetch` is read-only and fine.
-- Commit the user's SOURCE code on your own initiative — committing shared memory is fine, that is not.
+- Commit the user's SOURCE code on your own initiative.
 - Commit secrets, tokens, passwords, API keys, or private keys.
 - Rewrite historical decisions — supersede them instead.

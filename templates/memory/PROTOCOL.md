@@ -24,18 +24,26 @@ Canonical shared memory lives in `.project-memory/`.
 5. Summarise the current state in <=3 bullets before substantial action.
    Do NOT re-explore what is already recorded and still valid.
 
+## Storage (memory never goes into the project repository)
+- `.project-memory/` and the generated entry files (`AGENTS.md`, `.agents/rules/shared-memory.md`)
+  are local to this clone (`.git/info/exclude`). NEVER `git add` them to the project repository,
+  not even with `-f`; the `.githooks/pre-commit` guard rejects it.
+- Where memory is kept is chosen in Agent Workbench: Settings > Memory sync.
+  - Off: `.project-memory/` is a plain folder; the handoff stays on this machine.
+  - OneDrive / Google Drive folder: `.project-memory/` links into that folder; the cloud client
+    uploads it.
+  - Private GitHub repository: `.project-memory/` links into a clone of the user's private memory
+    repository; `commit-handoff.sh` commits there and pushes (`MEM_AUTOPUSH=0` skips the push).
+- Always save through `bash .project-memory/commit-handoff.sh "<msg>"`; it picks the right case.
+  Do not commit or copy memory anywhere by other means.
+
 ## Git safety
 - `git fetch` is read-only and always allowed. Everything that MUTATES the tree is restricted.
-- Committing the SHARED MEMORY is allowed and expected - it is local and reversible
-  (`git reset --soft HEAD~1`). Use `bash .project-memory/commit-handoff.sh "<msg>"`, which is
-  pathspec-limited to memory files and never sweeps up the user's source changes.
-  Committing the user's SOURCE CODE is their decision, not yours.
-- Pushing happens only when `MEM_AUTOPUSH=1`. Until pushed, other machines cannot see the handoff -
-  say so explicitly when you finish.
-- Do NOT automatically run `git pull --rebase`, `merge`, `reset`, or force-push. Ever.
-- The ONLY permitted automatic sync is `git pull --ff-only`, and only when ALL hold: auto-sync is
-  enabled, the working tree is clean, and the local branch has no divergent commits. A
-  non-fast-forward aborts and changes nothing - then REPORT and ask the user.
+- Committing the user's SOURCE CODE is their decision, not yours.
+- Do NOT automatically run `git pull --rebase`, `merge`, `reset`, or force-push on the project. Ever.
+- Syncing the private memory repository is done by Agent Workbench and the two memory scripts
+  (`status.sh` fast-forwards only with `MEM_AUTOSYNC=1`, a clean memory tree and no divergent
+  commits). Do not pull, rebase or push it by hand; if a script reports a conflict, REPORT and ask.
 - If uncommitted changes exist, inspect them; never overwrite blindly.
 
 ## Working
@@ -59,17 +67,30 @@ Do NOT update memory for: read-only questions, trivial explanations, no-change r
 exploration with no reusable result.
 
 ## Completion (when an update is required)
-1. Update `handoff.md`.
+1. Rewrite `handoff.md` in the Handoff format below.
 2. Update `STATE.md` only if its criteria apply.
 3. Append a decision only if its criteria apply.
 4. Run relevant tests/validation.
 5. Report `git diff --stat`, results, and remaining risk.
-6. Commit the memory yourself: `bash .project-memory/commit-handoff.sh "<one-line summary>"`.
-   This is what makes the handoff reach the other agents and the other machines - a handoff that
-   is never committed does not exist for anyone else. Report whether it was pushed.
+6. Save the memory: `bash .project-memory/commit-handoff.sh "<one-line summary>"`, and tell the
+   user what it printed (saved locally / saved in the synced folder / committed and pushed / push
+   failed). Memory sync off means the handoff stays on this machine - say so; do not work around it.
+
+## Handoff format
+`handoff.md` describes the CURRENT state, not a diary. Rewrite it each time with these sections
+(`status.sh` warns when one is missing):
+- `## State` - Updated (date), Agent, Task, Branch, Commit (`git rev-parse --short HEAD` or
+  `Uncommitted`), and what is done.
+- `## Verified` - what you actually checked: exact commands and results.
+- `## Not verified` - what you did not check or could not run. Never record an unverified pass.
+- `## Next` - numbered steps concrete enough to execute without this conversation.
+- `## Risks / do not` - open risks, and APIs/files/compatibility constraints not to touch.
 
 ## Size policy
 - `INDEX.md` tiny (index + rules only, no mutable state).
-- `handoff.md` / `STATE.md` preferably <=50 lines.
+- `handoff.md` at most 8000 bytes (`status.sh` warns above it; larger tier 1 gets truncated when
+  injected). `STATE.md` preferably <=50 lines.
+- Before rewriting the handoff, move the previous one's finished-event detail to
+  `archive/<YYYY-MM-DD>-<topic>.md` if it is still worth keeping.
 - Fidelity over brevity: shorten a file by moving detail into an on-demand file or `archive/`,
   NEVER by deleting facts to hit a line limit.

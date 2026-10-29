@@ -1,7 +1,10 @@
 # ShareProjectMem（繁體中文）
 
 跨工具共享專案記憶。讓 **Claude Code / Codex / Antigravity** 在換電腦、換 agent 時讀同一份
-Git 版控的記憶，不必重新解釋專案或重掃程式碼。
+記憶，不必重新解釋專案或重掃程式碼。
+
+記憶**絕不提交進專案 repo**：每個 clone 各自在本機，跨電腦共用交給
+[Agent Workbench 記憶同步](#存放位置agent-workbench-記憶同步)（私人 GitHub repo，或你指定的 OneDrive／Google Drive 資料夾）。
 
 *[English version →](README.md)*
 
@@ -22,7 +25,7 @@ Git 版控的記憶，不必重新解釋專案或重掃程式碼。
 - 重新掃描整個 repo 來「理解專案」
 - 重做已經完成的工作，或推翻已經做過的決定
 
-這套系統把「下一個 agent 做正確下一步所需的最少可靠資訊」放進 repo，讓每個 agent 開局自動拿到。
+這套系統把「下一個 agent 做正確下一步所需的最少可靠資訊」放在專案旁邊，讓每個 agent 開局自動拿到。
 
 **成本**：約 1,000 tokens／session。**省下**：每次 10,000–50,000 tokens 的重複探索。
 
@@ -45,9 +48,8 @@ Git 版控的記憶，不必重新解釋專案或重掃程式碼。
    SessionStart hook          AGENTS.md      .agents/rules/
    自動執行 → 注入              自動載入        自動載入
                                     ▲                ▲
-                                    └── git hook 自動再生 ──┘
-                              pre-commit（改 handoff 即再生+staged）
-                              post-merge（pull 後自動刷新）
+                                    └── 自動再生 ───────────┘
+                              commit-handoff.sh（每次交接）與 Agent Workbench（開啟專案時）
 ```
 
 entry 檔裡的 `AUTO-MEMORY` 區塊是**機器衍生**的，標有 do-not-edit，不會 drift。
@@ -61,9 +63,9 @@ entry 檔裡的 `AUTO-MEMORY` 區塊是**機器衍生**的，標有 do-not-edit�
 | **開局載入記憶** | ✅ 全自動 | ✅ 全自動 | ✅ 全自動 | SessionStart hook／生成區塊 |
 | 安裝 | `/memory-init` | `install.sh` | `install.sh` | 兩條路都通 |
 | 收工寫交接棒 | `/handoff` | entry 檔指示 | entry 檔指示 | `PROTOCOL.md` 更新門檻 |
-| **擋「改碼沒更新記憶」** | ✅ | ✅ | ✅ | **git pre-commit（工具無關）** |
-| **擋 secret 進 repo** | ✅ | ✅ | ✅ | **git pre-commit（工具無關）** |
-| 跨機同步 | ✅ | ✅ | ✅ | `status.sh`／`post-merge` |
+| **擋記憶進專案 repo** | ✅ | ✅ | ✅ | `.git/info/exclude` + git pre-commit（工具無關） |
+| **擋 secret 進記憶 repo** | ✅ | ✅ | ✅ | `commit-handoff.sh` secret 掃描 |
+| 跨機同步 | ✅ | ✅ | ✅ | Agent Workbench 記憶同步 + `commit-handoff.sh` |
 
 > **誠實的地板**：hook 擋得了「沒更新記憶」，擋不了「更新得敷衍」——
 > 內容品質仍取決於 agent，這是 LLM 的本質限制，沒有工具能繞過。
@@ -127,15 +129,17 @@ codex plugin add shared-project-memory@shared-project-memory
 ├── PROTOCOL.md           # 完整協定（首次/按需）
 ├── status.sh             # 開局腳本（任何 agent 或人都能跑）
 ├── sync-entry-files.sh   # 把 handoff 生成進 Codex/Antigravity 的 entry 檔
-├── commit-handoff.sh     # agent 自己提交記憶
+├── commit-handoff.sh     # 依記憶同步設定存放 handoff（絕不進專案 repo）
 └── archive/
-CLAUDE.md                          # 附加區塊（不覆蓋既有內容）
-AGENTS.md                          # Codex entry（含 AUTO-MEMORY 區塊）
-.agents/rules/shared-memory.md     # Antigravity entry（同上）
-.githooks/pre-commit               # 跨工具強制層
-.githooks/post-merge               # pull 後刷新 entry 檔
-.gitattributes                     # 強制 .sh 為 LF
+AGENTS.md                          # Codex entry（含 AUTO-MEMORY 區塊）           — 僅本機
+.agents/rules/shared-memory.md     # Antigravity entry（同上）                    — 僅本機
+CLAUDE.md                          # 附加區塊（只有指示、沒有記憶內容；不覆蓋既有內容）
+.githooks/pre-commit               # 有人強制 add 記憶時擋下
+.gitattributes                     # 強制 hook 為 LF
 ```
+
+`.project-memory/`、`AGENTS.md`、`.agents/rules/shared-memory.md` 會寫進 `.git/info/exclude`
+（只影響這個 clone，不產生 commit）。可以進專案 repo 的只有 `CLAUDE.md`、`.githooks/`、`.gitattributes`，要不要提交由你決定。
 
 ---
 
@@ -145,16 +149,12 @@ AGENTS.md                          # Codex entry（含 AUTO-MEMORY 區塊）
 想要含未提交狀態的最即時版本，任何 agent 都可跑 `bash .project-memory/status.sh`。
 
 **收工** — Claude Code 用 `/handoff`；其他 agent 依 `AGENTS.md` 的完成程序。
-Agent 會寫 handoff 並**自己 commit**。不符更新門檻（唯讀提問、瑣碎解釋、無變更 review）時
+Agent 會改寫 handoff（`State`、`Verified`、`Not verified`、`Next`、`Risks / do not` 五段，最多
+8000 bytes），再用 `commit-handoff.sh` 存放。不符更新門檻（唯讀提問、瑣碎解釋、無變更 review）時
 **完全不寫檔** —— 省下無謂的 churn。
 
-**換電腦** — clone 後跑一次：
-
-```bash
-git config core.hooksPath .githooks
-```
-
-（`core.hooksPath` 是每個 clone 的 local 設定，commit `.githooks/` 不會自動生效。）
+**換電腦** — 在已設定記憶同步的 Agent Workbench 開啟專案：它會把 `.project-memory/` 連到共用的那份並重產 entry 檔。
+若專案有提交 `.githooks/`，每個 clone 再跑一次 `git config core.hooksPath .githooks`。
 
 ---
 
@@ -166,7 +166,7 @@ git config core.hooksPath .githooks
 | Tier 2 | `STATE.md`、`DECISIONS.md`、`PROTOCOL.md` | **按需** |
 | 封存 | `archive/`、`SESSION_LOG.md` | 永不自動載入 |
 
-完整保真度**永遠留在磁碟 + Git** —— 省 token 靠「不 eager load」，**不是砍內容**。
+完整保真度**永遠留在磁碟** —— 省 token 靠「不 eager load」，**不是砍內容**。
 `INDEX.md` 不放任何可變狀態（commit／日期／進度），避免與 `handoff.md` 雙寫不一致。
 
 | 情境 | tokens／session |
@@ -178,57 +178,23 @@ git config core.hooksPath .githooks
 
 ---
 
-## 兩個開關
+## 存放位置：Agent Workbench 記憶同步
 
-```bash
-export MEM_AUTOSYNC=1   # 開局自動 fast-forward 同步（預設關，只報告）
-export MEM_AUTOPUSH=1   # agent 提交 handoff 後自動 push（預設關，只 commit）
-```
+記憶放哪裡，在每台電腦的 **Agent Workbench：設定 → 記憶同步** 選一次。plugin 的
+`commit-handoff.sh` 照這個設定存放，絕不提交進專案 repo。
 
-跨機工作建議**兩個都開** —— 「A 機收工 → B 機開局看得到」全程零手動。
+| 設定 | `.project-memory/` 是 | `commit-handoff.sh` |
+|---|---|---|
+| 關閉（預設） | clone 裡的一般資料夾 | 只存本機，不連網路 |
+| 你指定的 OneDrive／Google Drive 資料夾 | 指向該資料夾的連結 | 存好即可，由雲端硬碟程式上傳 |
+| 私人 GitHub repo | 指向私人記憶 repo clone 的連結 | 在那裡 commit 並 push（`MEM_AUTOPUSH=0` 不 push） |
 
-**`MEM_AUTOSYNC`**：三重守衛缺一不可 —— 開關開啟 **+** 工作樹乾淨 **+** 本地無分岔（ahead=0），
-且只用 `git pull --ff-only`：非快轉直接中止，不可能產生衝突或半 rebase 殘局。
-`rebase` / `merge` / `reset` / force-push **永不自動執行**。
+一個記憶 repo／資料夾放所有專案，每個專案一個子資料夾。Workbench 開啟專案時自動連結；另一台電腦則連到已經存在的那份。
 
-**`MEM_AUTOPUSH`**：被拒（分岔）時**只回報，不 force、不 reset**。commit 本身不受此開關影響 ——
-記憶永遠會被 commit，差別只在有沒有推上去。
+**沒有 Agent Workbench**：記憶只留在寫入它的那台電腦。**沒有這個 plugin**：Workbench 照樣存放與同步記憶，
+但 Claude Code 開局不會載入、也沒有 `/handoff`；Workbench 的記憶同步設定頁會提示安裝 plugin。
 
----
-
-## 同步層：不需要 GitHub
-
-必要的只有本機 `git init`。remote 只有跨機才需要，且不限 GitHub。
-
-| 方案 | 適用 |
-|---|---|
-| GitHub / GitLab private repo | 個人專案，最省事 |
-| NAS／網路磁碟上的 bare repo | 公司 IP 不能上雲 |
-| **OneDrive／Google Drive 上的 bare repo** | 只想用現有雲端硬碟 |
-| 無 remote | 單機使用，其餘功能全部照常 |
-
-### ⚠️ 絕對不要把整個 repo（含 `.git/`）放進雲端同步資料夾
-
-順序無保證（ref 可能先於 object 抵達 → `bad object`）、沒有 merge（雲端挑贏家，另一台的 commit
-無聲消失）、Files On-Demand 佔位符會讓 git 卡住。**失敗是靜默且會丟歷史的。**
-
-### ✅ 正確做法：雲端只放 bare repo 當 remote
-
-bare repo **只在 push/fetch 時被寫入**（短暫離散），雲端有時間收斂，且保留 git 原生的衝突偵測。
-
-```bash
-# 第一台，一次
-git init --bare "D:/OneDrive/git-remotes/myproj.git"
-cd /d/repos/myproj                          # 工作區在雲端資料夾「外」
-git remote add origin "D:/OneDrive/git-remotes/myproj.git"
-git push -u origin HEAD
-
-# 其他每一台
-git clone "D:/OneDrive/git-remotes/myproj.git" D:/repos/myproj
-git config core.hooksPath .githooks
-```
-
-務必把該資料夾設為「一律保留在此裝置上」（關閉 Files On-Demand）。
+`MEM_AUTOSYNC=1` 讓 `status.sh` 開局時 fast-forward 私人記憶 repo（僅限工作樹乾淨且無分岔；其他情況只回報，永不 merge 或 reset）。
 
 ---
 
@@ -237,19 +203,15 @@ git config core.hooksPath .githooks
 以拋棄式 repo 實測，Windows／Git Bash 與 Linux／Docker（Alpine + busybox）皆通過：
 
 - scaffold 冪等（第二次執行全部 skip，不覆蓋）
-- 改了 `src/` 但沒 staged 記憶 → **擋 commit**
-- 改了碼 + 更新記憶 → 通過
-- 記憶新增 `api_key: <長值>` → **擋 commit**
-- 移除既有 secret 的 commit → **正常通過**（不誤擋）
+- 安裝後 `git status` 不會列出 `.project-memory/`、`AGENTS.md`、`.agents/`（`.git/info/exclude`）
+- `git add -f .project-memory/handoff.md` → **被 `pre-commit` 擋下**；團隊自己的 `AGENTS.md`（沒有 AUTO-MEMORY 區塊）→ 通過
+- `commit-handoff.sh`：記憶同步關閉 → 只存本機、不 commit；雲端資料夾 → 存好；私人 repo → 在那裡 commit 並 push，專案 repo 不動
+- 記憶新增 `api_key: <長值>` → **`commit-handoff.sh` 拒絕提交**到記憶 repo
 - 記憶中出現 `Never store passwords, API keys` 這類**純文字** → 不誤判
 - Claude hook 路徑與直接執行 `status.sh` → **輸出完全一致**
 - 在沒有 `.project-memory/` 的 repo 執行 hook → **靜默 no-op，exit 0**
 - 安裝後 entry 檔**立即**含 AUTO-MEMORY 區塊
-- 更新 handoff 後 commit → entry 檔**自動再生並自動 staged 進同一個 commit**
-- `commit-handoff.sh` 在使用者已 staged `src/app.py` 時提交 → **只提交記憶檔，`src/app.py` 仍 staged**
-- 完整跨機閉環：A 寫 handoff → 自動 commit+push → B `pull` → **開局即見最新任務**
-- push 遇分岔被拒 → **只回報；遠端未被 force 覆蓋，本地 commit 未被 reset**
-- 全新 repo（零 commit）→ 正確提交（早期版本會誤判「無變更」，已修）
+- 存放 handoff → 兩個 entry 檔**自動再生**
 - **從 clone 出來的 repo** 安裝並跑完整套測試 → 全數通過，換行為 LF
 
 ---
@@ -260,9 +222,8 @@ git config core.hooksPath .githooks
 - **Codex／Antigravity 的服從性未經真機驗證** —— 已確認它們**讀取**哪些檔案
   （由 Antigravity 安裝檔實證：`.agents/rules/*.md`、`AGENTS.md`、`GEMINI.md`），
   但「是否照做」需手測。
-- **`handoff.md` merge conflict** 跨機同時提交仍會撞；解法有文件，未自動化。
-- **Codex／Antigravity 拿到的是 commit／pull 時點的快照**，未提交的在製品要跑 `status.sh` 才看得到。
-- **`pre-commit` 的工程檔比對偏嵌入式**（含 `firmware|drivers`、`c/cpp/h`），純軟體專案可自行調整。
+- **`handoff.md` 衝突**：兩台同時交接仍可能撞（私人 repo：push 失敗會 rebase 重試，真衝突則回報；雲端資料夾：雲端程式保留兩份）。
+- **Codex／Antigravity 拿到的是上次交接或開啟專案時的快照**，進行中的狀態要跑 `status.sh` 才看得到。
 - **Antigravity `.agents/rules/` 路徑可能隨版本變** —— 升級後用 grep 重驗（30 秒，方法見文件）。
 
 ---

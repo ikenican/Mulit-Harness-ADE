@@ -16,6 +16,8 @@ Before substantial work:
 5. Read `STATE.md` / `DECISIONS.md` only when the task needs macro status or architecture history.
 
 Before finishing, apply the memory-update criteria in `PROTOCOL.md` — update `handoff.md` when the
-work meets the threshold, and skip it for read-only or trivial sessions.
+work meets the threshold (or run `/handoff`), and skip it for read-only or trivial sessions.
+Never commit `.project-memory/`, `AGENTS.md` or `.agents/` to this repository; memory is shared
+only through Agent Workbench memory sync.
 
 Do NOT auto pull/rebase/merge/reset/push without user authorization. `git fetch` is fine.

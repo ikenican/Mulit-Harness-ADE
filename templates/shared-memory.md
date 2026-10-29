@@ -21,17 +21,19 @@ only on demand.
 Apply the memory-update criteria in `PROTOCOL.md`. Rewrite `handoff.md` when the work meets the
 threshold; skip memory updates for read-only questions and trivial, no-change work.
 
-Then commit the memory yourself — an uncommitted handoff does not exist for anyone else:
+Then save the memory — use the Handoff format in `PROTOCOL.md` (under 8000 bytes):
 
 ```bash
 bash .project-memory/commit-handoff.sh "docs(memory): <one-line summary>"
 ```
 
-It is pathspec-limited to memory files, so staged source changes are left untouched. It pushes only
-when `MEM_AUTOPUSH=1`; otherwise say clearly that the handoff is not pushed yet.
+It saves according to Agent Workbench: Settings > Memory sync (off: this machine only; OneDrive /
+Google Drive folder; or a commit + push to the private memory repository). Tell the user what it
+printed.
 
 ## Never
 
+Never commit `.project-memory/`, `AGENTS.md` or `.agents/` to the project repository.
 Do not auto pull, rebase, merge, reset, or force-push without user authorization.
-Do not commit the user's source code on your own initiative — committing shared memory is fine.
+Do not commit the user's source code on your own initiative.
 Never store secrets in project memory. Never rewrite historical decisions — supersede them.

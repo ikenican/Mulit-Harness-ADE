@@ -16,29 +16,31 @@ not diligence.
 
 If the threshold is met:
 
-1. Rewrite `.project-memory/handoff.md` with the real state — Agent, Branch, Commit (use
-   `git rev-parse --short HEAD`, or `Uncommitted`), Done, Not done, Next agent should, Tests,
-   Warnings. "Next agent should" must be concrete enough to execute without this conversation.
+1. Rewrite `.project-memory/handoff.md` in the Handoff format of `PROTOCOL.md`: `## State`
+   (Updated, Agent, Task, Branch, Commit from `git rev-parse --short HEAD` or `Uncommitted`, Done),
+   `## Verified`, `## Not verified`, `## Next`, `## Risks / do not`. "Next" must be concrete enough
+   to execute without this conversation. Keep it under 8000 bytes: move the previous handoff's
+   finished-event detail to `.project-memory/archive/<YYYY-MM-DD>-<topic>.md` first if it is worth
+   keeping.
 2. Update `.project-memory/STATE.md` **only** if a milestone, macro status, major blocker, or
    cross-module plan changed.
 3. Append to `.project-memory/DECISIONS.md` **only** for a durable architectural decision — add a
    row to the Quick Index and a new section below. Never rewrite an existing decision; supersede it.
-4. Run the relevant tests or validation and record the actual command and result. If tests failed
-   or you did not run them, write that — never record an unverified pass.
+4. Run the relevant tests or validation and record the actual command and result under
+   `## Verified`; anything failed or not run goes under `## Not verified` — never record an
+   unverified pass.
 5. Show `git diff --stat` and state any remaining risk.
-6. **Commit the memory yourself** so other agents and other machines actually receive it:
+6. **Save the memory** so other agents and other machines receive it:
 
 ```bash
 bash .project-memory/commit-handoff.sh "docs(memory): <one-line summary of this session>"
 ```
 
-   This commits ONLY `.project-memory/` and the generated entry-file blocks — pathspec-limited, so
-   any source changes you or the user have staged stay staged and uncommitted. It also regenerates
-   the block that Codex and Antigravity auto-load, so they get this handoff on their next session.
+   It regenerates the block Codex and Antigravity auto-load, then saves according to Agent
+   Workbench: Settings > Memory sync — off: stays on this machine; OneDrive / Google Drive folder:
+   the cloud client uploads it; private GitHub repository: committed and pushed there. It never
+   commits to the project repository. Tell the user what it printed; if memory sync is off, say the
+   handoff is on this machine only. Do not commit or copy memory any other way.
 
-   It pushes only when `MEM_AUTOPUSH=1`; otherwise the commit stays local and the script says so.
-   Tell the user if the handoff has not been pushed yet — until it is, other machines won't see it.
-
-Do not pull, rebase, merge, reset, or force-push. Committing the memory is fine and reversible
-(`git reset --soft HEAD~1`); committing the user's source code is not yours to decide — leave that
-to them.
+Never `git add` `.project-memory/`, `AGENTS.md` or `.agents/` to the project repository. Do not
+pull, rebase, merge, reset, or force-push; committing the user's source code is not yours to decide.

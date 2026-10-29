@@ -7,7 +7,8 @@
 # them to run status.sh, we derive the current handoff INTO the files they already read.
 #
 # handoff.md remains the single source of truth. The block below is GENERATED - never hand-edited.
-# Run automatically by .githooks/pre-commit (when handoff.md is staged) and .githooks/post-merge.
+# Bundled with Agent Workbench (memory sync) and the shared-project-memory plugin; run by
+# commit-handoff.sh and Workbench. Entry files tracked by the project repository are never written.
 
 set -e
 MEM="$(cd "$(dirname "$0")" && pwd)"
@@ -36,6 +37,12 @@ trap 'rm -f "$BLOCK"' EXIT
 inject() {
   local f="$1"
   [ -f "$f" ] || return 0
+  # The project tracks this file itself (e.g. a team AGENTS.md): writing the handoff into it would
+  # turn memory into a pending change of the project repository, so leave it alone.
+  if git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+    echo "  skipped (tracked by the project): $f"
+    return 0
+  fi
   if grep -qF "$BEGIN_MARK" "$f"; then
     # replace everything between the markers (inclusive) with the new block
     awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v bf="$BLOCK" '
