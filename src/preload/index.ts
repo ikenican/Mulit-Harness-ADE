@@ -241,11 +241,14 @@ const api = {
     /** 免 gh：連結使用者自己建好的私人 repo（網址或 owner/repo） */
     connectRepo: (input: string): Promise<MemSyncResult<{ result: MemSyncRepoResult; state: MemSyncState }>> =>
       ipcRenderer.invoke('memsync:connectRepo', input),
-    linkProject: (): Promise<MemSyncResult<{ result: MemSyncLinkResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:linkProject'),
+    /** 設定頁按下才呼叫；本機與共用的記憶內容不同時，prefer 指定用哪一份 */
+    linkProject: (prefer?: 'shared' | 'local'): Promise<MemSyncResult<{ result: MemSyncLinkResult; state: MemSyncState }>> =>
+      ipcRenderer.invoke('memsync:linkProject', prefer),
     sync: (pullOnly?: boolean): Promise<MemSyncResult<{ result: MemSyncSyncResult; state: MemSyncState }>> => ipcRenderer.invoke('memsync:sync', pullOnly),
     /** 開啟／切換專案時呼叫；記憶同步沒開啟時立刻回 null，不碰網路 */
-    onProjectOpen: (): Promise<MemSyncResult<{ pulled: MemSyncSyncResult | null; linked: MemSyncLinkResult | null } | null>> =>
-      ipcRenderer.invoke('memsync:onProjectOpen'),
+    onProjectOpen: (): Promise<
+      MemSyncResult<{ pulled: MemSyncSyncResult | null; linked: MemSyncLinkResult | null; needsReview: 'tracked' | 'differs' | null } | null>
+    > => ipcRenderer.invoke('memsync:onProjectOpen'),
     openClone: (): Promise<void> => ipcRenderer.invoke('memsync:openClone')
   },
   // Cowork 多 agent 規劃會議 —— main/ipc/cowork.ts（設計見 cowork.md）
@@ -716,6 +719,9 @@ export interface MemSyncState {
     hasLocalMemory: boolean
     hasRemoteMemory: boolean
     tracked: string[]
+    trackedEntries: string[]
+    memoryDiffers: boolean
+    branch: string
   } | null
   commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string }
 }

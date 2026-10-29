@@ -37,7 +37,8 @@ Workbench 本身的設定、儀表板紀錄、Cowork 會議紀錄存在各台電
       - **GitHub**：按「安裝 GitHub CLI」「登入 GitHub」（指令貼進新的終端分頁，按 Enter，需要時在瀏覽器登入），再按「建立或連結私人 repo」。第一台會建立私人 repo，其他電腦連到同一個；公開的 repo 會被拒絕。
       - **OneDrive／Google Drive**：按「選擇資料夾」，在雲端硬碟裡選（或新增）一個資料夾，例如 `OneDrive\ai-project-memory`。只接受雲端硬碟裡的子資料夾，記憶只會存在那裡。另一台電腦選同一個資料夾。
    4. 之後打開任何有 `.project-memory` 的專案，都會**自動接上**（「自動接上專案」預設開啟）：
-      - 第一台：本機記憶先備份，再搬進共用位置；專案 repo 會多一個「停止追蹤記憶檔」的提交（不會自動推送，確認後自己 push）。
+      - 第一台：本機記憶先備份，再搬進共用位置。專案 repo 不會被修改：只寫這個 clone 的 `.git/info/exclude`，不產生提交。
+      - repo 仍在追蹤記憶檔，或本機記憶和共用位置的不同（例如同一個 repo 的第二個 clone）：不自動接上，Workbench 會通知你到「這個專案」確認；追蹤中的記憶檔要按按鈕才會產生「停止追蹤」的提交（不會自動推送）。
       - 其他電腦：直接連到共用位置裡的記憶，入口檔（`AGENTS.md`、`.agents/rules/shared-memory.md`）自動補回。
       - 專案裡的 `commit-handoff.sh`、`status.sh` 會換成 Workbench 附的版本（依設定決定存本機、存資料夾或推到私人 repo）。
       也可以在設定頁「這個專案」手動操作。

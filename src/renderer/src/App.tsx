@@ -46,6 +46,9 @@ import {
 
 type CenterTab = 'editor' | 'preview' | 'browser' | 'memory'
 
+/** 已通知過「記憶同步需要確認」的專案（每次啟動每個專案只通知一次） */
+const memsyncNotified = new Set<string>()
+
 export default function App(): JSX.Element {
   const isDetachedWindow =
     typeof window !== 'undefined' && window.location.search.includes('mode=terminal-detached')
@@ -92,10 +95,20 @@ export default function App(): JSX.Element {
     })
   }, [workspaceRoot, agentBusy, liveAgentSessionIds, detectedDevUrl, agentModifiedFiles])
 
-  // 記憶同步：開啟／切換專案時自動接上記憶並拉取（main 只在使用者開啟記憶同步時才動作，否則不碰網路）
+  // 記憶同步：開啟／切換專案時自動接上記憶並拉取（main 只在使用者開啟記憶同步時才動作，否則不碰網路）。
+  // 需要使用者確認、所以沒有自動接上的專案，每次啟動通知一次
   useEffect(() => {
     if (!workspaceRoot) return
-    window.api.memsync.onProjectOpen().catch(() => {})
+    window.api.memsync
+      .onProjectOpen()
+      .then((r) => {
+        const reason = r.ok ? r.data?.needsReview : null
+        if (!reason || memsyncNotified.has(workspaceRoot)) return
+        memsyncNotified.add(workspaceRoot)
+        const name = workspaceRoot.split(/[\\/]/).filter(Boolean).pop() || workspaceRoot
+        window.api.notify.show(t('memsync.reviewTitle'), t(`memsync.review_${reason}`, { name }))
+      })
+      .catch(() => {})
   }, [workspaceRoot])
 
   // 若以 ?workspace= 參數開啟獨立專案視窗，初始化工作區與側邊欄；若未指定工作區，預設停留在 Dashboard
