@@ -1,0 +1,11 @@
+{
+  "shared-project-memory": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node scripts/session-start.js --antigravity",
+        "timeout": 30
+      }
+    ]
+  }
+}

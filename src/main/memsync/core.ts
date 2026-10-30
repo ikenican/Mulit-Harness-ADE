@@ -813,30 +813,40 @@ export async function syncNow(
 
 // ── shared-project-memory plugin（隨 Workbench 出貨） ─────────────────────
 // 原始碼在 plugins/shared-project-memory。安裝時複製到使用者資料夾裡的本機 marketplace
-// 「agent-workbench」，Claude Code 與 Codex 都從那裡裝，版本跟著 Workbench 走。名稱和 GitHub 版
+// 「agent-workbench」，三家都從那裡裝，版本跟著 Workbench 走。Claude Code／Codex 的名稱和 GitHub 版
 // （@shared-project-memory）不同，所以能先裝好新版、確認成功後才移除舊版，中間不會沒有 plugin。
+// Antigravity 沒有 marketplace：`agy plugin install <資料夾>` 直接覆蓋同名的舊版，靠標記檔認出自帶版。
 
 export const PLUGIN = 'shared-project-memory'
 export const MARKETPLACE = 'agent-workbench'
 export const BUNDLED_KEY = `${PLUGIN}@${MARKETPLACE}`
-export type PluginAgent = 'claude' | 'codex'
-export const PLUGIN_AGENTS: PluginAgent[] = ['claude', 'codex']
+/** 自帶版 plugin 資料夾裡的標記檔（Antigravity 用它分辨自帶版與 GitHub clone） */
+export const BUNDLED_MARKER = '.agent-workbench'
+export type PluginAgent = 'claude' | 'codex' | 'antigravity'
+export const PLUGIN_AGENTS: PluginAgent[] = ['claude', 'codex', 'antigravity']
 
 export interface InstalledPlugin {
   key: string
+  /** Claude Code／Codex：marketplace 名稱；Antigravity：plugin 資料夾名稱（agy plugin uninstall 用它） */
   marketplace: string
   version: string | null
-  /** Claude Code 的安裝範圍；Codex 沒有範圍，一律 user */
+  /** Claude Code 的安裝範圍；Codex、Antigravity 沒有範圍，一律 user */
   scope: string
 }
 
 export interface PluginHomes {
   claude: string
   codex: string
+  /** ~/.gemini/config */
+  antigravity: string
 }
 
 export function defaultHomes(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): PluginHomes {
-  return { claude: env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), codex: env.CODEX_HOME || path.join(home, '.codex') }
+  return {
+    claude: env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'),
+    codex: env.CODEX_HOME || path.join(home, '.codex'),
+    antigravity: path.join(home, '.gemini', 'config')
+  }
 }
 
 const readText = (p: string): string => {
@@ -888,17 +898,35 @@ function codexInstalled(dir: string): InstalledPlugin[] {
     })
 }
 
+/** Antigravity：plugins/<資料夾>/plugin.json 名稱是 shared-project-memory（1.2.0 以前誤寫成 share-project-memory） */
+function antigravityInstalled(dir: string): InstalledPlugin[] {
+  let dirs: string[] = []
+  try {
+    dirs = fs.readdirSync(path.join(dir, 'plugins'))
+  } catch {
+    return []
+  }
+  return dirs.flatMap((d) => {
+    const p = path.join(dir, 'plugins', d)
+    const m = readJson(path.join(p, 'plugin.json'))
+    if (m.name !== PLUGIN && m.name !== 'share-project-memory') return []
+    const version = typeof m.version === 'string' ? m.version : null
+    return [{ key: exists(path.join(p, BUNDLED_MARKER)) ? BUNDLED_KEY : `${PLUGIN}@${d}`, marketplace: d, version, scope: 'user' }]
+  })
+}
+
 export function installedPlugins(agent: PluginAgent, homes: PluginHomes = defaultHomes()): InstalledPlugin[] {
+  if (agent === 'antigravity') return antigravityInstalled(homes.antigravity)
   return agent === 'claude' ? claudeInstalled(homes.claude) : codexInstalled(homes.codex)
 }
 
-function marketplaceKnown(agent: PluginAgent, homes: PluginHomes): boolean {
+function marketplaceKnown(agent: 'claude' | 'codex', homes: PluginHomes): boolean {
   if (agent === 'claude') return MARKETPLACE in readJson(path.join(homes.claude, 'plugins', 'known_marketplaces.json'))
   return new RegExp(`^\\[marketplaces\\.${MARKETPLACE}\\]`, 'm').test(readText(path.join(homes.codex, 'config.toml')))
 }
 
 /** 這個 marketplace 是否還有別的 plugin（有的話不能整個移除） */
-function marketplaceInUse(agent: PluginAgent, homes: PluginHomes, marketplace: string): boolean {
+function marketplaceInUse(agent: 'claude' | 'codex', homes: PluginHomes, marketplace: string): boolean {
   return (agent === 'claude' ? claudePluginKeys(homes.claude) : codexPluginKeys(homes.codex)).some((k) => k.endsWith(`@${marketplace}`))
 }
 
@@ -938,6 +966,7 @@ export function prepareMarketplace(bundledDir: string, dir: string): void {
     fs.rmSync(target, { recursive: true, force: true })
     fs.cpSync(bundledDir, target, { recursive: true, filter: (src) => path.basename(src) !== 'tests' })
   }
+  fs.writeFileSync(path.join(target, BUNDLED_MARKER), `Installed by Agent Workbench (${MARKETPLACE}).\n`)
   const write = (rel: string, data: unknown): void => {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
     fs.writeFileSync(path.join(dir, rel), JSON.stringify(data, null, 2) + '\n')
@@ -980,6 +1009,17 @@ export async function applyBundledPlugin(agent: PluginAgent, exec: CliExec, opts
   const bundledVersion = pluginVersion(path.join(opts.marketplaceDir, PLUGIN))
   const before = installedPlugins(agent, homes)
   const ours = before.find((p) => p.key === BUNDLED_KEY)
+
+  if (agent === 'antigravity') {
+    // 同名的舊版（例如 GitHub clone）會被整個換掉；之後還留著的其他副本再移除
+    await step(['plugin', 'install', path.join(opts.marketplaceDir, PLUGIN)])
+    const after = installedPlugins(agent, homes)
+    if (!after.some((p) => p.key === BUNDLED_KEY && p.version === bundledVersion)) {
+      throw new MemSyncError('plugin-install-failed', `${agent}: ${BUNDLED_KEY} ${bundledVersion} is not listed as installed after the install`)
+    }
+    for (const old of after.filter((p) => p.key !== BUNDLED_KEY)) await step(['plugin', 'uninstall', old.marketplace])
+    return log
+  }
 
   if (agent === 'claude') {
     await step(marketplaceKnown(agent, homes) ? ['plugin', 'marketplace', 'update', MARKETPLACE] : ['plugin', 'marketplace', 'add', opts.marketplaceDir])

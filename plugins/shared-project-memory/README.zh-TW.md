@@ -60,9 +60,9 @@ entry 檔裡的 `AUTO-MEMORY` 區塊是**機器衍生**的，標有 do-not-edit�
 
 | 功能 | Claude Code | Codex | Antigravity | 機制 |
 |---|:--:|:--:|:--:|---|
-| **開局載入記憶** | ✅ 全自動 | ✅ 全自動 | ✅ 全自動 | SessionStart hook／生成區塊 |
+| **開局載入記憶** | ✅ 全自動 | ✅ 全自動 | ✅ 全自動 | plugin 的 SessionStart hook（即時）／生成區塊（快照） |
 | 安裝 | `/memory-init` | `install.sh` | `install.sh` | 兩條路都通 |
-| 收工寫交接棒 | `/handoff` | entry 檔指示 | entry 檔指示 | `PROTOCOL.md` 更新門檻 |
+| 收工寫交接棒 | `/handoff` | `$handoff` | `/handoff` | plugin 的 skill；沒裝 plugin 時照 entry 檔指示 |
 | **擋記憶進專案 repo** | ✅ | ✅ | ✅ | `.git/info/exclude` + git pre-commit（工具無關） |
 | **擋 secret 進記憶 repo** | ✅ | ✅ | ✅ | `commit-handoff.sh` secret 掃描 |
 | 跨機同步 | ✅ | ✅ | ✅ | Agent Workbench 記憶同步 + `commit-handoff.sh` |
@@ -77,9 +77,9 @@ entry 檔裡的 `AUTO-MEMORY` 區塊是**機器衍生**的，標有 do-not-edit�
 ### 搭配 Agent Workbench（建議）
 
 Agent Workbench 內附這個 plugin（原始碼在 Workbench repo 的 `plugins/shared-project-memory`）。
-開啟設定時，Workbench 會詢問是否幫每個已啟用的 Claude Code／Codex 從本機 marketplace
-`agent-workbench` 安裝，並取代從 GitHub 裝的版本（`@shared-project-memory`）。之後 plugin 跟著
-Workbench 一起更新。
+開啟設定時，Workbench 會詢問是否幫每個已啟用的 Claude Code／Codex（從本機 marketplace
+`agent-workbench`）與 Antigravity（`agy plugin install`）安裝，並取代從 GitHub 裝的版本。之後 plugin
+跟著 Workbench 一起更新。
 
 沒裝 plugin 時，Claude Code 仍會拿到記憶快照：`sync-entry-files.sh` 會寫入
 `.claude/rules/shared-memory.md`（只在這個 clone），裝上 plugin 後就移除，handoff 不會被載入兩次。
@@ -126,6 +126,15 @@ codex plugin add shared-project-memory@shared-project-memory
 ```
 
 接著在要初始化的專案中明確呼叫 `$shared-project-memory`。plugin 不會自動初始化專案，也不提供 MCP server；skill 會先檢查 Git repo 和既有記憶檔，再呼叫現有的專案初始化器。
+
+### Antigravity plugin
+
+```bash
+agy plugin install ./Mulit-Harness-ADE/plugins/shared-project-memory
+```
+
+Antigravity 會執行根目錄的 `hooks.json`（SessionStart → `node scripts/session-start.js --antigravity`，
+把 `status.sh` 的輸出注入 session），並提供 `handoff` 與 `shared-project-memory` 兩個 skill。
 
 ---
 

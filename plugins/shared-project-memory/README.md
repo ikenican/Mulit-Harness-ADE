@@ -67,9 +67,9 @@ derived from `handoff.md` — never hand-copied, so it cannot drift.
 
 | Capability | Claude Code | Codex | Antigravity | Mechanism |
 |---|:--:|:--:|:--:|---|
-| **Memory loaded at startup** | ✅ automatic | ✅ automatic | ✅ automatic | SessionStart hook / generated block |
+| **Memory loaded at startup** | ✅ automatic | ✅ automatic | ✅ automatic | plugin SessionStart hook (live) / generated block (snapshot) |
 | Install | `/memory-init` | `install.sh` | `install.sh` | both paths work |
-| Write the handoff | `/handoff` | entry-file instructions | entry-file instructions | update thresholds in `PROTOCOL.md` |
+| Write the handoff | `/handoff` | `$handoff` | `/handoff` | plugin skill; without the plugin, entry-file instructions |
 | **Block memory entering the project repo** | ✅ | ✅ | ✅ | `.git/info/exclude` + git pre-commit (tool-agnostic) |
 | **Block secrets entering the memory repo** | ✅ | ✅ | ✅ | `commit-handoff.sh` secret scan |
 | Cross-machine sync | ✅ | ✅ | ✅ | Agent Workbench memory sync + `commit-handoff.sh` |
@@ -85,8 +85,8 @@ derived from `handoff.md` — never hand-copied, so it cannot drift.
 
 Agent Workbench ships this plugin (source: `plugins/shared-project-memory` in the Workbench
 repository). When Settings opens, Workbench offers to install it into every enabled Claude Code /
-Codex from a local marketplace named `agent-workbench`, and to replace a GitHub install
-(`@shared-project-memory`). The plugin then updates together with Workbench.
+Codex (from a local marketplace named `agent-workbench`) and Antigravity (`agy plugin install`), and
+to replace a GitHub install. The plugin then updates together with Workbench.
 
 Without the plugin, Claude Code still gets a memory snapshot: `sync-entry-files.sh` writes
 `.claude/rules/shared-memory.md` (local to the clone) and removes it once the plugin is installed,
@@ -137,6 +137,15 @@ codex plugin add shared-project-memory@shared-project-memory
 Then explicitly invoke `$shared-project-memory` from the project you want to initialize. The
 plugin does not initialize projects automatically and does not add an MCP server; the skill runs
 the existing project-scoped installer after checking the Git repository and existing memory files.
+
+### Antigravity plugin
+
+```bash
+agy plugin install ./Mulit-Harness-ADE/plugins/shared-project-memory
+```
+
+Antigravity runs the root `hooks.json` (SessionStart → `node scripts/session-start.js --antigravity`,
+which injects `status.sh` output) and offers the `handoff` and `shared-project-memory` skills.
 
 ---
 

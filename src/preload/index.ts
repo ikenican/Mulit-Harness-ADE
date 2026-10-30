@@ -734,7 +734,7 @@ export interface MemSyncState {
   } | null
   commands: { shell: 'powershell' | 'bash'; installGh: string; loginGh: string; installOneDrive: string; installGDrive: string }
 }
-export type MemoryPluginAgent = 'claude' | 'codex'
+export type MemoryPluginAgent = 'claude' | 'codex' | 'antigravity'
 export interface MemoryPluginAgentState {
   agent: MemoryPluginAgent
   /** 設定裡有啟用這家 agent */

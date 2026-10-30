@@ -42,7 +42,7 @@ Workbench 本身的設定、儀表板紀錄、Cowork 會議紀錄存在各台電
       - 其他電腦：直接連到共用位置裡的記憶，入口檔（`AGENTS.md`、`.agents/rules/shared-memory.md`）自動補回。
       - 專案裡的 `commit-handoff.sh`、`status.sh` 會換成 Workbench 附的版本（依設定決定存本機、存資料夾或推到私人 repo）。
       也可以在設定頁「這個專案」手動操作。
-4. **記憶 plugin**（Claude Code／Codex）：Workbench 內附 shared-project-memory，開啟設定時會詢問是否幫已啟用的 Claude Code、Codex 安裝（從 GitHub 裝過舊版的會一併換成內附版）。
+4. **記憶 plugin**（Claude Code／Codex／Antigravity）：Workbench 內附 shared-project-memory，開啟設定時會詢問是否幫已啟用的 Claude Code、Codex、Antigravity 安裝（從 GitHub 裝過舊版的會一併換成內附版）。
    裝了之後，每次開新對話都會即時讀到專案記憶，並有 `/handoff`。沒裝時，Claude Code 讀 `.claude/rules/shared-memory.md`、Codex 讀 `AGENTS.md` 裡的記憶快照。
    外掛會在開新對話時執行**該專案自己的** `.project-memory/status.sh`，只在信任的專案使用。
 5. **Workbench 本機設定**（每台各自做）：設定 → CLI（安裝或指定各家 CLI）、設定 → Cowork、Customized 面板的連線憑證。

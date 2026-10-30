@@ -1,5 +1,6 @@
 ---
-description: Run the completion protocol — write the handoff and update shared memory if the work meets the threshold
+name: handoff
+description: Run the completion protocol — write the handoff and update shared memory if the work meets the threshold. Use when the user invokes /handoff or asks to write the handoff or save the session to project memory.
 ---
 
 Run the shared-project-memory completion protocol for the work done in this session.

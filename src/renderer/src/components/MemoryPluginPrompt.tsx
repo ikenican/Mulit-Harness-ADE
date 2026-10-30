@@ -10,7 +10,7 @@ import type { MemoryPluginAgent, MemoryPluginAgentState, MemoryPluginApplyResult
 
 /** 需要處理的 agent：設定裡啟用、找得到 CLI、還不是自帶的最新版 */
 const pendingAgents = (s: MemoryPluginState | null): MemoryPluginAgentState[] => s?.agents.filter((a) => a.enabled && a.cli && a.action !== 'ok') ?? []
-const AGENT_NAME: Record<MemoryPluginAgent, string> = { claude: 'Claude Code', codex: 'Codex' }
+const AGENT_NAME: Record<MemoryPluginAgent, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' }
 
 type Phase = 'closed' | 'ask' | 'busy' | 'declined' | 'done'
 
