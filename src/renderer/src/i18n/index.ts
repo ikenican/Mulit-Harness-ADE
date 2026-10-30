@@ -370,7 +370,7 @@ export const translations = {
         rowInstall: '{agent}: install v{version}',
         rowUpdate: '{agent}: update {from} to v{version}',
         rowMigrate: '{agent}: replace {from} with the Workbench version v{version}',
-        noteHook: 'Every Claude Code / Codex session then runs the plugin startup hook (bash). The install changes ~/.claude/plugins and ~/.codex/config.toml.',
+        noteHook: 'Every Claude Code / Codex / Antigravity session then runs the plugin startup hook (bash). The install changes ~/.claude/plugins, ~/.codex/config.toml and ~/.gemini/config/plugins.',
         noteRestart: 'Restart open sessions to load it. Codex asks once to trust the new hook.',
         noteData: 'Your memory files and memory sync settings are not touched.',
         busyTitle: 'Installing…',
@@ -386,7 +386,7 @@ export const translations = {
         failTitle: 'Some installs failed',
         doneOk: '{agent}: installed',
         doneFail: '{agent}: {error}',
-        doneRestart: 'Restart open Claude Code / Codex sessions to load it.'
+        doneRestart: 'Restart open Claude Code / Codex / Antigravity sessions to load it.'
       },
       working: 'Working…',
       err: {
@@ -1277,7 +1277,7 @@ export const translations = {
         rowInstall: '{agent}：安裝 v{version}',
         rowUpdate: '{agent}：從 {from} 更新到 v{version}',
         rowMigrate: '{agent}：把 {from} 換成 Workbench 內附的 v{version}',
-        noteHook: '之後每個 Claude Code／Codex session 開局都會執行 plugin 的啟動 hook（bash）。安裝會修改 ~/.claude/plugins 與 ~/.codex/config.toml。',
+        noteHook: '之後每個 Claude Code／Codex／Antigravity session 開局都會執行 plugin 的啟動 hook（bash）。安裝會修改 ~/.claude/plugins、~/.codex/config.toml 與 ~/.gemini/config/plugins。',
         noteRestart: '已開啟的 session 要重開才會載入。Codex 會詢問一次是否信任新的 hook。',
         noteData: '不會動到你的記憶檔與記憶同步設定。',
         busyTitle: '安裝中…',
@@ -1293,7 +1293,7 @@ export const translations = {
         failTitle: '部分安裝失敗',
         doneOk: '{agent}：已安裝',
         doneFail: '{agent}：{error}',
-        doneRestart: '已開啟的 Claude Code／Codex session 重開後才會載入。'
+        doneRestart: '已開啟的 Claude Code／Codex／Antigravity session 重開後才會載入。'
       },
       working: '處理中…',
       err: {

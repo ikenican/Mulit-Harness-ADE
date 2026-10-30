@@ -473,7 +473,7 @@ const bundledV = pluginVersion(pluginSrc)
 for (const m of ['plugin.json', '.codex-plugin/plugin.json']) {
   assert.equal(JSON.parse(fs.readFileSync(path.join(pluginSrc, m), 'utf8')).version, bundledV, `${m} has the same version as .claude-plugin/plugin.json`)
 }
-const homes = { claude: path.join(tmp, 'ph', 'claude'), codex: path.join(tmp, 'ph', 'codex') }
+const homes = { claude: path.join(tmp, 'ph', 'claude'), codex: path.join(tmp, 'ph', 'codex'), antigravity: path.join(tmp, 'ph', 'agy') }
 fs.mkdirSync(path.join(homes.claude, 'plugins'), { recursive: true })
 fs.mkdirSync(homes.codex, { recursive: true })
 const cInstalled = path.join(homes.claude, 'plugins', 'installed_plugins.json')
@@ -547,7 +547,42 @@ assert.equal(pluginAction(installedPlugins('codex', homes), bundledV), 'ok')
 assert.equal(pluginAction(installedPlugins('claude', homes), bundledV), 'ok')
 assert.equal(pluginAction([{ key: 'shared-project-memory@agent-workbench', marketplace: 'agent-workbench', version: '0.0.1', scope: 'user' }], bundledV), 'update')
 assert.equal(pluginAction([{ key: 'shared-project-memory@shared-project-memory', marketplace: 'shared-project-memory', version: '1.0.0', scope: 'project' }], bundledV), 'install', 'project-scope installs are left to the user')
-console.log('bundled plugin: versions agree, marketplace prepared, failed install keeps the old one, migrate order ok')
+
+// Antigravity: `agy plugin install <dir>` copies the folder to plugins/<manifest name>, replacing a
+// same-named one; `agy plugin uninstall <folder>` removes one (both verified with agy 1.4.10).
+const agyPlugins = path.join(homes.antigravity, 'plugins')
+const agyPut = (dir: string, manifest: object, marker = false): void => {
+  fs.mkdirSync(path.join(agyPlugins, dir), { recursive: true })
+  fs.writeFileSync(path.join(agyPlugins, dir, 'plugin.json'), JSON.stringify(manifest))
+  if (marker) fs.writeFileSync(path.join(agyPlugins, dir, '.agent-workbench'), '')
+}
+assert.deepEqual(installedPlugins('antigravity', homes), [], 'antigravity: nothing installed')
+agyPut('shared-project-memory', { name: 'shared-project-memory', version: '1.0.0' }) // the GitHub clone
+agyPut('share-project-memory', { name: 'share-project-memory', version: '1.2.0' }) // a dev install with the old typo
+agyPut('ponytail', { name: 'ponytail', version: '4.10.0' })
+assert.equal(pluginAction(installedPlugins('antigravity', homes), bundledV), 'migrate')
+const agyCli = (fail = false) => async (args: string[]) => {
+  calls.push(`antigravity ${args.join(' ')}`)
+  if (args[1] === 'install') {
+    if (fail) return { code: 1, stdout: '', stderr: 'disk full' }
+    const name = rj(path.join(args[2], 'plugin.json')).name
+    fs.rmSync(path.join(agyPlugins, name), { recursive: true, force: true })
+    fs.cpSync(args[2], path.join(agyPlugins, name), { recursive: true })
+  }
+  if (args[1] === 'uninstall') fs.rmSync(path.join(agyPlugins, args[2]), { recursive: true })
+  return { code: 0, stdout: '', stderr: '' }
+}
+await assert.rejects(applyBundledPlugin('antigravity', agyCli(true), { marketplaceDir: mkt, homes }), (e: MemSyncError) => e.code === 'plugin-install-failed')
+assert.equal(installedPlugins('antigravity', homes).length, 2, 'antigravity: failed install removes nothing')
+calls.length = 0
+await applyBundledPlugin('antigravity', agyCli(), { marketplaceDir: mkt, homes })
+assert.deepEqual(calls, [`antigravity plugin install ${path.join(mkt, 'shared-project-memory')}`, 'antigravity plugin uninstall share-project-memory'])
+assert.deepEqual(installedPlugins('antigravity', homes), [{ key: 'shared-project-memory@agent-workbench', marketplace: 'shared-project-memory', version: bundledV, scope: 'user' }])
+assert.ok(fs.existsSync(path.join(agyPlugins, 'ponytail')), 'other plugins untouched')
+assert.ok(fs.existsSync(path.join(mkt, 'shared-project-memory', 'hooks.json')), 'Antigravity hooks.json shipped at the plugin root')
+agyPut('shared-project-memory', { name: 'shared-project-memory', version: '0.0.1' }, true)
+assert.equal(pluginAction(installedPlugins('antigravity', homes), bundledV), 'update')
+console.log('bundled plugin: versions agree, marketplace prepared, failed install keeps the old one, migrate order ok (claude, codex, antigravity)')
 
 // Claude Code entry file: written while the plugin is absent, removed once it is installed
 const projCl = path.join(tmp, 'claude-entry')
