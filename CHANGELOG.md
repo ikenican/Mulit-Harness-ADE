@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.47] - 2026-10-30
+
+### Added / 新增
+- Antigravity 也改用內附的 shared-project-memory plugin（1.3.0），和 Claude Code／Codex 同一套：開新 session 時由 hook 自動載入最新記憶，並提供 `/handoff`。開啟設定時，已啟用的 Antigravity 若還沒裝、版本較舊，或裝的是 GitHub 版，會一起詢問是否安裝或換成內附版。（PR #60）
+- Antigravity now uses the bundled shared-project-memory plugin (1.3.0), the same way as Claude Code and Codex: a SessionStart hook loads the live memory and `/handoff` is available. When Settings opens, an enabled Antigravity that lacks the plugin, has an older copy, or has the GitHub install is included in the install offer.
+
+### Changed / 變更
+- `/handoff` 改成 plugin 的 skill，三家都能用：Claude Code 與 Antigravity 打 `/handoff`，Codex 打 `$handoff`。（PR #60）
+- `/handoff` is now a plugin skill, so all three agents have it: `/handoff` in Claude Code and Antigravity, `$handoff` in Codex.
 ## [0.1.46] - 2026-10-29
 
 ### Added / 新增
